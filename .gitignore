@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+.env
+config/api_keys.json
+memory/long_term.json
+*.log
+.vscode/
+.idea/
