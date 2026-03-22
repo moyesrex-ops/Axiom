@@ -178,7 +178,7 @@ def create_plan(goal: str, context: str = "") -> dict:
                 step["tool"] = "web_search"
                 step["parameters"] = {"query": desc[:200]}
 
-        print(f"[Planner] ✅ Plan: {len(plan['steps'])} steps")
+        print(f"[Planner] ✅ Draft Plan: {len(plan['steps'])} steps")
         for s in plan["steps"]:
             print(f"  Step {s['step']}: [{s['tool']}] {s['description']}")
 
@@ -190,6 +190,49 @@ def create_plan(goal: str, context: str = "") -> dict:
     except Exception as e:
         print(f"[Planner] ⚠️ Planning failed: {e}")
         return _fallback_plan(goal)
+
+
+def reflect_and_improve(goal: str, plan: dict) -> dict:
+    import google.generativeai as genai
+
+    genai.configure(api_key=_get_api_key())
+    model = genai.GenerativeModel(
+        model_name="gemini-2.5-flash",
+        system_instruction=PLANNER_PROMPT
+    )
+    
+    print(f"[Planner] 🧠 Reflecting on draft plan for: {goal[:50]}...")
+    
+    prompt = f"""Goal: {goal}
+    
+Draft Plan:
+{json.dumps(plan, indent=2)}
+
+CRITIQUE AND IMPROVE the draft plan.
+- Are there missing critical steps?
+- Are the parameters correct and optimized?
+- Is it unnecessarily complex?
+
+Return the final improved plan in JSON format ONLY, adhering strictly to the response rules."""
+
+    try:
+        response = model.generate_content(prompt)
+        text     = response.text.strip()
+        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
+        
+        improved_plan = json.loads(text)
+        
+        for step in improved_plan.get("steps", []):
+            if step.get("tool") in ("generated_code",):
+                step["tool"] = "web_search"
+                step["parameters"] = {"query": step.get("description", goal)[:200]}
+                
+        print(f"[Planner] ✨ Improved Plan: {len(improved_plan['steps'])} steps")
+        return improved_plan
+        
+    except Exception as e:
+        print(f"[Planner] ⚠️ Reflection failed (using draft): {e}")
+        return plan
 
 
 def _fallback_plan(goal: str) -> dict:

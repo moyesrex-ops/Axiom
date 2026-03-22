@@ -8,8 +8,9 @@ import os
 from pathlib import Path
 from typing import Callable
 
-from agent.planner       import create_plan, replan
+from agent.planner       import create_plan, replan, reflect_and_improve
 from agent.error_handler import analyze_error, generate_fix, ErrorDecision
+from memory.memory_manager import save_to_nexus
 
 
 def get_base_dir() -> Path:
@@ -264,7 +265,13 @@ class AgentExecutor:
         replan_attempts = 0
         completed_steps = []
         step_results    = {}
-        plan            = create_plan(goal)
+        
+        # 1. Draft
+        plan = create_plan(goal)
+        
+        # 2. Reflection & Critique
+        if "steps" in plan and len(plan["steps"]) > 0:
+            plan = reflect_and_improve(goal, plan)
 
         while True:
             steps = plan.get("steps", [])
@@ -365,6 +372,15 @@ class AgentExecutor:
                     break
 
             if success:
+                # 3. Continuous Learning (Nexus Brain Hook)
+                if replan_attempts > 0:
+                    topic = f"learned_strategy_{goal.replace(' ', '_')[:30]}"
+                    learned_content = f"Goal: {goal}\nSuccessful sequence:\n" + "\n".join(
+                        f"Step: {s['tool']}({s.get('parameters')})" for s in completed_steps
+                    )
+                    save_to_nexus(topic, learned_content)
+                    if speak: speak("I learned from my mistakes and saved this strategy to my Nexus Brain.")
+                    
                 return self._summarize(goal, completed_steps, speak)
 
             if replan_attempts >= self.MAX_REPLAN_ATTEMPTS:

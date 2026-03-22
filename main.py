@@ -7,6 +7,7 @@ import traceback
 from pathlib import Path
 
 import pyaudio
+import numpy as np
 from google import genai
 from google.genai import types
 import time
@@ -31,6 +32,7 @@ from actions.code_helper      import code_helper
 from actions.dev_agent        import dev_agent
 from actions.web_search       import web_search as web_search_action
 from actions.computer_control import computer_control
+from actions.nexus_memory     import nexus_memory
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -460,6 +462,24 @@ TOOL_DECLARATIONS = [
         },
         "required": ["origin", "destination", "date"]
     }
+},
+{
+    "name": "nexus_memory",
+    "description": (
+        "Saves, recalls, or lists long-term knowledge from the Nexus Brain. "
+        "Use this to permanently memorize learned skills, preferences, strategies, "
+        "or code snippets so you never forget them. Before attempting complex tasks, "
+        "you can use this to recall how you were told to do them previously."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action":  {"type": "STRING", "description": "save | recall | list"},
+            "topic":   {"type": "STRING", "description": "Topic name (e.g., 'trading_strategy_A', 'my_code_preferences')"},
+            "content": {"type": "STRING", "description": "The detailed content to save (required for save action)"}
+        },
+        "required": ["action"]
+    }
 }
 ]
 
@@ -471,6 +491,11 @@ class AxiomLive:
         self.audio_in_queue = None
         self.out_queue      = None
         self._loop          = None
+        
+        # Audio tweaks
+        self.is_speaking       = False
+        self.VOLUME_MULTIPLIER = 3.0  # Boost soft whispers
+        self.VAD_THRESHOLD     = 500  # RMS threshold to detect user interruption
 
     def speak(self, text: str):
         """Thread-safe speak — any thread can call this."""
@@ -663,6 +688,12 @@ class AxiomLive:
                     None, lambda: flight_finder(parameters=args, player=self.ui)
                 )
                 result = r or "Done."
+                
+            elif name == "nexus_memory":
+                r = await loop.run_in_executor(
+                    None, lambda: nexus_memory(parameters=args, player=self.ui)
+                )
+                result = r or "Done."
 
             else:
                 result = f"Unknown tool: {name}"
@@ -699,6 +730,27 @@ class AxiomLive:
                 data = await asyncio.to_thread(
                     stream.read, CHUNK_SIZE, exception_on_overflow=False
                 )
+                
+                try:
+                    # Whisper Boost
+                    audio_data = np.frombuffer(data, dtype=np.int16)
+                    audio_data = np.clip(audio_data * self.VOLUME_MULTIPLIER, -32768, 32767).astype(np.int16)
+                    boosted_data = audio_data.tobytes()
+                    
+                    # Interruption Detection (VAD)
+                    rms = np.sqrt(np.mean(np.square(audio_data.astype(np.float32))))
+                    if self.is_speaking and rms > self.VAD_THRESHOLD:
+                        print(f"[AXIOM] 🛑 Interrupted by user! (RMS: {rms:.0f})")
+                        # Clear playback queue
+                        while not self.audio_in_queue.empty():
+                            try: self.audio_in_queue.get_nowait()
+                            except: break
+                        self.is_speaking = False
+                    
+                    data = boosted_data
+                except Exception as e:
+                    pass # Fallback to raw data if numpy fails
+                    
                 await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
         except Exception as e:
             print(f"[AXIOM] ❌ Mic error: {e}")
@@ -782,11 +834,15 @@ class AxiomLive:
         try:
             while True:
                 chunk = await self.audio_in_queue.get()
+                self.is_speaking = True
                 await asyncio.to_thread(stream.write, chunk)
+                if self.audio_in_queue.empty():
+                    self.is_speaking = False
         except Exception as e:
             print(f"[AXIOM] ❌ Play error: {e}")
             raise
         finally:
+            self.is_speaking = False
             stream.close()
 
     async def run(self):

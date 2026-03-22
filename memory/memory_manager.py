@@ -22,7 +22,8 @@ def _empty_memory() -> dict:
         "identity":      {},
         "preferences":   {},
         "relationships": {},
-        "notes":         {}
+        "notes":         {},
+        "nexus_knowledge": {}
     }
 
 def load_memory() -> dict:
@@ -100,6 +101,28 @@ def update_memory(memory_update: dict) -> dict:
     return memory
 
 
+# --- NEXUS BRAIN FUNCTIONS ---
+
+def save_to_nexus(topic: str, content: str) -> bool:
+    memory = load_memory()
+    if "nexus_knowledge" not in memory:
+        memory["nexus_knowledge"] = {}
+    
+    memory["nexus_knowledge"][topic] = content
+    save_memory(memory)
+    print(f"[Nexus] 🧠 Saved new knowledge: {topic}")
+    return True
+
+def get_from_nexus(topic: str) -> str:
+    memory = load_memory()
+    knowledge = memory.get("nexus_knowledge", {})
+    return knowledge.get(topic, "")
+
+def list_nexus_topics() -> list:
+    memory = load_memory()
+    return list(memory.get("nexus_knowledge", {}).keys())
+
+
 
 def format_memory_for_prompt(memory: dict | None) -> str:
     if not memory:
@@ -146,7 +169,15 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         return ""
 
     result = "[USER MEMORY]\n" + "\n".join(f"- {l}" for l in lines)
-    if len(result) > 800:
-        result = result[:797] + "…"
+    
+    # Inject Nexus Brain high-level schema so it knows what it knows
+    topics = list_nexus_topics()
+    if topics:
+        result += "\n\n[NEXUS BRAIN TOPICS]\n"
+        result += f"You have deep knowledge stored about: {', '.join(topics)}.\n"
+        result += "Use the `nexus_recall` tool to retrieve full details if needed."
+        
+    if len(result) > 1500:
+        result = result[:1497] + "…"
 
     return result + "\n"
