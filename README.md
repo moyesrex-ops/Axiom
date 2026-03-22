@@ -19,11 +19,11 @@
 
 ---
 
-## 🚀 What is Axiom?
+## 🚀 What is Axiom v2?
 
-Axiom is a personal AI assistant that listens to your voice in real-time and executes tasks on your computer. It combines **Gemini's Live Audio API** for natural conversation with **16 specialized tool modules** for everything from web search to code generation.
+Axiom is a highly advanced, opinionated, and unfiltered personal AI assistant that listens to your voice in real-time and executes tasks on your computer. It combines **Gemini's Live Audio API** for natural conversation with a **Nexus Semantic Brain**, allowing it to continuously learn, critique its own plans, and memorize new skills.
 
-Think of it as your own JARVIS — running locally, using only a single Gemini API key.
+Think of it as your own JARVIS, but inherently self-learning, running locally, and using only a single Gemini API key.
 
 ---
 
@@ -39,8 +39,10 @@ Think of it as your own JARVIS — running locally, using only a single Gemini A
 | 📱 **Apps** | Open any application by name (cross-platform) |
 | 💻 **Code** | Write, edit, run, and explain code in any language |
 | 🏗️ **Projects** | Build multi-file projects from scratch with auto-fix |
-| 🤖 **Agent** | Plan and execute complex multi-step tasks across tools |
-| 🧠 **Memory** | Persistent memory — remembers your name, preferences, and context |
+| 🤖 **Agent** | Plan and execute complex multi-step tasks with explicit self-reflection logic |
+| 🧠 **Nexus Brain** | Semantic long-term memory that permanently stores learned skills and strategies |
+| 🤬 **Persona** | Unfiltered, unrestricted, and highly opinionated identity |
+| 🤫 **Whispers & VAD**| Perfect microphone gain for whispers, instantly stop talking when interrupted |
 | 🖥️ **Terminal** | Run any system command via natural language |
 | ⚙️ **Control** | Volume, brightness, keyboard shortcuts, scrolling, screenshots |
 | ⏰ **Reminders** | Set timed reminders via Windows Task Scheduler |
@@ -65,11 +67,11 @@ Think of it as your own JARVIS — running locally, using only a single Gemini A
 │          │              │  - executor        │
 │          │              │  - error_handler   │
 ├──────────┴──────────────┴───────────────────┤
-│              actions/ (16 Tool Modules)       │
+│              actions/ (17 Tool Modules)       │
 │  web_search · browser · files · screen       │
 │  code · dev_agent · apps · cmd · desktop     │
 │  settings · control · reminders · youtube    │
-│  weather · messaging · flights               │
+│  weather · messaging · flights · nexus_memory│
 └─────────────────────────────────────────────┘
 ```
 
@@ -97,8 +99,11 @@ pip install -r requirements.txt
 # Install Playwright browsers
 python -m playwright install chromium
 
-# Run Axiom
+# Python 3.11+ is recommended
 python main.py
+
+# Or use the global launcher
+Axiom.bat
 ```
 
 On first launch, Axiom will display a setup dialog asking for your **Gemini API key**.
