@@ -494,8 +494,8 @@ class AxiomLive:
         
         # Audio tweaks
         self.is_speaking       = False
-        self.VOLUME_MULTIPLIER = 3.0  # Boost soft whispers
-        self.VAD_THRESHOLD     = 500  # RMS threshold to detect user interruption
+        self.VOLUME_MULTIPLIER = 3.0   # Boost soft whispers
+        self.VAD_THRESHOLD     = 2500  # Higher RMS threshold so it doesn't trigger on its own speakers
 
     def speak(self, text: str):
         """Thread-safe speak — any thread can call this."""
@@ -737,17 +737,26 @@ class AxiomLive:
                     audio_data = np.clip(audio_data * self.VOLUME_MULTIPLIER, -32768, 32767).astype(np.int16)
                     boosted_data = audio_data.tobytes()
                     
-                    # Interruption Detection (VAD)
+                    # Interruption Detection (VAD) & Echo Cancellation
                     rms = np.sqrt(np.mean(np.square(audio_data.astype(np.float32))))
-                    if self.is_speaking and rms > self.VAD_THRESHOLD:
-                        print(f"[AXIOM] 🛑 Interrupted by user! (RMS: {rms:.0f})")
-                        # Clear playback queue
-                        while not self.audio_in_queue.empty():
-                            try: self.audio_in_queue.get_nowait()
-                            except: break
-                        self.is_speaking = False
                     
-                    data = boosted_data
+                    if self.is_speaking:
+                        if rms > self.VAD_THRESHOLD:
+                            print(f"[AXIOM] 🛑 Interrupted by user! (RMS: {rms:.0f})")
+                            # User spoke louder than the speaker threshold. Clear playback queue.
+                            while not self.audio_in_queue.empty():
+                                try: self.audio_in_queue.get_nowait()
+                                except: break
+                            self.is_speaking = False
+                            data = boosted_data # Let the user's voice through
+                        else:
+                            # Axiom is speaking, and the mic is picking up Axiom's own voice from the speakers.
+                            # Mute the mic stream going to the API so Axiom doesn't talk to itself.
+                            data = b'\x00' * len(data)
+                    else:
+                        # Axiom is not speaking, let the mic stream flow normally
+                        data = boosted_data
+                        
                 except Exception as e:
                     pass # Fallback to raw data if numpy fails
                     
