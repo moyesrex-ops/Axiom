@@ -17,3 +17,4 @@ pycaw
 win10toast
 duckduckgo-search
 youtube-transcript-api
+yt-dlp

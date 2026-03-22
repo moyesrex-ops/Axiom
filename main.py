@@ -33,6 +33,7 @@ from actions.dev_agent        import dev_agent
 from actions.web_search       import web_search as web_search_action
 from actions.computer_control import computer_control
 from actions.nexus_memory     import nexus_memory
+from actions.deep_analyzer    import deep_analyzer
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -479,6 +480,25 @@ TOOL_DECLARATIONS = [
         },
         "required": ["action"]
     }
+},
+{
+    "name": "deep_analyzer",
+    "description": (
+        "Performs deep MULTIMODAL video analysis using Gemini's massive context window. "
+        "Use this ONLY when the user explicitly asks to 'watch this YouTube video', "
+        "'analyze this chart over time', or wants deep visual insight into a video feed. "
+        "Unlike youtube_video (which only reads text transcripts), this tool actually WATCHES the visual footage."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action":   {"type": "STRING", "description": "youtube (download a video) or screen (record user screen)"},
+            "url":      {"type": "STRING", "description": "YouTube URL if action is youtube"},
+            "duration": {"type": "INTEGER", "description": "Seconds to record if action is screen (10-30)"},
+            "prompt":   {"type": "STRING", "description": "What specifically to analyze or look for"}
+        },
+        "required": ["action", "prompt"]
+    }
 }
 ]
 
@@ -691,6 +711,16 @@ class AxiomLive:
             elif name == "nexus_memory":
                 r = await loop.run_in_executor(
                     None, lambda: nexus_memory(parameters=args, player=self.ui)
+                )
+                result = r or "Done."
+
+            elif name == "deep_analyzer":
+                r = await loop.run_in_executor(
+                    None, lambda: deep_analyzer(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
                 )
                 result = r or "Done."
 
