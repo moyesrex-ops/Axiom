@@ -223,11 +223,10 @@ TOOL_DECLARATIONS = [
     {
         "name": "screen_process",
         "description": (
-            "Captures and analyzes the screen or webcam image. "
-            "MUST be called when user asks what is on screen, what you see, "
-            "analyze my screen, look at camera, etc. "
-            "You have NO visual ability without this tool. "
-            "After calling this tool, stay SILENT — the vision module speaks directly."
+            "Analyzes the user's screen or their webcam using Gemini Vision. "
+            "Use when the user asks 'what is on my screen', 'read this', or 'explain what you see'. "
+            "CRITICAL: If the user explicitly asks you to 'look at me', 'use the camera', or 'what am I holding', "
+            "you MUST set the angle parameter to 'camera' so you can see them directly through their webcam!"
         ),
         "parameters": {
             "type": "OBJECT",

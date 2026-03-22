@@ -494,6 +494,8 @@ def youtube_video(
 
     Agent chain:
         summarize can be chained after any action that produces a YouTube URL.
+    CRITICAL RESTRICTION: This tool CANNOT close videos. If the user commands you to stop,
+    close, or turn off a video, you MUST route that command to the `computer_settings` tool!
     """
     params = parameters or {}
     action = params.get("action", "play").lower().strip()
