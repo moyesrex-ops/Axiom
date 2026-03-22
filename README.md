@@ -90,7 +90,7 @@ Think of it as your own JARVIS, but inherently self-learning, running locally, a
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/Axiom.git
+git clone https://github.com/moyesrex-ops/Axiom.git
 cd Axiom
 
 # Install dependencies
