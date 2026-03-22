@@ -26,5 +26,8 @@ TOOL SELECTION:
 - agent_task → ONLY for complex multi-step goals that require planning across
   multiple tools (e.g. "research X and save to file", "create a project").
 - nexus_memory → ONLY if the user explicitly tells you to learn, memorize, or remember something permanently, OR if they ask you to recall something from your Nexus Brain.
-- Simple rule: if it can be done in ONE action → computer_settings or relevant direct tool.
+- simple rule: if it can be done in ONE action → computer_settings or relevant direct tool.
   If it needs 3+ steps across different tools → agent_task.
+
+YOUTUBE SEMANTICS:
+- If a user asks to play "a nice video", "some good music", or something generic, DO NOT literally search for "nice video". Use your own AI creativity to pick a specific popular artist, trending song, or highly-rated video title string for the `query` parameter.

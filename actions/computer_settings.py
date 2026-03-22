@@ -111,13 +111,31 @@ def brightness_down():
         subprocess.run(["brightnessctl", "set", "10%-"])
 
 
+def _safe_focus_target():
+    if _OS == "Windows":
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetForegroundWindow()
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(length + 1)
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+            title = buf.value.upper()
+            if "AXIOM" in title or "JARVIS" in title:
+                print("[Settings] 🛡️ Axiom is focused. Switching window before closing to prevent self-termination.")
+                pyautogui.hotkey("alt", "tab")
+                time.sleep(0.3)
+        except Exception:
+            pass
+
 def close_app():
+    _safe_focus_target()
     if _OS == "Darwin":
         pyautogui.hotkey("command", "q")
     else:
         pyautogui.hotkey("alt", "f4")
 
 def close_window():
+    _safe_focus_target()
     if _OS == "Darwin":
         pyautogui.hotkey("command", "w")
     else:
@@ -185,6 +203,7 @@ def refresh_page():
     else:               pyautogui.press("f5")
 
 def close_tab():
+    _safe_focus_target()
     if _OS == "Darwin": pyautogui.hotkey("command", "w")
     else:               pyautogui.hotkey("ctrl", "w")
 
