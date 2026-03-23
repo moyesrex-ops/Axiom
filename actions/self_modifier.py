@@ -222,6 +222,68 @@ OUTPUT: Return ONLY the raw Python source code. No markdown fences, no explanati
         return f"[SelfModifier] AI code generation failed: {e}"
 
 
+# ── Voice change ─────────────────────────────────────────────────────────────
+
+_AVAILABLE_VOICES = [
+    "Aoede", "Charon", "Fenrir", "Kore", "Leda", "Orus", "Puck",
+    "Schedar", "Umbriel", "Zephyr", "Achird", "Algenib", "Algieba",
+    "Alnilam", "Autonoe", "Callirrhoe", "Despina", "Enceladus",
+    "Erinome", "Gacrux", "Iocaste", "Laomedeia", "Lysithea",
+    "Megaclite", "Mundilfari", "Nereid", "Oberon", "Rasalgethi",
+    "Sadachbia", "Sadaltager", "Sulafat", "Thuban", "Vindemiatrix",
+    "Wasat", "Zubenelgenubi"
+]
+
+
+def change_voice(voice_name: str) -> str:
+    """
+    Change Axiom's voice by editing the voice_name in main.py.
+    The change takes effect on the next session reconnect.
+    """
+    base = _get_base_dir()
+    main_path = base / "main.py"
+
+    if not main_path.exists():
+        return "[SelfModifier] Cannot locate main.py to change voice."
+
+    # Normalise the requested name
+    requested = voice_name.strip().title()
+
+    # Soft-match against known voices
+    matched = next((v for v in _AVAILABLE_VOICES if v.lower() == requested.lower()), None)
+    if matched is None:
+        # Try prefix match
+        matched = next((v for v in _AVAILABLE_VOICES if v.lower().startswith(requested.lower())), None)
+    if matched is None:
+        return (
+            f"[SelfModifier] Voice '{voice_name}' not found. "
+            f"Available voices: {', '.join(_AVAILABLE_VOICES)}"
+        )
+
+    try:
+        source = main_path.read_text(encoding="utf-8")
+        import re as _re
+        new_source = _re.sub(
+            r'(voice_name\s*=\s*[\'"])([^\'"]+)([\'"])',
+            rf'\g<1>{matched}\g<3>',
+            source
+        )
+        if new_source == source:
+            return f"[SelfModifier] Voice is already set to '{matched}' — no change needed."
+        main_path.write_text(new_source, encoding="utf-8")
+        try:
+            from memory.memory_manager import save_to_nexus
+            save_to_nexus("Voice Setting", f"Voice changed to '{matched}'. Reconnect to apply.")
+        except Exception:
+            pass
+        return (
+            f"✅ Voice changed to '{matched}'. "
+            "This takes effect when the session reconnects (auto in ~3 seconds)."
+        )
+    except Exception as e:
+        return f"[SelfModifier] Voice change failed: {e}"
+
+
 # ── main entry point ─────────────────────────────────────────────────────────
 
 def self_modifier(parameters: dict = None, player=None, speak=None) -> str:
@@ -234,6 +296,8 @@ def self_modifier(parameters: dict = None, player=None, speak=None) -> str:
         edit_action    — Edit existing tool. Requires: tool_name, new_code
         generate_action— AI-generate new tool. Requires: tool_name, description
         list_actions   — List all action files
+        change_voice   — Change Axiom's voice. Requires: voice_name
+        list_voices    — List all available voices
     """
     params = parameters or {}
     action = params.get("action", "list_actions").strip().lower()
@@ -276,5 +340,14 @@ def self_modifier(parameters: dict = None, player=None, speak=None) -> str:
     elif action == "list_actions":
         return list_actions()
 
+    elif action == "change_voice":
+        voice_name = params.get("voice_name", params.get("value", ""))
+        if not voice_name:
+            return "[SelfModifier] 'voice_name' is required for change_voice."
+        return change_voice(voice_name)
+
+    elif action == "list_voices":
+        return "Available voices: " + ", ".join(_AVAILABLE_VOICES)
+
     else:
-        return f"[SelfModifier] Unknown action: '{action}'. Use read_source | write_action | edit_action | generate_action | list_actions."
+        return f"[SelfModifier] Unknown action: '{action}'. Use read_source | write_action | edit_action | generate_action | list_actions | change_voice | list_voices."
