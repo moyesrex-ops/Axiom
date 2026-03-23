@@ -53,10 +53,11 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
                         soul_lessons = "\n".join([f"- {l['lesson']}" for l in lessons])
             except: pass
             
-        # Use a high-intelligence model for the master prediction
-        model = genai.GenerativeModel("gemini-2.5-pro")
+        # Use the specific Flash model tier requested by the user
+        model = genai.GenerativeModel("gemini-3.0-flash")
         
         prompt = f"""
+        [CRITICAL PRECISION MODE: FLASH-3.0]
         You are the Master Prediction Node of Axiom. 
         You are tasked with analyzing the market trajectory for the asset: {asset}.
         
@@ -66,13 +67,14 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
         Additional context provided by the user or recent queries:
         {context}
         
-        Perform a Swarm-Intelligence style prediction:
-        1. Macro Analysis (Fundamental forces at play)
-        2. Micro Analysis (Structural trends, momentum)
-        3. Sentiment (What is the current prevailing bias?)
-        4. Verdict (Bullish, Bearish, or Neutral) with a specific confidence percentage.
+        STRICT ANALYSIS PROTOCOL:
+        1. Macro Analysis: Fundamental forces at play.
+        2. Micro Analysis: Structural trends, candle momentum, volume.
+        3. Sentiment Bias: Current market greed/fear index.
+        4. SPECIFIC VERDICT: Bullish, Bearish, or Neutral.
+        5. CONFIDENCE: X% (numerical only).
         
-        Keep your response highly analytical, professional, and brutal in its logic.
+        Output as a clean diagnostic report. Be brutal, logical, and avoid generic AI filler.
         """
         
         response = model.generate_content(prompt)

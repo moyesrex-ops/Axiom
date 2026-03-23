@@ -64,16 +64,23 @@ class HeartbeatDaemon:
 
             import google.generativeai as genai
             genai.configure(api_key=_get_api_key())
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("gemini-3.0-flash")
             
             prompt = f"""
+            [SENTINEL CORE: AUTOMATED RISK OVERRIDE]
             You are the Axiom Background Heartbeat Daemon.
-            Current active trades open in the market:
+            Your task is CAPITOL PROTECTION. Analyze these active trades:
+            
             {context}
             
-            Analyze these solely on PnL vs open price. If a trade is critically failing or has made enormous unsaved profit and you believe the structure warrants closing it NOW, output a JSON array of their Ticket numbers.
-            If they should continue breathing, output an empty array [].
-            Return strictly a JSON array, like: [1234, 5678] and NO OTHER TEXT.
+            RISK ASSESSMENT CRITERIA:
+            - If PnL is deeply negative and structure has broken = CLOSE.
+            - If PnL is at extreme profit and structure is hitting resistance = CLOSE.
+            
+            TASK: Output a JSON array of their Ticket numbers to close.
+            If all positions are safe, output [].
+            
+            STRICT OUTPUT: RETURN THE JSON ARRAY ONLY. NO EXPLANATION. NO MARKDOWN.
             """
             
             response = await asyncio.to_thread(model.generate_content, prompt)

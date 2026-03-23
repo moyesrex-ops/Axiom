@@ -1,4 +1,5 @@
 import time
+import json
 from typing import Optional
 
 try:
@@ -6,12 +7,33 @@ try:
 except ImportError:
     mt5 = None
 
+def _get_api_key() -> str:
+    import sys
+    from pathlib import Path
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).parent
+    else:
+        base = Path(__file__).resolve().parent.parent
+    config_path = base / "config" / "api_keys.json"
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)["gemini_api_key"]
+    except Exception:
+        return ""
+
+def get_base_dir():
+    import sys
+    from pathlib import Path
+    if getattr(sys, "frozen", False): return Path(sys.executable).parent
+    return Path(__file__).resolve().parent.parent
+
 def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
     params = parameters or {}
     action = params.get("action", "").lower()
     symbol = params.get("symbol", "EURUSD")
     volume = float(params.get("volume", 0.01))
     magic  = int(params.get("magic", 234000))
+    prompt_raw = params.get("prompt", "")
 
     if mt5 is None:
         return (
@@ -31,6 +53,45 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         if speak: speak(res)
         mt5.shutdown()
         return res
+
+    # If the AI provides a raw prompt/intent, use Gemini Flash to extract strict JSON
+    if prompt_raw and action not in ("buy", "sell"):
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=_get_api_key())
+            
+            # Load the Trading Soul for infinite context
+            soul_path = get_base_dir() / "memory" / "trading_soul.json"
+            soul_lessons = ""
+            if soul_path.exists():
+                try:
+                    with open(soul_path, "r", encoding="utf-8") as f:
+                        soul_data = json.load(f)
+                        lessons = soul_data.get("lessons_learned", [])
+                        if lessons:
+                            soul_lessons = "\n".join([f"- {l['lesson']}" for l in lessons])
+                except: pass
+
+            model = genai.GenerativeModel("gemini-2.5-flash")
+            prompt = f"""
+            [MT5 EXECUTION ENGINE: MULTIMODAL EXTRACTION]
+            Extract parameters for a trade from this intent: "{prompt_raw}"
+            
+            UNBREAKABLE TRADING SOUL LESSONS:
+            {soul_lessons if soul_lessons else "No past lessons."}
+            
+            Output strictly a JSON object:
+            {{"symbol": "STRING", "volume": FLOAT, "action": "buy/sell", "stop_loss": FLOAT, "take_profit": FLOAT}}
+            """
+            
+            response = model.generate_content(prompt)
+            raw_text = response.text.strip().replace("```json", "").replace("```", "").strip()
+            data = json.loads(raw_text)
+            action = data.get("action", "").lower()
+            symbol = data.get("symbol", "EURUSD")
+            volume = float(data.get("volume", 0.01))
+        except Exception as e:
+            return f"Parameter extraction failed: {e}"
 
     if action in ("buy", "sell"):
         if speak: speak(f"Executing {action} order for {volume} lots on {symbol}.")
@@ -62,7 +123,7 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
             "price": price,
             "deviation": 20,
             "magic": magic,
-            "comment": "Axiom v3 Auto",
+            "comment": "Axiom v4 Omni",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
