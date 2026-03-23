@@ -65,6 +65,12 @@ def reflect_on_trade(symbol: str, profit: float, reason: str):
             "lesson": lesson
         })
         
+        # Neural Link: Mirror lessons to the main neural context
+        try:
+            from memory.memory_manager import save_to_nexus
+            save_to_nexus(f"Trading Wisdom: {symbol}", lesson)
+        except: pass
+        
         with open(SOUL_FILE, "w", encoding="utf-8") as f:
             json.dump(soul, f, indent=4)
             

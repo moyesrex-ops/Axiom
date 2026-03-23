@@ -98,6 +98,12 @@ class HeartbeatDaemon:
                         if self.speak:
                             self.speak("Heartbeat daemon triggered. Autonomously terminating an open position to secure capital structure.")
                         
+                        # Neural Link: Axiom remembers its autonomous actions
+                        try:
+                            from memory.memory_manager import save_to_nexus
+                            save_to_nexus(f"Autonomous Trade Close: {p.symbol}", f"Daemon closed ticket {t} at {price} due to risk override.")
+                        except: pass
+                        
                         tick = mt5.symbol_info_tick(p.symbol)
                         price = tick.bid if p.type == mt5.ORDER_TYPE_BUY else tick.ask
                         action_type = mt5.ORDER_TYPE_SELL if p.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY

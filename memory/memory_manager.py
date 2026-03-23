@@ -170,14 +170,22 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
     result = "[USER MEMORY]\n" + "\n".join(f"- {l}" for l in lines)
     
-    # Inject Nexus Brain high-level schema so it knows what it knows
+    # Inject Neural Link (Nexus Brain) capacity
+    # Surfacing the last 3 topics directly for extreme recency
     topics = list_nexus_topics()
     if topics:
-        result += "\n\n[NEXUS BRAIN TOPICS]\n"
-        result += f"You have deep knowledge stored about: {', '.join(topics)}.\n"
-        result += "Use the `nexus_recall` tool to retrieve full details if needed."
+        result += "\n\n[NEURAL LINK: NEXUS BRAIN]\n"
+        result += f"You have deep-link knowledge on: {', '.join(topics)}.\n"
         
-    if len(result) > 1500:
-        result = result[:1497] + "…"
+        # Pull the absolute latest knowledge snippet to maintain 'infinite' flow
+        latest_topic = topics[-1]
+        latest_content = get_from_nexus(latest_topic)
+        if latest_content:
+            result += f"LATEST RECALL ({latest_topic}): {latest_content[:500]}...\n"
+            
+        result += "To recall other topics, use `nexus_memory` with `action='recall'`."
+        
+    if len(result) > 2000:
+        result = result[:1997] + "…"
 
     return result + "\n"

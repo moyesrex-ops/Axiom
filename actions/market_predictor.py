@@ -83,6 +83,12 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
         if speak:
             speak(f"Market prediction for {asset} is complete. You can view the full diagnostic in the logs.")
         
+        # Neural Link: Automatically persist this prediction for infinite context
+        try:
+            from memory.memory_manager import save_to_nexus
+            save_to_nexus(f"Market Prediction: {asset}", text[:2000])
+        except: pass
+        
         return f"Prediction Diagnostic for {asset}:\n\n{text}"
 
     except Exception as e:
