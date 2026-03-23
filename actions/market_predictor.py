@@ -34,12 +34,34 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
         import google.generativeai as genai
         genai.configure(api_key=get_api_key())
         
+        # Load the Trading Soul to prevent repeating mistakes
+        import sys
+        from pathlib import Path
+        if getattr(sys, "frozen", False):
+            base = Path(sys.executable).parent
+        else:
+            base = Path(__file__).resolve().parent.parent
+            
+        soul_path = base / "memory" / "trading_soul.json"
+        soul_lessons = ""
+        if soul_path.exists():
+            try:
+                with open(soul_path, "r", encoding="utf-8") as f:
+                    soul_data = json.load(f)
+                    lessons = soul_data.get("lessons_learned", [])
+                    if lessons:
+                        soul_lessons = "\n".join([f"- {l['lesson']}" for l in lessons])
+            except: pass
+            
         # Use a high-intelligence model for the master prediction
         model = genai.GenerativeModel("gemini-2.5-pro")
         
         prompt = f"""
         You are the Master Prediction Node of Axiom. 
         You are tasked with analyzing the market trajectory for the asset: {asset}.
+        
+        YOUR EVOLVED TRADING SOUL (Do not repeat these past mistakes):
+        {soul_lessons if soul_lessons else "No past trauma/lessons recorded yet."}
         
         Additional context provided by the user or recent queries:
         {context}
