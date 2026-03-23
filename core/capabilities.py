@@ -156,6 +156,7 @@ def format_capability_status() -> str:
             if caps["openrgb_installed"] and caps["openrgb_sdk_reachable"]
             else "RGB hardware control: package/sdk unavailable"
         ),
+        "System context inference: ready",
         f"MetaTrader5 bridge: {'ready' if caps['mt5_installed'] else 'not installed'}",
         f"CCXT bridge: {'ready' if caps['ccxt_installed'] else 'not installed'}",
         f"MiroFish repo: {caps['mirofish_path'] or 'not found'}",
@@ -189,6 +190,7 @@ def format_capability_report() -> str:
             if caps["openrgb_installed"] and caps["openrgb_sdk_reachable"]
             else "OpenRGB: not fully available"
         ),
+        "System context inference: ready",
         f"MetaTrader5: {'installed' if caps['mt5_installed'] else 'missing'}",
         f"CCXT: {'installed' if caps['ccxt_installed'] else 'missing'}",
         f"MiroFish path: {caps['mirofish_path'] or 'not found'}",

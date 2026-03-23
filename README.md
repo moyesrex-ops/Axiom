@@ -1,5 +1,5 @@
-# A.X.I.O.M v4.2
-### Live Voice Operator, Autonomous Execution, Research, and Swarm Reasoning
+# A.X.I.O.M v4.3
+### Live Voice Operator, Autonomous Execution, Research, Memory, and Channel Control
 
 <p align="center">
   <img src="assets/banner.png" alt="AXIOM Banner" width="100%">
@@ -29,11 +29,12 @@ Axiom is no longer just a trading shell. The current repo combines:
 - Long-term memory plus a durable runtime event/failure store.
 - Task lifecycle checkpoints persisted to SQLite.
 - Archived conversation turns with searchable cross-session recall.
+- Live system context awareness for timezone, locale, and best-effort location.
 - MT5 trading with stop-loss / take-profit defaults and post-trade reflection.
 - Hardware RGB control through OpenRGB.
 - Prompt generation, public lead research, and generalized swarm reasoning.
 - Optional PersonaPlex sidecar integration for personality/voice experiments.
-- Optional Telegram bridge for remote task queuing and status checks.
+- Optional Telegram bridge for remote chat, task queuing, and status checks.
 
 This repo keeps the core runtime local and stable. Larger external systems such as PersonaPlex, MiroFish, and Automaton are treated as optional integrations instead of being left as broken placeholder submodules.
 
@@ -65,11 +66,11 @@ This is the actual shape of the project now: a Gemini Live runtime at the center
 | Research | Deep search, public lead extraction, YouTube/channel research |
 | Prompting | Generate image/video prompts with Prompt Studio |
 | Swarm | Run generalized multi-role debates for research, strategy, build planning, or critique |
-| Runtime Awareness | Inspect installed integrations, recent events, and failures |
+| Runtime Awareness | Inspect installed integrations, recent events, failures, timezone, and system context |
 | Task Persistence | Record task queue lifecycle checkpoints for later inspection |
 | Memory Recall | Search old nexus knowledge and archived conversation turns |
 | Persona | Manage optional PersonaPlex configuration and launch instructions |
-| Channels | Optional Telegram bot bridge for remote task submission |
+| Channels | Optional Telegram bot bridge for remote chat and task submission |
 
 ---
 
@@ -95,6 +96,20 @@ config/api_keys.json     Local API keys (created at runtime, ignored by git)
 </p>
 
 The important change here is that Axiom no longer relies only on shallow prompt memory. It now archives conversation turns, keeps structured long-term memory, and can search that history again later.
+
+---
+
+## Live Runtime Recovery
+
+<p align="center">
+  <img src="assets/live-runtime-resilience.svg" alt="AXIOM live runtime resilience" width="100%">
+</p>
+
+The live runtime now does three extra things:
+
+- Uses adaptive input gain and stricter speaker-echo guards so softer or accented speech is easier to catch without letting Axiom talk to itself.
+- Replies conversationally over Telegram for normal chat instead of queueing everything like a batch task.
+- Preserves partial transcript state through reconnects and reloads recent context when the live session comes back.
 
 ---
 
@@ -160,13 +175,14 @@ Startup behavior:
 - If Gemini is not configured, the first-run setup panel asks for the Gemini key and offers optional Telegram linking.
 - If Gemini is configured but Telegram is not, Axiom can show a separate optional Telegram link prompt at startup.
 - Telegram remains optional. Skip it and Axiom continues to run locally.
+- System context is inferred at runtime and injected into the live prompt, so reminders and time-sensitive responses use the local machine context by default.
 
 ---
 
 ## New Integrated Tools
 
 ### `system_capabilities`
-Inspect the live environment, installed integrations, recent runtime events, recent failures, and recent task checkpoints.
+Inspect the live environment, installed integrations, recent runtime events, recent failures, recent task checkpoints, and live system context.
 
 ### `nexus_memory`
 The memory tool now supports:
@@ -255,7 +271,10 @@ Supported commands:
 - `/tasks`
 - `/task <goal>`
 
-If `queue_plain_messages` is enabled, ordinary messages are also queued as tasks.
+Plain chat messages get a conversational reply.
+If `queue_plain_messages` is enabled, operational plain messages can still auto-execute as tasks.
+
+At startup, Telegram linking is optional. If you do not provide a bot token, Axiom stays local-only and the rest of the runtime still works.
 
 ### MiroFish / Automaton
 
@@ -275,6 +294,7 @@ in `config/runtime.json`.
 - `Axiom.bat` now launches the repo directory it lives in.
 - `memory/axiom_state.db` is created at runtime and ignored by git.
 - `config/api_keys.json` and long-term memory files are ignored by git.
+- `config/api_keys.json` is for local secrets only and should stay blank or absent in any public push.
 - This repo is designed around Windows first. Some tools are cross-platform, but the main UX targets Windows 10/11.
 
 ---

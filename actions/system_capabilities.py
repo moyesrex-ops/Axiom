@@ -1,4 +1,5 @@
 from core.capabilities import collect_capabilities, format_capability_report
+from core.system_context import format_system_context
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import (
     log_capability,
@@ -28,6 +29,11 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             save_to_nexus("Capability Snapshot", report[:2000])
         except Exception:
             pass
+        return report
+
+    if action == "context":
+        report = format_system_context()
+        log_event("capabilities", "system_context", report[:2000])
         return report
 
     if action == "failures":
@@ -65,4 +71,4 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             )
         return "\n".join(lines)
 
-    return "Unknown action. Use summary, failures, events, or tasks."
+    return "Unknown action. Use summary, context, failures, events, or tasks."

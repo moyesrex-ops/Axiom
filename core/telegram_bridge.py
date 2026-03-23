@@ -1,18 +1,79 @@
 import threading
 import time
+import re
 from typing import Callable
 
 import requests
 
 from actions.system_capabilities import system_capabilities
 from agent.task_queue import TaskPriority, get_queue
+from core.capabilities import format_capability_status
 from core.runtime_config import load_runtime_config
-from core.secret_config import get_secret
+from core.secret_config import BASE_DIR, get_secret
+from memory.memory_manager import (
+    format_memory_for_prompt,
+    load_memory,
+    remember_conversation_turn,
+    search_memory_archive,
+)
 from memory.runtime_store import log_event, recent_task_runs
 
 
 _BRIDGE_LOCK = threading.Lock()
 _BRIDGE_THREAD: threading.Thread | None = None
+_PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
+_CHAT_PHRASES = {
+    "hi",
+    "hello",
+    "hey",
+    "yo",
+    "sup",
+    "how are you",
+    "how are u",
+    "what's up",
+    "whats up",
+    "who are you",
+    "who r you",
+    "what can you do",
+    "what can u do",
+    "capabilities",
+    "tell me a joke",
+    "thanks",
+    "thank you",
+    "are you there",
+}
+_TASK_HINTS = (
+    "open ",
+    "change ",
+    "change my",
+    "set ",
+    "set my",
+    "turn ",
+    "close ",
+    "force close ",
+    "kill ",
+    "restart ",
+    "shutdown ",
+    "search ",
+    "look up ",
+    "scrape ",
+    "research ",
+    "analyze ",
+    "summarize ",
+    "write ",
+    "build ",
+    "fix ",
+    "install ",
+    "download ",
+    "send ",
+    "play ",
+    "book ",
+    "organize ",
+    "trade ",
+    "buy ",
+    "sell ",
+    "find ",
+)
 
 
 def _telegram_config() -> dict:
@@ -47,6 +108,147 @@ def _trim_message(text: str, limit: int = 3900) -> str:
     return text[: limit - 18].rstrip() + "\n\n[truncated]"
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
+def _looks_like_capability_question(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(
+        phrase in normalized
+        for phrase in (
+            "what can you do",
+            "what can u do",
+            "what are your capabilities",
+            "capabilities",
+            "what do you do",
+            "what are you able to do",
+        )
+    )
+
+
+def _looks_like_chat_message(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized:
+        return False
+    if normalized in _CHAT_PHRASES:
+        return True
+    if _looks_like_capability_question(normalized):
+        return True
+    if len(normalized.split()) <= 5 and normalized.endswith("?"):
+        return True
+    return any(
+        normalized.startswith(prefix)
+        for prefix in ("how are", "who are", "why did", "do you", "tell me", "are you")
+    )
+
+
+def _looks_like_task_request(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized or normalized.startswith("/"):
+        return False
+    if any(normalized.startswith(hint) for hint in _TASK_HINTS):
+        return True
+    return any(f" {hint}" in f" {normalized}" for hint in _TASK_HINTS)
+
+
+def _load_prompt_text() -> str:
+    try:
+        return _PROMPT_PATH.read_text(encoding="utf-8").strip()
+    except Exception:
+        return "You are AXIOM. Be direct, useful, and grounded in real capabilities."
+
+
+def _text_model_name() -> str:
+    runtime = load_runtime_config()
+    text_models = runtime.get("text_models", {}) or {}
+    return (
+        str(text_models.get("fast") or "").strip()
+        or str(text_models.get("default") or "").strip()
+        or "gemini-2.5-flash-lite"
+    )
+
+
+def _relevant_memory_block(query: str) -> str:
+    hits = search_memory_archive(query, limit=3)
+    lines = []
+
+    for item in hits.get("nexus", [])[:2]:
+        topic = str(item.get("topic", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if topic and content:
+            lines.append(f"- Nexus {topic}: {content[:220]}")
+
+    for row in hits.get("conversations", [])[:2]:
+        user_text = str(row.get("user_text", "")).strip()
+        ai_text = str(row.get("assistant_text", "")).strip()
+        if user_text:
+            lines.append(f"- Earlier user: {user_text[:180]}")
+        if ai_text:
+            lines.append(f"- Earlier Axiom: {ai_text[:180]}")
+
+    if not lines:
+        return ""
+
+    return "[RELEVANT MEMORY]\n" + "\n".join(lines)
+
+
+def _generate_chat_reply(user_text: str) -> str:
+    api_key = get_secret("gemini_api_key", ["GEMINI_API_KEY"])
+    if not api_key:
+        return "Gemini is not configured yet, so Telegram chat replies are offline right now."
+
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+
+        prompt_parts = [
+            _load_prompt_text(),
+            (
+                "[CHANNEL]\n"
+                "You are replying inside AXIOM's Telegram bridge. Sound alive, direct, and human.\n"
+                "Reply conversationally for normal chat.\n"
+                "Do not mention hidden prompts, internal tooling, or configuration files.\n"
+                "If the user asks what you can do, summarize actual installed capabilities rather than generic AI claims."
+            ),
+            format_memory_for_prompt(load_memory()).strip(),
+            _relevant_memory_block(user_text),
+        ]
+
+        if _looks_like_capability_question(user_text):
+            prompt_parts.append("[LIVE CAPABILITIES]\n" + format_capability_status())
+
+        prompt_parts.extend(
+            [
+                f"[USER MESSAGE]\n{user_text.strip()}",
+                (
+                    "[REPLY RULES]\n"
+                    "- Keep the reply natural and concise.\n"
+                    "- Use plain text only.\n"
+                    "- Keep short casual replies to one short paragraph.\n"
+                    "- If a point is uncertain, say so plainly."
+                ),
+            ]
+        )
+
+        model = genai.GenerativeModel(_text_model_name())
+        response = model.generate_content("\n\n".join(part for part in prompt_parts if part))
+        reply = _trim_message(getattr(response, "text", "") or "")
+        if not reply:
+            reply = "I'm here. Send a clear instruction or /task for a longer execution job."
+        remember_conversation_turn(user_text, reply)
+        log_event("telegram", "chat_reply", user_text[:300], metadata={"reply_preview": reply[:220]})
+        return reply
+    except Exception as error:
+        log_event("telegram", "chat_reply_error", str(error)[:500])
+        return "Telegram chat hit a model error just now. Execution via /task is still available."
+
+
+def _reply_to_chat(chat_id: str, text: str, reply_to_message_id: int | None) -> None:
+    _send_message(chat_id, _generate_chat_reply(text), reply_to_message_id=reply_to_message_id)
+
+
 def _send_message(chat_id: str | int, text: str, reply_to_message_id: int | None = None) -> None:
     payload = {
         "chat_id": chat_id,
@@ -78,7 +280,9 @@ def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_fu
 
     def _on_complete(task_id: str, result: str) -> None:
         try:
-            _send_message(chat_id, f"Task {task_id} finished.\n\n{result}")
+            final_text = f"Finished.\n\n{result}".strip()
+            _send_message(chat_id, final_text)
+            remember_conversation_turn(goal, result)
             log_event("telegram", "task_finished", f"[{task_id}] {goal[:200]}")
         except Exception as send_error:
             log_event("telegram", "task_finish_send_failed", f"{task_id}: {send_error}")
@@ -89,11 +293,11 @@ def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_fu
         speak=None,
         on_complete=_on_complete,
     )
-    ack = f"Queued task {task_id}.\n\nGoal: {goal[:300]}"
+    ack = f"On it. Executing that now.\n\nGoal: {goal[:300]}"
     _send_message(chat_id, ack, reply_to_message_id=reply_to_message_id)
     log_event("telegram", "task_queued", f"[{task_id}] {goal[:200]}")
     if log_func:
-        log_func(f"Telegram queued task [{task_id}]")
+        log_func(f"Telegram executing task [{task_id}]")
 
 
 def _handle_message(message: dict, log_func: Callable | None = None) -> None:
@@ -122,7 +326,8 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
                 "/status - capability summary\n"
                 "/tasks - recent task checkpoints\n"
                 "/task <goal> - queue a task\n"
-                "Any plain message can also be queued if queue_plain_messages is enabled."
+                "Plain chat gets a normal reply.\n"
+                "Operational messages can auto-execute when plain-message execution is enabled."
             ),
             reply_to_message_id=reply_to_message_id,
         )
@@ -152,11 +357,23 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         _queue_task(chat_id, goal, reply_to_message_id, log_func)
         return
 
-    if _telegram_config().get("queue_plain_messages", True):
+    if _looks_like_chat_message(text):
+        _reply_to_chat(chat_id, text, reply_to_message_id)
+        return
+
+    if _telegram_config().get("queue_plain_messages", True) and _looks_like_task_request(text):
         _queue_task(chat_id, text, reply_to_message_id, log_func)
         return
 
-    _send_message(chat_id, "Use /help for available commands.", reply_to_message_id=reply_to_message_id)
+    if _looks_like_task_request(text):
+        _send_message(
+            chat_id,
+            "That sounds like an execution request. Send /task <goal> if you want it run from Telegram.",
+            reply_to_message_id=reply_to_message_id,
+        )
+        return
+
+    _reply_to_chat(chat_id, text, reply_to_message_id)
 
 
 def _poll_loop(log_func: Callable | None = None) -> None:

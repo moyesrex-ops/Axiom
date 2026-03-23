@@ -52,8 +52,9 @@ from agent.heartbeat               import HeartbeatDaemon
 from core.capabilities             import format_capability_status
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_secret
+from core.system_context           import format_prompt_system_context
 from core.telegram_bridge          import start_telegram_bridge
-from memory.runtime_store          import init_runtime_store
+from memory.runtime_store          import init_runtime_store, log_event
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -613,13 +614,14 @@ TOOL_DECLARATIONS = [
     "name": "system_capabilities",
     "description": (
         "Inspects Axiom's current environment, installed integrations, recent runtime events, "
-        "and recorded failures. Use when the user asks what Axiom can do right now."
+        "recorded failures, local timezone, and best-effort location context. "
+        "Use when the user asks what Axiom can do right now or asks where they are / what timezone they are in."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | failures | events"},
-            "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events"}
+            "action": {"type": "STRING", "description": "summary | context | failures | events | tasks"},
+            "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
     }
@@ -709,9 +711,17 @@ class AxiomLive:
         self.live_model     = DEFAULT_LIVE_MODEL
         
         # Audio tweaks
-        self.is_speaking       = False
-        self.VOLUME_MULTIPLIER = 5.0   # Extreme volume boost for soft voices/whispering
-        self.VAD_THRESHOLD     = 2000  # Calculated solely on RAW unboosted audio to prevent speaker loop
+        self.is_speaking          = False
+        self.TARGET_INPUT_RMS     = 2300.0
+        self.MAX_INPUT_GAIN       = 3.4
+        self.MIN_INTERRUPT_RMS    = 1200.0
+        self._ambient_rms         = 120.0
+        self._speaker_guard_until = 0.0
+
+        self._input_turn_buffer   = []
+        self._output_turn_buffer  = []
+        self._disconnect_count    = 0
+        self._last_disconnect_reason = ""
 
     def speak(self, text: str):
         """Thread-safe speak - any thread can call this."""
@@ -725,6 +735,60 @@ class AxiomLive:
             self._loop
          )
 
+    def _interrupt_threshold(self) -> float:
+        return max(self.MIN_INTERRUPT_RMS, self._ambient_rms * 4.25)
+
+    def _adaptive_gain(self, rms: float) -> float:
+        if rms <= 60:
+            return 1.0
+        return min(self.MAX_INPUT_GAIN, max(1.0, self.TARGET_INPUT_RMS / max(rms, 1.0)))
+
+    def _finalize_transcript_turn(self) -> None:
+        full_in = " ".join(self._input_turn_buffer).strip()
+        full_out = " ".join(self._output_turn_buffer).strip()
+
+        if full_in:
+            self.ui.write_log(f"You: {full_in}")
+        if full_out:
+            self.ui.write_log(f"Axiom: {full_out}")
+
+        self._input_turn_buffer.clear()
+        self._output_turn_buffer.clear()
+
+        if full_in and len(full_in) > 5:
+            threading.Thread(
+                target=_update_memory_async,
+                args=(full_in, full_out),
+                daemon=True
+            ).start()
+
+    def _recover_partial_transcript(self, reason: str) -> None:
+        full_in = " ".join(self._input_turn_buffer).strip()
+        full_out = " ".join(self._output_turn_buffer).strip()
+        self._input_turn_buffer.clear()
+        self._output_turn_buffer.clear()
+
+        if not full_in and not full_out:
+            return
+
+        if full_in:
+            self.ui.write_log(f"You (recovered): {full_in}")
+        if full_out:
+            self.ui.write_log(f"Axiom (recovered): {full_out}")
+
+        if full_in and len(full_in) > 5:
+            remember_conversation_turn(full_in, full_out)
+
+        log_event(
+            "session",
+            "partial_turn_recovered",
+            reason[:500],
+            metadata={
+                "user_text": full_in[:240],
+                "assistant_text": full_out[:240],
+            },
+        )
+
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
 
@@ -732,6 +796,7 @@ class AxiomLive:
         mem_str = format_memory_for_prompt(memory)
         runtime = load_runtime_config()
         capability_status = format_capability_status()
+        context_status = format_prompt_system_context()
 
         sys_prompt = _load_system_prompt()
 
@@ -744,10 +809,20 @@ class AxiomLive:
             f"If user says 'in 2 minutes', add 2 minutes to this time.\n\n"
         )
 
+        recovery_ctx = ""
+        if self._disconnect_count > 0:
+            recovery_ctx = (
+                "[SESSION RECOVERY]\n"
+                "The live connection recently dropped and was re-established.\n"
+                "Continue naturally from the recovered archive and any partial turn notes below.\n"
+                "Do not act like the conversation context was lost.\n\n"
+            )
+
+        prompt_prefix = time_ctx + context_status + "\n\n" + recovery_ctx
         if mem_str:
-            sys_prompt = time_ctx + mem_str + "\n\n" + capability_status + "\n\n" + sys_prompt
+            sys_prompt = prompt_prefix + mem_str + "\n\n" + capability_status + "\n\n" + sys_prompt
         else:
-            sys_prompt = time_ctx + capability_status + "\n\n" + sys_prompt
+            sys_prompt = prompt_prefix + capability_status + "\n\n" + sys_prompt
 
         self.live_model = runtime.get("live_model") or DEFAULT_LIVE_MODEL
         voice_name = runtime.get("voice_name") or "Charon"
@@ -1054,33 +1129,38 @@ class AxiomLive:
                 
                 try:
                     raw_audio = np.frombuffer(data, dtype=np.int16)
-                    
-                    # Whisper Boost (API ONLY)
-                    boosted_audio = np.clip(raw_audio * self.VOLUME_MULTIPLIER, -32768, 32767).astype(np.int16)
-                    boosted_data  = boosted_audio.tobytes()
-                    
-                    # Interruption Detection (VAD) on RAW audio to prevent 5x speaker amplification trigger
                     rms = np.sqrt(np.mean(np.square(raw_audio.astype(np.float32))))
+                    gain = self._adaptive_gain(rms)
+                    boosted_audio = np.clip(
+                        raw_audio.astype(np.float32) * gain,
+                        -32768,
+                        32767,
+                    ).astype(np.int16)
+                    boosted_data = boosted_audio.tobytes()
+                    interrupt_threshold = self._interrupt_threshold()
+
+                    if not self.is_speaking and rms < (interrupt_threshold * 0.8):
+                        self._ambient_rms = (self._ambient_rms * 0.92) + (max(rms, 50.0) * 0.08)
                     
                     if self.is_speaking:
-                        if rms > self.VAD_THRESHOLD:
-                            print(f"[AXIOM] Interrupted by user (RMS: {rms:.0f})")
-                            # User spoke louder than the speaker threshold. Clear playback queue.
+                        if rms > interrupt_threshold:
+                            print(f"[AXIOM] Interrupted by user (RMS: {rms:.0f}, threshold: {interrupt_threshold:.0f})")
                             while not self.audio_in_queue.empty():
                                 try: self.audio_in_queue.get_nowait()
                                 except: break
                             self.is_speaking = False
-                            data = boosted_data # Let the user's voice through
+                            self._speaker_guard_until = time.time() + 0.18
+                            data = boosted_data
                         else:
-                            # Axiom is speaking, and the mic is picking up Axiom's own voice from the speakers.
-                            # Mute the mic stream going to the API so Axiom doesn't talk to itself.
                             data = b'\x00' * len(data)
                     else:
-                        # Axiom is not speaking, let the mic stream flow normally
-                        data = boosted_data
+                        if time.time() < self._speaker_guard_until and rms < (interrupt_threshold * 1.15):
+                            data = b'\x00' * len(data)
+                        else:
+                            data = boosted_data
                         
                 except Exception as e:
-                    pass # Fallback to raw data if numpy fails
+                    pass
                     
                 await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
         except Exception as e:
@@ -1091,9 +1171,6 @@ class AxiomLive:
 
     async def _receive_audio(self):
         print("[AXIOM] Receive loop started")
-        out_buf = []
-        in_buf  = []
-
         try:
             while True:
                 turn = self.session.receive()
@@ -1108,35 +1185,15 @@ class AxiomLive:
                         if sc.input_transcription and sc.input_transcription.text:
                             txt = sc.input_transcription.text.strip()
                             if txt:
-                                in_buf.append(txt)
+                                self._input_turn_buffer.append(txt)
 
                         if sc.output_transcription and sc.output_transcription.text:
                             txt = sc.output_transcription.text.strip()
                             if txt:
-                                out_buf.append(txt)
+                                self._output_turn_buffer.append(txt)
 
                         if sc.turn_complete:
-                            full_in  = ""
-                            full_out = ""
-
-                            if in_buf:
-                                full_in = " ".join(in_buf).strip()
-                                if full_in:
-                                    self.ui.write_log(f"You: {full_in}")
-                            in_buf = []
-
-                            if out_buf:
-                                full_out = " ".join(out_buf).strip()
-                                if full_out:
-                                    self.ui.write_log(f"Axiom: {full_out}")
-                            out_buf = []
-
-                            if full_in and len(full_in) > 5:
-                                threading.Thread(
-                                    target=_update_memory_async,
-                                    args=(full_in, full_out),
-                                    daemon=True
-                                ).start()
+                            self._finalize_transcript_turn()
 
                     if response.tool_call:
                         fn_responses = []
@@ -1149,6 +1206,7 @@ class AxiomLive:
                         )
 
         except Exception as e:
+            self._recover_partial_transcript(str(e) or "Connection dropped while a turn was in progress.")
             print(f"[AXIOM] Receive error: {e}")
             traceback.print_exc()
             raise
@@ -1169,6 +1227,7 @@ class AxiomLive:
                 await asyncio.to_thread(stream.write, chunk)
                 if self.audio_in_queue.empty():
                     self.is_speaking = False
+                    self._speaker_guard_until = time.time() + 0.25
         except Exception as e:
             print(f"[AXIOM] Playback error: {e}")
             raise
@@ -1184,6 +1243,7 @@ class AxiomLive:
 
         while True:
             try:
+                reconnecting = self._disconnect_count > 0
                 print("[AXIOM] Connecting...")
                 config = self._build_config()
 
@@ -1197,7 +1257,13 @@ class AxiomLive:
                     self.out_queue      = asyncio.Queue(maxsize=10)
 
                     print("[AXIOM] Connected.")
-                    self.ui.write_log("AXIOM online.")
+                    if reconnecting:
+                        self.ui.write_log("SYS: Live link restored. Recent context was reloaded.")
+                        log_event("session", "reconnected", self._last_disconnect_reason[:500])
+                    else:
+                        self.ui.write_log("AXIOM online.")
+                        log_event("session", "connected", "Live session established.")
+                    self._last_disconnect_reason = ""
 
                     heartbeat = HeartbeatDaemon(speak_func=self.speak, log_func=self.ui.write_log)
                     tg.create_task(heartbeat.start())
@@ -1208,8 +1274,22 @@ class AxiomLive:
                     tg.create_task(self._play_audio())
 
             except Exception as e:
+                self._disconnect_count += 1
+                self._last_disconnect_reason = str(e) or e.__class__.__name__
+                log_event(
+                    "session",
+                    "connection_error",
+                    self._last_disconnect_reason[:500],
+                    metadata={"disconnect_count": self._disconnect_count},
+                )
+                self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
                 print(f"[AXIOM] Error: {e}")
                 traceback.print_exc()
+            finally:
+                self.session = None
+                self._loop = None
+                self.audio_in_queue = None
+                self.out_queue = None
 
             print("[AXIOM] Reconnecting in 3s...")
             await asyncio.sleep(3)
