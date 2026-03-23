@@ -34,6 +34,7 @@ from actions.web_search       import web_search as web_search_action
 from actions.computer_control import computer_control
 from actions.nexus_memory     import nexus_memory
 from actions.deep_analyzer    import deep_analyzer
+from actions.autonomous_researcher import autonomous_research
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -499,6 +500,24 @@ TOOL_DECLARATIONS = [
         },
         "required": ["action", "prompt"]
     }
+},
+{
+    "name": "autonomous_researcher",
+    "description": (
+        "Mass-ingests an entire YouTube channel or playlist, extracts all transcripts, "
+        "and uses Gemini's 2M token context window to synthesize the ultimate strategy. "
+        "Use this exclusively when the user says 'watch every video on this channel', "
+        "'learn his entire account', 'find the perfect strategy from his videos', etc. "
+        "It will automatically save the knowledge to the Nexus Brain without you needing to do it."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "url":   {"type": "STRING", "description": "The URL to the YouTube channel or playlist."},
+            "query": {"type": "STRING", "description": "What exactly to synthesize (e.g. 'Extract his exact trading strategy, entry/exit, psychology')"}
+        },
+        "required": ["url", "query"]
+    }
 }
 ]
 
@@ -717,6 +736,16 @@ class AxiomLive:
             elif name == "deep_analyzer":
                 r = await loop.run_in_executor(
                     None, lambda: deep_analyzer(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "autonomous_researcher":
+                r = await loop.run_in_executor(
+                    None, lambda: autonomous_research(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak
