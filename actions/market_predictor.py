@@ -54,7 +54,7 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
             except: pass
             
         # Use the specific Flash model tier requested by the user
-        model = genai.GenerativeModel("gemini-3.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-pro")
         
         prompt = f"""
         [CRITICAL PRECISION MODE: FLASH-3.0]

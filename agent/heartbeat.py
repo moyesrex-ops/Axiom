@@ -64,7 +64,7 @@ class HeartbeatDaemon:
 
             import google.generativeai as genai
             genai.configure(api_key=_get_api_key())
-            model = genai.GenerativeModel("gemini-3.0-flash")
+            model = genai.GenerativeModel("gemini-2.5-flash")
             
             prompt = f"""
             [SENTINEL CORE: AUTOMATED RISK OVERRIDE]
