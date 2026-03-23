@@ -19,3 +19,8 @@ duckduckgo-search
 youtube-transcript-api
 yt-dlp
 MetaTrader5
+# Optional: crypto market support (pip install ccxt)
+ccxt
+# Optional: physical RGB hardware control (pip install openrgb-python)
+# Requires the OpenRGB app to be running — https://openrgb.org
+openrgb-python
