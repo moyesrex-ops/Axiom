@@ -1,7 +1,15 @@
 import json
+import re
 from threading import Lock
 from pathlib import Path
 import sys
+
+from memory.runtime_store import (
+    log_conversation_turn,
+    recent_conversation_turns,
+    recent_events,
+    search_conversation_turns,
+)
 
 
 def get_base_dir() -> Path:
@@ -119,6 +127,13 @@ def save_to_nexus(topic: str, content: str) -> bool:
         pass
     return True
 
+
+def remember_conversation_turn(user_text: str, axiom_text: str = "") -> None:
+    try:
+        log_conversation_turn(user_text, axiom_text)
+    except Exception as e:
+        print(f"[Memory] ⚠️ Conversation archive error: {e}")
+
 def get_from_nexus(topic: str) -> str:
     memory = load_memory()
     knowledge = memory.get("nexus_knowledge", {})
@@ -127,6 +142,31 @@ def get_from_nexus(topic: str) -> str:
 def list_nexus_topics() -> list:
     memory = load_memory()
     return list(memory.get("nexus_knowledge", {}).keys())
+
+
+def search_memory_archive(query: str, limit: int = 5) -> dict:
+    memory = load_memory()
+    knowledge = memory.get("nexus_knowledge", {})
+    query_terms = {
+        token for token in re.findall(r"[a-zA-Z0-9_'-]+", str(query or "").lower())
+        if len(token) >= 4
+    }
+
+    nexus_hits = []
+    for topic, content in knowledge.items():
+        haystack = f"{topic}\n{content}".lower()
+        score = sum(1 for token in query_terms if token in haystack)
+        if score > 0:
+            nexus_hits.append((score, topic, content))
+    nexus_hits.sort(key=lambda item: item[0], reverse=True)
+
+    return {
+        "nexus": [
+            {"topic": topic, "content": str(content)[:1200]}
+            for _, topic, content in nexus_hits[: int(limit)]
+        ],
+        "conversations": search_conversation_turns(query, limit=limit),
+    }
 
 
 
@@ -171,27 +211,55 @@ def format_memory_for_prompt(memory: dict | None) -> str:
         if val:
             lines.append(f"{key}: {val}")
 
-    if not lines:
-        return ""
+    sections = []
+    if lines:
+        sections.append("[USER MEMORY]\n" + "\n".join(f"- {l}" for l in lines))
 
-    result = "[USER MEMORY]\n" + "\n".join(f"- {l}" for l in lines)
-    
-    # Inject Neural Link (Nexus Brain) capacity
-    # Surfacing the last 3 topics directly for extreme recency
     topics = list_nexus_topics()
     if topics:
-        result += "\n\n[NEURAL LINK: NEXUS BRAIN]\n"
-        result += f"You have deep-link knowledge on: {', '.join(topics)}.\n"
-        
-        # Pull the absolute latest knowledge snippet to maintain 'infinite' flow
+        nexus_lines = [f"Known topics: {', '.join(topics[:12])}"]
         latest_topic = topics[-1]
         latest_content = get_from_nexus(latest_topic)
         if latest_content:
-            result += f"LATEST RECALL ({latest_topic}): {latest_content[:500]}...\n"
-            
-        result += "To recall other topics, use `nexus_memory` with `action='recall'`."
-        
-    if len(result) > 2000:
-        result = result[:1997] + "…"
+            nexus_lines.append(f"Latest recall ({latest_topic}): {latest_content[:420]}...")
+
+        recent_nexus = []
+        seen_topics = set()
+        for row in recent_events(limit=10, kind="nexus"):
+            topic = str(row.get("topic", "")).strip()
+            if not topic or topic in seen_topics:
+                continue
+            seen_topics.add(topic)
+            recent_nexus.append(f"- {topic}: {str(row.get('content', ''))[:180]}")
+            if len(recent_nexus) >= 4:
+                break
+        if recent_nexus:
+            nexus_lines.append("Recent learned knowledge:")
+            nexus_lines.extend(recent_nexus)
+
+        nexus_lines.append("Use `nexus_memory` with action='search' or 'recall' for deeper retrieval.")
+        sections.append("[NEURAL LINK: NEXUS BRAIN]\n" + "\n".join(nexus_lines))
+
+    recent_turns = list(reversed(recent_conversation_turns(limit=4)))
+    if recent_turns:
+        convo_lines = []
+        for row in recent_turns:
+            user_text = str(row.get("user_text", "")).strip()
+            ai_text = str(row.get("assistant_text", "")).strip()
+            convo_lines.append(f"- User: {user_text[:180]}")
+            if ai_text:
+                convo_lines.append(f"  Axiom: {ai_text[:180]}")
+        sections.append(
+            "[RECENT CONVERSATION ARCHIVE]\n"
+            "This is durable cross-session recall from earlier interactions.\n"
+            + "\n".join(convo_lines)
+        )
+
+    if not sections:
+        return ""
+
+    result = "\n\n".join(sections)
+    if len(result) > 3200:
+        result = result[:3197] + "…"
 
     return result + "\n"

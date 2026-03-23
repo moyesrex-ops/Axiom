@@ -46,6 +46,7 @@ DEFAULT_RUNTIME_CONFIG = {
             "allowed_chat_ids": [],
             "poll_seconds": 1.5,
             "queue_plain_messages": True,
+            "startup_prompt_enabled": True,
         }
     },
 }

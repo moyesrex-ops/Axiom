@@ -12,7 +12,12 @@ from google import genai
 from google.genai import types
 import time
 from ui import AxiomUI
-from memory.memory_manager import load_memory, update_memory, format_memory_for_prompt
+from memory.memory_manager import (
+    load_memory,
+    update_memory,
+    format_memory_for_prompt,
+    remember_conversation_turn,
+)
 
 from agent.task_queue import get_queue
 
@@ -88,6 +93,8 @@ _last_memory_input    = ""
 
 def _update_memory_async(user_text: str, axiom_text: str) -> None:
     global _memory_turn_counter, _last_memory_input
+
+    remember_conversation_turn(user_text, axiom_text)
 
     with _memory_turn_lock:
         _memory_turn_counter += 1
@@ -484,17 +491,19 @@ TOOL_DECLARATIONS = [
 {
     "name": "nexus_memory",
     "description": (
-        "Saves, recalls, or lists long-term knowledge from the Nexus Brain. "
+        "Saves, recalls, lists, searches, or reviews archived long-term knowledge from the Nexus Brain. "
         "Use this to permanently memorize learned skills, preferences, strategies, "
         "or code snippets so you never forget them. Before attempting complex tasks, "
-        "you can use this to recall how you were told to do them previously."
+        "you can use this to recall how you were told to do them previously, including older conversation turns."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action":  {"type": "STRING", "description": "save | recall | list"},
+            "action":  {"type": "STRING", "description": "save | recall | list | recent | search"},
             "topic":   {"type": "STRING", "description": "Topic name (e.g., 'trading_strategy_A', 'my_code_preferences')"},
-            "content": {"type": "STRING", "description": "The detailed content to save (required for save action)"}
+            "content": {"type": "STRING", "description": "The detailed content to save (required for save action)"},
+            "query":   {"type": "STRING", "description": "Search query for memory search"},
+            "limit":   {"type": "INTEGER", "description": "Maximum number of results to return"}
         },
         "required": ["action"]
     }

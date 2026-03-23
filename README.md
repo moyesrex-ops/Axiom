@@ -28,6 +28,7 @@ Axiom is no longer just a trading shell. The current repo combines:
 - Browser, screen, desktop, file, and terminal control.
 - Long-term memory plus a durable runtime event/failure store.
 - Task lifecycle checkpoints persisted to SQLite.
+- Archived conversation turns with searchable cross-session recall.
 - MT5 trading with stop-loss / take-profit defaults and post-trade reflection.
 - Hardware RGB control through OpenRGB.
 - Prompt generation, public lead research, and generalized swarm reasoning.
@@ -56,6 +57,7 @@ This repo keeps the core runtime local and stable. Larger external systems such 
 | Swarm | Run generalized multi-role debates for research, strategy, build planning, or critique |
 | Runtime Awareness | Inspect installed integrations, recent events, and failures |
 | Task Persistence | Record task queue lifecycle checkpoints for later inspection |
+| Memory Recall | Search old nexus knowledge and archived conversation turns |
 | Persona | Manage optional PersonaPlex configuration and launch instructions |
 | Channels | Optional Telegram bot bridge for remote task submission |
 
@@ -133,12 +135,29 @@ The repo now uses `config/runtime.json` for non-secret runtime behavior. Importa
 
 This keeps voice/model/integration settings out of the source code.
 
+Startup behavior:
+
+- If Gemini is not configured, the first-run setup panel asks for the Gemini key and offers optional Telegram linking.
+- If Gemini is configured but Telegram is not, Axiom can show a separate optional Telegram link prompt at startup.
+- Telegram remains optional. Skip it and Axiom continues to run locally.
+
 ---
 
 ## New Integrated Tools
 
 ### `system_capabilities`
 Inspect the live environment, installed integrations, recent runtime events, recent failures, and recent task checkpoints.
+
+### `nexus_memory`
+The memory tool now supports:
+
+- `save`
+- `recall`
+- `list`
+- `recent`
+- `search`
+
+That means Axiom can search both saved nexus topics and archived conversation turns instead of relying only on the latest saved note.
 
 ### `persona_control`
 Configure optional PersonaPlex integration, inspect its status, or get launch instructions.

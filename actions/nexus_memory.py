@@ -1,5 +1,11 @@
 import json
-from memory.memory_manager import save_to_nexus, get_from_nexus, list_nexus_topics
+from memory.memory_manager import (
+    save_to_nexus,
+    get_from_nexus,
+    list_nexus_topics,
+    recent_conversation_turns,
+    search_memory_archive,
+)
 
 def nexus_memory(parameters: dict, player=None) -> str:
     """Action module for saving and recalling from the Nexus Brain."""
@@ -32,5 +38,42 @@ def nexus_memory(parameters: dict, player=None) -> str:
         if topics:
             return f"Nexus Brain contains knowledge on: {', '.join(topics)}"
         return "The Nexus Brain is currently empty."
+
+    elif action == "recent":
+        rows = list(reversed(recent_conversation_turns(limit=int(parameters.get("limit", 5) or 5))))
+        if not rows:
+            return "No archived conversation turns yet."
+        lines = ["Recent archived conversation turns"]
+        for row in rows:
+            lines.append(f"- User: {str(row.get('user_text', ''))[:160]}")
+            if row.get("assistant_text"):
+                lines.append(f"  Axiom: {str(row.get('assistant_text', ''))[:160]}")
+        return "\n".join(lines)
+
+    elif action == "search":
+        query = str(parameters.get("query", "")).strip()
+        if not query:
+            return "Error: 'query' is required for memory search."
+
+        results = search_memory_archive(query, limit=int(parameters.get("limit", 5) or 5))
+        lines = [f"Memory search results for: {query}"]
+
+        nexus_hits = results.get("nexus", [])
+        if nexus_hits:
+            lines.append("Nexus matches:")
+            for item in nexus_hits:
+                lines.append(f"- {item['topic']}: {item['content'][:180]}")
+
+        convo_hits = results.get("conversations", [])
+        if convo_hits:
+            lines.append("Conversation matches:")
+            for row in convo_hits:
+                lines.append(f"- User: {str(row.get('user_text', ''))[:160]}")
+                if row.get("assistant_text"):
+                    lines.append(f"  Axiom: {str(row.get('assistant_text', ''))[:160]}")
+
+        if len(lines) == 1:
+            return "No relevant memory matches found."
+        return "\n".join(lines)
         
-    return f"Unknown action: {action}. Use 'save', 'recall', or 'list'."
+    return f"Unknown action: {action}. Use 'save', 'recall', 'list', 'recent', or 'search'."

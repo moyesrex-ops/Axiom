@@ -5,6 +5,9 @@ from PIL import Image, ImageTk, ImageDraw
 import sys
 from pathlib import Path
 
+from core.runtime_config import load_runtime_config, update_runtime_config
+from core.secret_config import load_api_config
+
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -69,6 +72,8 @@ class AxiomUI:
 
         self.typing_queue = deque()
         self.is_typing    = False
+        self.setup_frame  = None
+        self.telegram_setup_frame = None
 
         self._face_pil         = None
         self._has_face         = False
@@ -97,6 +102,8 @@ class AxiomUI:
         self._api_key_ready = self._api_keys_exist()
         if not self._api_key_ready:
             self._show_setup_ui()
+        else:
+            self.root.after(400, self._maybe_show_telegram_setup_ui)
 
         self._animate()
         self.root.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
@@ -333,12 +340,41 @@ class AxiomUI:
         self.status_text = "ONLINE"
 
     def _api_keys_exist(self):
-        return API_FILE.exists()
+        return bool(load_api_config().get("gemini_api_key"))
 
     def wait_for_api_key(self):
         """Block until API key is saved (called from main thread before starting AXIOM)."""
         while not self._api_key_ready:
             time.sleep(0.1)
+
+    @staticmethod
+    def _parse_chat_ids(raw_text: str) -> list[str]:
+        parts = []
+        seen = set()
+        for chunk in str(raw_text or "").replace("\n", ",").split(","):
+            item = chunk.strip()
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            parts.append(item)
+        return parts
+
+    def _telegram_state(self) -> dict:
+        api_config = load_api_config()
+        runtime = load_runtime_config()
+        tg = runtime.get("channels", {}).get("telegram", {}) or {}
+        return {
+            "token": str(api_config.get("telegram_bot_token", "") or "").strip(),
+            "enabled": bool(tg.get("enabled", False)),
+            "allowed_chat_ids": tg.get("allowed_chat_ids", []) or [],
+            "startup_prompt_enabled": bool(tg.get("startup_prompt_enabled", True)),
+        }
+
+    def _maybe_show_telegram_setup_ui(self):
+        state = self._telegram_state()
+        if state["token"] or state["enabled"] or not state["startup_prompt_enabled"]:
+            return
+        self._show_telegram_setup_ui()
 
     def _show_setup_ui(self):
         self.setup_frame = tk.Frame(
@@ -350,7 +386,7 @@ class AxiomUI:
         tk.Label(self.setup_frame, text="◈  INITIALISATION REQUIRED",
                  fg=C_PRI, bg="#0d0d1a", font=("Courier", 13, "bold")).pack(pady=(18, 4))
         tk.Label(self.setup_frame,
-                 text="Enter your Gemini API key to boot A.X.I.O.M.",
+                 text="Enter your Gemini API key to boot A.X.I.O.M. Telegram linking is optional.",
                  fg=C_MID, bg="#0d0d1a", font=("Courier", 9)).pack(pady=(0, 10))
 
         tk.Label(self.setup_frame, text="GEMINI API KEY",
@@ -360,6 +396,22 @@ class AxiomUI:
             insertbackground=C_TEXT, borderwidth=0, font=("Courier", 10), show="*"
         )
         self.gemini_entry.pack(pady=(0, 4))
+
+        tk.Label(self.setup_frame, text="TELEGRAM BOT TOKEN  [OPTIONAL]",
+                 fg=C_DIM, bg="#0d0d1a", font=("Courier", 9)).pack(pady=(10, 2))
+        self.telegram_entry = tk.Entry(
+            self.setup_frame, width=52, fg=C_TEXT, bg="#0f0a20",
+            insertbackground=C_TEXT, borderwidth=0, font=("Courier", 10), show="*"
+        )
+        self.telegram_entry.pack(pady=(0, 4))
+
+        tk.Label(self.setup_frame, text="ALLOWED CHAT IDS  [OPTIONAL, comma-separated]",
+                 fg=C_DIM, bg="#0d0d1a", font=("Courier", 9)).pack(pady=(8, 2))
+        self.telegram_chat_ids_entry = tk.Entry(
+            self.setup_frame, width=52, fg=C_TEXT, bg="#0f0a20",
+            insertbackground=C_TEXT, borderwidth=0, font=("Courier", 10)
+        )
+        self.telegram_chat_ids_entry.pack(pady=(0, 4))
 
         tk.Button(
             self.setup_frame, text="▸  INITIALISE SYSTEMS",
@@ -372,10 +424,140 @@ class AxiomUI:
         gemini = self.gemini_entry.get().strip()
         if not gemini:
             return
+
+        telegram_token = self.telegram_entry.get().strip()
+        allowed_chat_ids = self._parse_chat_ids(self.telegram_chat_ids_entry.get())
+
         os.makedirs(CONFIG_DIR, exist_ok=True)
+        config = load_api_config()
+        config["gemini_api_key"] = gemini
+        if telegram_token:
+            config["telegram_bot_token"] = telegram_token
+
         with open(API_FILE, "w", encoding="utf-8") as f:
-            json.dump({"gemini_api_key": gemini}, f, indent=4)
+            json.dump(config, f, indent=4)
+
+        update_runtime_config(
+            {
+                "channels": {
+                    "telegram": {
+                        "enabled": bool(telegram_token),
+                        "allowed_chat_ids": allowed_chat_ids if telegram_token else [],
+                        "startup_prompt_enabled": not bool(telegram_token),
+                    }
+                }
+            }
+        )
+
         self.setup_frame.destroy()
         self._api_key_ready = True
         self.status_text = "ONLINE"
         self.write_log("SYS: Systems initialised. AXIOM online.")
+        if telegram_token:
+            self.write_log("SYS: Telegram bridge linked and will sync automatically.")
+
+    def _show_telegram_setup_ui(self):
+        if self.telegram_setup_frame is not None:
+            return
+
+        state = self._telegram_state()
+        self.telegram_setup_frame = tk.Frame(
+            self.root, bg="#0d0d1a",
+            highlightbackground=C_ACC2, highlightthickness=1
+        )
+        self.telegram_setup_frame.place(relx=0.5, rely=0.52, anchor="center")
+
+        tk.Label(
+            self.telegram_setup_frame,
+            text="OPTIONAL TELEGRAM LINK",
+            fg=C_ACC2, bg="#0d0d1a", font=("Courier", 12, "bold")
+        ).pack(pady=(16, 4))
+        tk.Label(
+            self.telegram_setup_frame,
+            text="Link a Telegram bot now, or skip and keep running locally.",
+            fg=C_MID, bg="#0d0d1a", font=("Courier", 9)
+        ).pack(pady=(0, 10))
+
+        tk.Label(self.telegram_setup_frame, text="BOT TOKEN",
+                 fg=C_DIM, bg="#0d0d1a", font=("Courier", 9)).pack(pady=(8, 2))
+        self.telegram_optional_entry = tk.Entry(
+            self.telegram_setup_frame, width=52, fg=C_TEXT, bg="#0f0a20",
+            insertbackground=C_TEXT, borderwidth=0, font=("Courier", 10), show="*"
+        )
+        self.telegram_optional_entry.pack(pady=(0, 4))
+        if state["token"]:
+            self.telegram_optional_entry.insert(0, state["token"])
+
+        tk.Label(self.telegram_setup_frame, text="ALLOWED CHAT IDS  [OPTIONAL]",
+                 fg=C_DIM, bg="#0d0d1a", font=("Courier", 9)).pack(pady=(8, 2))
+        self.telegram_optional_chat_ids = tk.Entry(
+            self.telegram_setup_frame, width=52, fg=C_TEXT, bg="#0f0a20",
+            insertbackground=C_TEXT, borderwidth=0, font=("Courier", 10)
+        )
+        self.telegram_optional_chat_ids.pack(pady=(0, 8))
+        if state["allowed_chat_ids"]:
+            self.telegram_optional_chat_ids.insert(0, ", ".join(state["allowed_chat_ids"]))
+
+        button_row = tk.Frame(self.telegram_setup_frame, bg="#0d0d1a")
+        button_row.pack(pady=(4, 14))
+
+        tk.Button(
+            button_row, text="LINK TELEGRAM",
+            command=self._save_telegram_setup, bg=C_BG, fg=C_PRI,
+            activebackground="#2d1f5e", font=("Courier", 10),
+            borderwidth=0, pady=8, padx=10
+        ).pack(side="left", padx=6)
+
+        tk.Button(
+            button_row, text="SKIP FOR NOW",
+            command=self._skip_telegram_setup, bg=C_PANEL, fg=C_ACC2,
+            activebackground="#3d3210", font=("Courier", 10),
+            borderwidth=0, pady=8, padx=10
+        ).pack(side="left", padx=6)
+
+    def _save_telegram_setup(self):
+        token = self.telegram_optional_entry.get().strip()
+        allowed_chat_ids = self._parse_chat_ids(self.telegram_optional_chat_ids.get())
+
+        config = load_api_config()
+        if token:
+            config["telegram_bot_token"] = token
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(API_FILE, "w", encoding="utf-8") as f:
+                json.dump(config, f, indent=4)
+
+        update_runtime_config(
+            {
+                "channels": {
+                    "telegram": {
+                        "enabled": bool(token),
+                        "allowed_chat_ids": allowed_chat_ids if token else [],
+                        "startup_prompt_enabled": False,
+                    }
+                }
+            }
+        )
+
+        if self.telegram_setup_frame is not None:
+            self.telegram_setup_frame.destroy()
+            self.telegram_setup_frame = None
+
+        if token:
+            self.write_log("SYS: Telegram bridge linked. AXIOM can now accept Telegram tasks.")
+        else:
+            self.write_log("SYS: Telegram setup left disabled.")
+
+    def _skip_telegram_setup(self):
+        update_runtime_config(
+            {
+                "channels": {
+                    "telegram": {
+                        "startup_prompt_enabled": False
+                    }
+                }
+            }
+        )
+        if self.telegram_setup_frame is not None:
+            self.telegram_setup_frame.destroy()
+            self.telegram_setup_frame = None
+        self.write_log("SYS: Telegram setup skipped. Local runtime only.")
