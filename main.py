@@ -36,6 +36,8 @@ from actions.nexus_memory     import nexus_memory
 from actions.deep_analyzer    import deep_analyzer
 from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
+from actions.market_predictor      import predict_market
+from agent.heartbeat               import HeartbeatDaemon
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -535,6 +537,21 @@ TOOL_DECLARATIONS = [
         },
         "required": ["action"]
     }
+},
+{
+    "name": "predict_market",
+    "description": (
+        "Spawns a highly intelligent background swarm to synthesize technical and fundamental data "
+        "and predict the future trajectory of ANY market asset (Forex, Crypto, Stocks, Polymarket, Kalshi)."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "asset": {"type": "STRING", "description": "The asset to predict (e.g., 'Bitcoin', 'EURUSD')."},
+            "context": {"type": "STRING", "description": "Any specific news, timeframes, or biases the user provided."}
+        },
+        "required": ["asset"]
+    }
 }
 ]
 
@@ -780,6 +797,16 @@ class AxiomLive:
                 )
                 result = r or "Done."
 
+            elif name == "predict_market":
+                r = await loop.run_in_executor(
+                    None, lambda: predict_market(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
             else:
                 result = f"Unknown tool: {name}"
 
@@ -962,6 +989,9 @@ class AxiomLive:
 
                     print("[AXIOM] ✅ Connected.")
                     self.ui.write_log("AXIOM online.")
+
+                    heartbeat = HeartbeatDaemon(speak_func=self.speak, log_func=self.ui.write_log)
+                    tg.create_task(heartbeat.start())
 
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
