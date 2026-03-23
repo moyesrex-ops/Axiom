@@ -28,6 +28,13 @@ try:
 except ImportError:
     _PYPERCLIP = False
 
+try:
+    from openrgb import OpenRGBClient
+    from openrgb.utils import RGBColor
+    _OPENRGB = True
+except ImportError:
+    _OPENRGB = False
+
 _OS = platform.system() 
 
 def get_base_dir() -> Path:
@@ -386,6 +393,71 @@ def toggle_wifi():
     else:
         subprocess.run(["nmcli", "radio", "wifi"])
 
+# ── RGB Hardware Control ──────────────────────────────────────────────────────
+
+_RGB_COLOR_MAP = {
+    "red":           (255, 0, 0),
+    "green":         (0, 255, 0),
+    "blue":          (0, 0, 255),
+    "white":         (255, 255, 255),
+    "off":           (0, 0, 0),
+    "purple":        (128, 0, 128),
+    "pink":          (255, 0, 255),
+    "cyan":          (0, 255, 255),
+    "yellow":        (255, 255, 0),
+    "orange":        (255, 128, 0),
+    "glowing":       (128, 0, 255),
+    "glow":          (128, 0, 255),
+    "glowing lights":(128, 0, 255),
+    "rainbow":       (255, 0, 128),
+    "gold":          (255, 215, 0),
+}
+
+def change_hardware_color(color_name: str = "white") -> str:
+    """
+    Physically changes the RGB lights on all connected devices (keyboard, mouse, etc.)
+    via OpenRGB. Requires OpenRGB desktop app to be running.
+    """
+    if not _OPENRGB:
+        msg = (
+            "[RGB] openrgb-python is not installed. "
+            "Run: pip install openrgb-python — then launch the OpenRGB app before using this."
+        )
+        print(msg)
+        return msg
+
+    key = color_name.lower().strip()
+    rgb = _RGB_COLOR_MAP.get(key)
+
+    # Try partial match if exact key not found
+    if rgb is None:
+        for k, v in _RGB_COLOR_MAP.items():
+            if k in key or key in k:
+                rgb = v
+                break
+
+    if rgb is None:
+        rgb = (255, 255, 255)  # default: white
+
+    try:
+        client = OpenRGBClient()
+        color  = RGBColor(*rgb)
+        for device in client.devices:
+            device.set_color(color)
+        result = f"Hardware RGB color changed to '{color_name}' {rgb}."
+        print(f"[RGB] ✅ {result}")
+        try:
+            from memory.memory_manager import save_to_nexus
+            save_to_nexus("Last RGB Command", result)
+        except Exception:
+            pass
+        return result
+    except Exception as e:
+        msg = f"[RGB] Hardware color change failed: {e}. Is OpenRGB running?"
+        print(msg)
+        return msg
+
+
 ACTION_MAP = {
     "volume_up":               volume_up,
     "volume_down":             volume_down,
@@ -523,6 +595,21 @@ ACTION_MAP = {
     "escape":                  press_escape,
     "press_escape":            press_escape,
     "cancel":                  press_escape,
+    # RGB Hardware Control
+    "change_hardware_color":   change_hardware_color,
+    "rgb_color":               change_hardware_color,
+    "keyboard_color":          change_hardware_color,
+    "change_keyboard_color":   change_hardware_color,
+    "change_rgb":              change_hardware_color,
+    "set_rgb":                 change_hardware_color,
+    "rgb_red":                 lambda: change_hardware_color("red"),
+    "rgb_blue":                lambda: change_hardware_color("blue"),
+    "rgb_green":               lambda: change_hardware_color("green"),
+    "rgb_white":               lambda: change_hardware_color("white"),
+    "rgb_off":                 lambda: change_hardware_color("off"),
+    "rgb_glow":                lambda: change_hardware_color("glowing"),
+    "rgb_purple":              lambda: change_hardware_color("purple"),
+    "rgb_rainbow":             lambda: change_hardware_color("rainbow"),
 }
 
 def _detect_action(description: str) -> dict:
@@ -597,6 +684,12 @@ Examples:
 - "press f5" → {{"action": "press_key", "value": "f5"}}
 - "enter'a bas" → {{"action": "enter", "value": null}}
 - "escape'e bas" → {{"action": "escape", "value": null}}
+- "change keyboard color to red" → {{"action": "change_hardware_color", "value": "red"}}
+- "set keyboard lights to blue" → {{"action": "change_hardware_color", "value": "blue"}}
+- "make my keyboard glow" → {{"action": "change_hardware_color", "value": "glowing"}}
+- "rgb red" → {{"action": "change_hardware_color", "value": "red"}}
+- "keyboard rengi kırmızı yap" → {{"action": "change_hardware_color", "value": "red"}}
+- "turn off rgb" → {{"action": "change_hardware_color", "value": "off"}}
 
 IMPORTANT:
 - Always return one of the available actions listed above.
@@ -686,6 +779,11 @@ def computer_settings(
             return f"Scrolled {'up' if action == 'scroll_up' else 'down'}."
         except Exception as e:
             return f"Scroll failed: {e}"
+
+    if action in ("change_hardware_color", "rgb_color", "keyboard_color",
+                  "change_keyboard_color", "change_rgb", "set_rgb"):
+        color = str(value or params.get("color", "white"))
+        return change_hardware_color(color)
 
     func = ACTION_MAP.get(action)
     if not func:

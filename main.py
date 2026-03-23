@@ -37,6 +37,7 @@ from actions.deep_analyzer    import deep_analyzer
 from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
 from actions.market_predictor      import predict_market
+from actions.self_modifier         import self_modifier
 from agent.heartbeat               import HeartbeatDaemon
 
 def get_base_dir():
@@ -155,14 +156,15 @@ TOOL_DECLARATIONS = [
     },
 {
     "name": "web_search",
-    "description": "Searches the web for any information.",
+    "description": "Searches the web for any information. Use mode='deep' for Perplexity-style iterative multi-source research. Use mode='social' with query=URL to analyze a Reddit/Twitter/X page and extract strategies.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "query":  {"type": "STRING", "description": "Search query"},
-            "mode":   {"type": "STRING", "description": "search (default) or compare"},
-            "items":  {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Items to compare"},
-            "aspect": {"type": "STRING", "description": "price | specs | reviews"}
+            "query":   {"type": "STRING", "description": "Search query or URL (for social mode)"},
+            "mode":    {"type": "STRING", "description": "search (default) | compare | deep | social"},
+            "items":   {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Items to compare"},
+            "aspect":  {"type": "STRING", "description": "price | specs | reviews"},
+            "context": {"type": "STRING", "description": "What to extract/analyze (for social mode)"}
         },
         "required": ["query"]
     }
@@ -254,6 +256,7 @@ TOOL_DECLARATIONS = [
         "Controls the computer: volume, brightness, window management, keyboard shortcuts, "
         "typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, "
         "scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. "
+        "ALSO controls physical RGB hardware lighting (keyboard/mouse color) — use action: change_hardware_color with value: red/blue/green/glowing/off etc. "
         "ALSO use for repeated actions: 'refresh 10 times', 'reload page 5 times' → action: reload_n, value: 10. "
         "Use for ANY single computer control command — even if repeated N times. "
         "NEVER route simple computer commands to agent_task."
@@ -261,9 +264,9 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action":      {"type": "STRING", "description": "The action to perform (if known). For repeated reload: 'reload_n'"},
+            "action":      {"type": "STRING", "description": "The action to perform (if known). For repeated reload: 'reload_n'. For RGB: 'change_hardware_color'"},
             "description": {"type": "STRING", "description": "Natural language description of what to do"},
-            "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, number of times, etc."}
+            "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, number of times, color name (red/blue/glowing/etc.)"}
         },
         "required": []
     }
@@ -552,6 +555,31 @@ TOOL_DECLARATIONS = [
         },
         "required": ["asset"]
     }
+},
+{
+    "name": "self_modifier",
+    "description": (
+        "Axiom's self-modification engine. Allows Axiom to read its own source code, "
+        "write new Python action scripts into the actions/ directory, edit existing ones, "
+        "or use AI to generate entirely new capabilities on the fly. "
+        "Use when the user asks Axiom to add a new skill, grant itself a new tool, "
+        "edit its own behavior, or list available actions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {
+                "type": "STRING",
+                "description": "read_source | write_action | edit_action | generate_action | list_actions"
+            },
+            "file_path":    {"type": "STRING", "description": "Relative path to source file (for read_source)"},
+            "tool_name":    {"type": "STRING", "description": "Snake_case name for the new/existing tool"},
+            "description":  {"type": "STRING", "description": "What the tool should do (for generate_action / write_action)"},
+            "code":         {"type": "STRING", "description": "Raw Python source code (for write_action)"},
+            "new_code":     {"type": "STRING", "description": "Replacement Python source code (for edit_action)"}
+        },
+        "required": ["action"]
+    }
 }
 ]
 
@@ -800,6 +828,16 @@ class AxiomLive:
             elif name == "predict_market":
                 r = await loop.run_in_executor(
                     None, lambda: predict_market(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "self_modifier":
+                r = await loop.run_in_executor(
+                    None, lambda: self_modifier(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak

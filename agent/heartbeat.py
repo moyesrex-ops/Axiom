@@ -20,11 +20,30 @@ def _get_api_key():
     except Exception:
         return ""
 
+def _load_soul_context() -> str:
+    """Load last 5 lessons from the Trading Soul for OODA reflection."""
+    soul_path = get_base_dir() / "memory" / "trading_soul.json"
+    if not soul_path.exists():
+        return "No past lessons recorded."
+    try:
+        with open(soul_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        lessons = data.get("lessons_learned", [])
+        if lessons:
+            return "\n".join([f"- {l['lesson']}" for l in lessons[-5:]])
+    except Exception:
+        pass
+    return "No past lessons recorded."
+
 class HeartbeatDaemon:
     """
-    A relentless background daemon inspired by Sovereign Automaton architecture.
-    Wakes up every N seconds continuously, checking open trades and scanning the horizon.
-    If a trade is fundamentally broken, it will override and close it independently.
+    Conway Automaton Event Loop — Sovereign OODA (Observe, Orient, Decide, Act) Daemon.
+
+    Every pulse cycle it:
+      1. OBSERVE  — Fetches all market positions via BrokerManager (MT5 + Crypto + any connected exchange).
+      2. ORIENT   — Reflects on past lessons from trading_soul.json.
+      3. DECIDE   — Runs a Gemini swarm debate to determine whether to HOLD, CLOSE, or flag new trades.
+      4. ACT      — Executes autonomous closes via BrokerManager and logs everything to the Nexus Brain.
     """
     def __init__(self, speak_func, log_func):
         self.speak = speak_func
@@ -39,97 +58,137 @@ class HeartbeatDaemon:
             await self._pulse()
 
     async def _pulse(self):
-        if mt5 is None: return
         try:
-            # We don't initialize here to avoid locking; we assume MT5 logic handles its own state
-            # but for safety, we just check if it's responsive.
-            info = mt5.terminal_info()
-            if info is None: return
-            
-            positions = mt5.positions_get()
+            # ── OBSERVE ──────────────────────────────────────────────────────
+            from core.broker_manager import BrokerManager
+            broker = BrokerManager()
+            positions = await asyncio.to_thread(broker.get_all_positions)
+
             if not positions:
                 return
-                
-            self.log(f"[HEARTBEAT] Evaluating {len(positions)} active market positions...")
-            
-            pos_data = []
+
+            self.log(f"[HEARTBEAT] OBSERVE: {len(positions)} active position(s) detected across all markets.")
+
+            pos_summary = []
             for p in positions:
-                tick = mt5.symbol_info_tick(p.symbol)
-                if tick is None: continue
-                current_price = tick.bid if p.type == mt5.ORDER_TYPE_BUY else tick.ask
-                pos_data.append(f"Ticket:{p.ticket} | Symbol:{p.symbol} | Type:{'BUY' if p.type==mt5.ORDER_TYPE_BUY else 'SELL'} | Open:{p.price_open} | Cur:{current_price} | PnL:{p.profit}")
+                pos_summary.append(
+                    f"Market:{p['market']} | Symbol:{p['symbol']} | "
+                    f"Type:{p['type']} | PnL:{p['unrealized_pnl']:.2f} | "
+                    f"Ticket:{p['ticket']} | Volume:{p['volume']}"
+                )
+            market_state = "\n".join(pos_summary)
 
-            if not pos_data: return
-            context = "\n".join(pos_data)
+            # ── ORIENT ───────────────────────────────────────────────────────
+            soul_context = await asyncio.to_thread(_load_soul_context)
 
+            # ── DECIDE ───────────────────────────────────────────────────────
             import google.generativeai as genai
             genai.configure(api_key=_get_api_key())
             model = genai.GenerativeModel("gemini-2.5-flash")
-            
+
             prompt = f"""
-            [SENTINEL CORE: AUTOMATED RISK OVERRIDE]
-            You are the Axiom Background Heartbeat Daemon.
-            Your task is CAPITOL PROTECTION. Analyze these active trades:
-            
-            {context}
-            
-            RISK ASSESSMENT CRITERIA:
-            - If PnL is deeply negative and structure has broken = CLOSE.
-            - If PnL is at extreme profit and structure is hitting resistance = CLOSE.
-            
-            TASK: Output a JSON array of their Ticket numbers to close.
-            If all positions are safe, output [].
-            
-            STRICT OUTPUT: RETURN THE JSON ARRAY ONLY. NO EXPLANATION. NO MARKDOWN.
-            """
-            
+[AXIOM SOVEREIGN OODA LOOP — HEARTBEAT DAEMON]
+You are the inner autonomous mind of Axiom, running silently in the background.
+
+── OBSERVE ──
+Current open positions across ALL connected markets:
+{market_state}
+
+── ORIENT ──
+Past trading lessons (do NOT repeat these mistakes):
+{soul_context}
+
+── DECIDE ──
+You must now decide for each position: HOLD, CLOSE, or MONITOR_CLOSELY.
+
+DECISION CRITERIA:
+- CLOSE if: PnL is deeply negative AND market structure has broken, OR PnL is at extreme profit hitting resistance.
+- HOLD if: position is within normal volatility and thesis is intact.
+- MONITOR_CLOSELY if: position is borderline — not urgent but needs watching.
+
+Think step by step. Consider risk, reward, and momentum.
+Then output a JSON object in this EXACT format:
+{{
+  "decisions": [
+    {{"ticket": "TICKET_ID", "action": "HOLD|CLOSE|MONITOR_CLOSELY", "reason": "brief reason"}}
+  ],
+  "overall_assessment": "one sentence market overview"
+}}
+
+STRICT: Output ONLY the JSON. No markdown. No extra text.
+"""
             response = await asyncio.to_thread(model.generate_content, prompt)
             text = response.text.strip()
             text = text.replace("```json", "").replace("```", "").strip()
-            
-            # Very strict parse
-            if not text.startswith("["): return
-            tickets_to_close = json.loads(text)
-            
-            for t in tickets_to_close:
-                for p in positions:
-                    if p.ticket == t:
-                        self.log(f"[HEARTBEAT] Executing autonomous capital protection on ticket {t}")
-                        if self.speak:
-                            self.speak("Heartbeat daemon triggered. Autonomously terminating an open position to secure capital structure.")
-                        
-                        # Neural Link: Axiom remembers its autonomous actions
+
+            if not text.startswith("{"):
+                return
+
+            decision_data = json.loads(text)
+            decisions = decision_data.get("decisions", [])
+            overall = decision_data.get("overall_assessment", "")
+
+            if overall:
+                self.log(f"[HEARTBEAT] ORIENT: {overall}")
+
+            # ── ACT ──────────────────────────────────────────────────────────
+            for decision in decisions:
+                ticket = str(decision.get("ticket", ""))
+                action = decision.get("action", "HOLD").upper()
+                reason = decision.get("reason", "")
+
+                if action == "CLOSE":
+                    self.log(f"[HEARTBEAT] ACT: Closing ticket {ticket} — {reason}")
+                    if self.speak:
+                        self.speak(f"Heartbeat daemon triggered. Autonomously closing a position to protect capital.")
+
+                    success = await asyncio.to_thread(broker.close_position_by_ticket, ticket)
+
+                    # Find position data for soul reflection
+                    pos_data = next((p for p in positions if str(p["ticket"]) == ticket), {})
+                    pnl = pos_data.get("unrealized_pnl", 0)
+                    symbol = pos_data.get("symbol", ticket)
+
+                    if success:
+                        self.log(f"[HEARTBEAT] ✅ Position {ticket} closed successfully.")
                         try:
-                            from memory.memory_manager import save_to_nexus
-                            save_to_nexus(f"Autonomous Trade Close: {p.symbol}", f"Daemon closed ticket {t} at {price} due to risk override.")
-                        except: pass
-                        
-                        tick = mt5.symbol_info_tick(p.symbol)
-                        price = tick.bid if p.type == mt5.ORDER_TYPE_BUY else tick.ask
-                        action_type = mt5.ORDER_TYPE_SELL if p.type == mt5.ORDER_TYPE_BUY else mt5.ORDER_TYPE_BUY
-                        
-                        req = {
-                            "action": mt5.TRADE_ACTION_DEAL,
-                            "symbol": p.symbol,
-                            "volume": p.volume,
-                            "type": action_type,
-                            "position": p.ticket,
-                            "price": price,
-                            "deviation": 20,
-                            "magic": 234000,
-                            "comment": "Daemon Auto-Close",
-                            "type_time": mt5.ORDER_TIME_GTC,
-                            "type_filling": mt5.ORDER_FILLING_IOC,
-                        }
-                        
-                        res = mt5.order_send(req)
-                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                            # Evolve!
-                            try:
-                                from memory.trading_soul import reflect_on_trade
-                                reflect_on_trade(p.symbol, p.profit, "Heartbeat daemon automatically closed trade due to risk logic.")
-                            except Exception as er:
-                                self.log(f"Soul reflection error: {er}")
-                                
+                            from memory.trading_soul import reflect_on_trade
+                            reflect_on_trade(symbol, pnl, f"Heartbeat OODA daemon closed trade: {reason}")
+                        except Exception as er:
+                            self.log(f"[HEARTBEAT] Soul reflection error: {er}")
+                    else:
+                        self.log(f"[HEARTBEAT] ⚠️ Close attempt for {ticket} failed or not confirmed.")
+
+                    # Always log to Nexus Brain
+                    try:
+                        from memory.memory_manager import save_to_nexus
+                        save_to_nexus(
+                            f"Autonomous Close: {symbol}",
+                            f"Daemon closed ticket {ticket} | PnL: {pnl} | Reason: {reason}"
+                        )
+                    except Exception:
+                        pass
+
+                elif action == "MONITOR_CLOSELY":
+                    self.log(f"[HEARTBEAT] 👁️ Monitoring closely: ticket {ticket} — {reason}")
+                    try:
+                        from memory.memory_manager import save_to_nexus
+                        save_to_nexus(
+                            f"Monitor Flag: {ticket}",
+                            f"Daemon flagged for close watch | Reason: {reason}"
+                        )
+                    except Exception:
+                        pass
+
+            # Log the full pulse to Nexus Brain
+            try:
+                from memory.memory_manager import save_to_nexus
+                save_to_nexus(
+                    "Last Heartbeat Pulse",
+                    f"Positions: {len(positions)} | Decisions: {len(decisions)} | {overall}"
+                )
+            except Exception:
+                pass
+
         except Exception as e:
             self.log(f"[HEARTBEAT] Pulse encountered turbulence: {e}")

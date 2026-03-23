@@ -18,81 +18,170 @@ def get_api_key() -> str:
     except Exception:
         return ""
 
+def _load_soul_lessons() -> str:
+    """Load past trading lessons from the soul to avoid repeating mistakes."""
+    import sys
+    from pathlib import Path
+    base = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+    soul_path = base / "memory" / "trading_soul.json"
+    if not soul_path.exists():
+        return "No past lessons recorded yet."
+    try:
+        with open(soul_path, "r", encoding="utf-8") as f:
+            soul_data = json.load(f)
+        lessons = soul_data.get("lessons_learned", [])
+        if lessons:
+            return "\n".join([f"- {l['lesson']}" for l in lessons[-10:]])
+    except Exception:
+        pass
+    return "No past lessons recorded yet."
+
+
+def _run_swarm_agent(model, role: str, asset: str, soul_lessons: str, context: str) -> str:
+    """
+    Run a single swarm agent with a specific role and return its analysis.
+    Each agent is a simulated expert human analyst.
+    """
+    role_prompts = {
+        "macro_economist": f"""
+You are a Macro-Economist AI agent participating in a market swarm debate for {asset}.
+Your sole focus: macroeconomic forces — interest rates, inflation, GDP trends, geopolitical risk,
+central bank policy, and global capital flows.
+
+SOUL LESSONS (don't repeat past mistakes): {soul_lessons}
+ADDITIONAL CONTEXT: {context}
+
+Provide your macroeconomic verdict on {asset}: Bull/Bear/Neutral with specific reasoning.
+Be brutally honest. End with: VERDICT: [BULL/BEAR/NEUTRAL] | CONFIDENCE: [0-100]%
+""",
+        "technical_analyst": f"""
+You are a Technical Analyst AI agent participating in a market swarm debate for {asset}.
+Your sole focus: price action, chart structure, momentum indicators (RSI, MACD), 
+support/resistance levels, volume analysis, and candlestick patterns.
+
+SOUL LESSONS (don't repeat past mistakes): {soul_lessons}
+ADDITIONAL CONTEXT: {context}
+
+Provide your technical verdict on {asset}: Bull/Bear/Neutral with specific structural reasoning.
+End with: VERDICT: [BULL/BEAR/NEUTRAL] | CONFIDENCE: [0-100]%
+""",
+        "risk_manager": f"""
+You are a Risk Manager AI agent participating in a market swarm debate for {asset}.
+Your sole focus: volatility assessment, drawdown risk, position sizing logic, liquidity concerns,
+black swan scenarios, and whether the risk/reward ratio justifies a trade.
+
+SOUL LESSONS (don't repeat past mistakes): {soul_lessons}
+ADDITIONAL CONTEXT: {context}
+
+Provide your risk assessment for {asset}. Should we trade it, or is the risk too high?
+End with: VERDICT: [PROCEED/AVOID/CAUTION] | CONFIDENCE: [0-100]%
+""",
+    }
+
+    prompt = role_prompts.get(role, "")
+    if not prompt:
+        return f"Unknown role: {role}"
+
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Agent '{role}' failed: {e}"
+
+
+def _synthesize_debate(model, asset: str, macro: str, technical: str, risk: str) -> str:
+    """Have a final synthesis pass that reads all three agent outputs and produces a consensus."""
+    prompt = f"""
+[SWARM CONSENSUS ENGINE — AXIOM]
+Three expert AI agents have analysed {asset}. Your job is to synthesise their debate
+into a final, actionable intelligence report.
+
+─── MACRO-ECONOMIST REPORT ───
+{macro}
+
+─── TECHNICAL ANALYST REPORT ───
+{technical}
+
+─── RISK MANAGER REPORT ───
+{risk}
+
+SYNTHESIS INSTRUCTIONS:
+1. Identify agreement and conflict between agents.
+2. Weigh each perspective (macro: 30%, technical: 40%, risk: 30%).
+3. Produce a FINAL VERDICT: Bullish / Bearish / Neutral.
+4. Provide an OVERALL CONFIDENCE score (0-100%).
+5. State a clear suggested action: BUY | SELL | HOLD | AVOID.
+6. List the top 3 risks that could invalidate this thesis.
+
+Output as a clean, professional diagnostic. Be direct and avoid AI filler.
+"""
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Synthesis failed: {e}"
+
+
 def predict_market(parameters: dict = None, player=None, speak=None) -> str:
     """
-    Acts as a Swarm Predictor. Gathers context, synthesizes an analysis, 
-    and returns a structured prediction on the trajectory of a market.
+    MiroFish-style Swarm Market Predictor.
+
+    Spawns three AI analyst agents (Macro-Economist, Technical Analyst, Risk Manager)
+    that each independently analyse the asset and then debate to reach a consensus.
+    All results are automatically persisted to the Nexus Brain.
     """
     params = parameters or {}
     asset = params.get("asset", "EURUSD")
     context = params.get("context", "")
 
     if speak:
-        speak(f"Initiating swarm prediction sequence for {asset}.")
+        speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
 
     try:
         import google.generativeai as genai
         genai.configure(api_key=get_api_key())
-        
-        # Load the Trading Soul to prevent repeating mistakes
-        import sys
-        from pathlib import Path
-        if getattr(sys, "frozen", False):
-            base = Path(sys.executable).parent
-        else:
-            base = Path(__file__).resolve().parent.parent
-            
-        soul_path = base / "memory" / "trading_soul.json"
-        soul_lessons = ""
-        if soul_path.exists():
-            try:
-                with open(soul_path, "r", encoding="utf-8") as f:
-                    soul_data = json.load(f)
-                    lessons = soul_data.get("lessons_learned", [])
-                    if lessons:
-                        soul_lessons = "\n".join([f"- {l['lesson']}" for l in lessons])
-            except: pass
-            
-        # Use the specific Flash model tier requested by the user
         model = genai.GenerativeModel("gemini-2.5-pro")
-        
-        prompt = f"""
-        [CRITICAL PRECISION MODE: FLASH-3.0]
-        You are the Master Prediction Node of Axiom. 
-        You are tasked with analyzing the market trajectory for the asset: {asset}.
-        
-        YOUR EVOLVED TRADING SOUL (Do not repeat these past mistakes):
-        {soul_lessons if soul_lessons else "No past trauma/lessons recorded yet."}
-        
-        Additional context provided by the user or recent queries:
-        {context}
-        
-        STRICT ANALYSIS PROTOCOL:
-        1. Macro Analysis: Fundamental forces at play.
-        2. Micro Analysis: Structural trends, candle momentum, volume.
-        3. Sentiment Bias: Current market greed/fear index.
-        4. SPECIFIC VERDICT: Bullish, Bearish, or Neutral.
-        5. CONFIDENCE: X% (numerical only).
-        
-        Output as a clean diagnostic report. Be brutal, logical, and avoid generic AI filler.
-        """
-        
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        
+
+        soul_lessons = _load_soul_lessons()
+
+        print(f"[SwarmPredictor] 🤖 Spawning Macro-Economist agent for {asset}...")
+        macro_report = _run_swarm_agent(model, "macro_economist", asset, soul_lessons, context)
+
+        print(f"[SwarmPredictor] 📈 Spawning Technical Analyst agent for {asset}...")
+        technical_report = _run_swarm_agent(model, "technical_analyst", asset, soul_lessons, context)
+
+        print(f"[SwarmPredictor] ⚖️ Spawning Risk Manager agent for {asset}...")
+        risk_report = _run_swarm_agent(model, "risk_manager", asset, soul_lessons, context)
+
+        print(f"[SwarmPredictor] 🔮 Synthesising swarm consensus for {asset}...")
+        consensus = _synthesize_debate(model, asset, macro_report, technical_report, risk_report)
+
+        full_report = (
+            f"═══ AXIOM SWARM PREDICTION: {asset} ═══\n\n"
+            f"── MACRO-ECONOMIST ──\n{macro_report}\n\n"
+            f"── TECHNICAL ANALYST ──\n{technical_report}\n\n"
+            f"── RISK MANAGER ──\n{risk_report}\n\n"
+            f"══ SWARM CONSENSUS ══\n{consensus}"
+        )
+
         if speak:
-            speak(f"Market prediction for {asset} is complete. You can view the full diagnostic in the logs.")
-        
-        # Neural Link: Automatically persist this prediction for infinite context
+            speak(f"Swarm debate complete for {asset}. Consensus achieved. Full diagnostic is now in the logs.")
+
+        # Neural Link: Persist to Nexus Brain for infinite context
         try:
             from memory.memory_manager import save_to_nexus
-            save_to_nexus(f"Market Prediction: {asset}", text[:2000])
-        except: pass
-        
-        return f"Prediction Diagnostic for {asset}:\n\n{text}"
+            save_to_nexus(f"Swarm Prediction: {asset}", consensus[:2000])
+            save_to_nexus(f"Macro Report: {asset}", macro_report[:1000])
+            save_to_nexus(f"Technical Report: {asset}", technical_report[:1000])
+            save_to_nexus(f"Risk Report: {asset}", risk_report[:1000])
+        except Exception:
+            pass
+
+        return full_report
 
     except Exception as e:
-        error_msg = f"Prediction engine failed: {str(e)}"
+        error_msg = f"Swarm prediction engine failed: {str(e)}"
         if speak:
-            speak("My prediction engines encountered an anomaly.")
+            speak("My prediction swarm encountered an anomaly.")
         return error_msg
+
