@@ -57,13 +57,10 @@ def _get_api_key() -> str:
         return json.load(f)["gemini_api_key"]
 
 
-def open_browser():
-    pyautogui.press("win")
-    time.sleep(0.4)
-    pyautogui.write("browser", interval=0.05)
-    time.sleep(0.3)
-    pyautogui.press("enter")
-    time.sleep(2.0)
+def open_browser(url: str):
+    import webbrowser
+    webbrowser.open(url)
+    time.sleep(1.5)
 
 
 def find_video_thumbnails() -> list[tuple[int, int]]:
@@ -323,16 +320,11 @@ def _handle_play(parameters: dict, player) -> str:
     if player:
         player.write_log(f"[YouTube] Searching: {query}")
 
-    open_browser()
-
     search_query = query.replace(" ", "+")
     url = f"https://www.youtube.com/results?search_query={search_query}"
 
-    pyautogui.hotkey("ctrl", "l")
-    time.sleep(0.3)
-    pyautogui.write(url, interval=0.02)
-    pyautogui.press("enter")
-    time.sleep(3.5)
+    open_browser(url)
+    time.sleep(2.0)
 
     thumbnails = find_video_thumbnails()
 

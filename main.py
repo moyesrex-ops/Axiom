@@ -533,7 +533,7 @@ class AxiomLive:
         # Audio tweaks
         self.is_speaking       = False
         self.VOLUME_MULTIPLIER = 3.0   # Boost soft whispers
-        self.VAD_THRESHOLD     = 2500  # Higher RMS threshold so it doesn't trigger on its own speakers
+        self.VAD_THRESHOLD     = 1000  # Lowered so the user can interrupt Axiom without shouting
 
     def speak(self, text: str):
         """Thread-safe speak — any thread can call this."""
