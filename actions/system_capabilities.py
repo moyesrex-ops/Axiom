@@ -1,6 +1,12 @@
 from core.capabilities import collect_capabilities, format_capability_report
 from memory.memory_manager import save_to_nexus
-from memory.runtime_store import log_capability, log_event, recent_events, recent_failures
+from memory.runtime_store import (
+    log_capability,
+    log_event,
+    recent_events,
+    recent_failures,
+    recent_task_runs,
+)
 
 
 def _snapshot_capabilities() -> None:
@@ -47,4 +53,16 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             )
         return "\n".join(lines)
 
-    return "Unknown action. Use summary, failures, or events."
+    if action == "tasks":
+        rows = recent_task_runs(limit=limit)
+        if not rows:
+            return "No recent task checkpoints recorded."
+        lines = ["Recent task checkpoints"]
+        for row in rows:
+            lines.append(
+                f"- [{row['task_id']}] {row['status']} | {row['goal'][:90]} | "
+                f"updated={row['updated_at']}"
+            )
+        return "\n".join(lines)
+
+    return "Unknown action. Use summary, failures, events, or tasks."

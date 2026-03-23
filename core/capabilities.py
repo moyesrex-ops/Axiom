@@ -1,11 +1,13 @@
 import importlib.util
 import json
+import os
 import socket
 import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
 from core.runtime_config import load_runtime_config
+from core.secret_config import get_secret
 
 
 def get_base_dir() -> Path:
@@ -57,11 +59,16 @@ def _is_tcp_reachable(url: str, timeout: float = 0.35) -> bool:
 
 
 def _api_key_configured() -> bool:
-    try:
-        data = json.loads(API_CONFIG_PATH.read_text(encoding="utf-8"))
-        return bool(data.get("gemini_api_key"))
-    except Exception:
-        return False
+    return bool(get_secret("gemini_api_key", ["GEMINI_API_KEY"]))
+
+
+def _telegram_token_configured() -> bool:
+    return bool(
+        get_secret(
+            "telegram_bot_token",
+            ["AXIOM_TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"],
+        )
+    )
 
 
 def _integration_candidates() -> dict:
@@ -110,6 +117,7 @@ def collect_capabilities() -> dict:
     candidates = _integration_candidates()
     personaplex_cfg = runtime.get("personaplex", {})
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
+    telegram_cfg = runtime.get("channels", {}).get("telegram", {})
 
     return {
         "voice_backend": runtime.get("voice_backend", "gemini_live"),
@@ -128,6 +136,9 @@ def collect_capabilities() -> dict:
         "personaplex_enabled": bool(personaplex_cfg.get("enabled", False)),
         "personaplex_server_url": personaplex_url,
         "personaplex_server_reachable": bool(personaplex_url) and _is_tcp_reachable(personaplex_url),
+        "telegram_bridge_enabled": bool(telegram_cfg.get("enabled", False)),
+        "telegram_bot_configured": _telegram_token_configured(),
+        "telegram_allowed_chat_count": len(telegram_cfg.get("allowed_chat_ids", []) or []),
     }
 
 
@@ -153,6 +164,11 @@ def format_capability_status() -> str:
             f"PersonaPlex: configured at {caps['personaplex_server_url']}"
             if caps["personaplex_enabled"]
             else "PersonaPlex: disabled"
+        ),
+        (
+            "Telegram bridge: ready"
+            if caps["telegram_bridge_enabled"] and caps["telegram_bot_configured"]
+            else "Telegram bridge: disabled or missing bot token"
         ),
     ]
     return "[CAPABILITY STATUS]\n" + "\n".join(f"- {line}" for line in lines)
@@ -182,6 +198,16 @@ def format_capability_report() -> str:
             f"PersonaPlex server: reachable at {caps['personaplex_server_url']}"
             if caps["personaplex_server_reachable"]
             else f"PersonaPlex server: {'configured but offline' if caps['personaplex_enabled'] else 'disabled'}"
+        ),
+        (
+            f"Telegram bridge: enabled ({caps['telegram_allowed_chat_count']} allowed chats)"
+            if caps["telegram_bridge_enabled"]
+            else "Telegram bridge: disabled"
+        ),
+        (
+            "Telegram bot token: configured"
+            if caps["telegram_bot_configured"]
+            else "Telegram bot token: missing"
         ),
     ]
     return "\n".join(lines)

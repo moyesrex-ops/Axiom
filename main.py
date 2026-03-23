@@ -46,6 +46,8 @@ from actions.swarm_orchestrator    import swarm_orchestrator
 from agent.heartbeat               import HeartbeatDaemon
 from core.capabilities             import format_capability_status
 from core.runtime_config           import load_runtime_config
+from core.secret_config            import get_secret
+from core.telegram_bridge          import start_telegram_bridge
 from memory.runtime_store          import init_runtime_store
 
 def get_base_dir():
@@ -66,8 +68,7 @@ CHUNK_SIZE          = 1024
 pya = pyaudio.PyAudio()
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return get_secret("gemini_api_key", ["GEMINI_API_KEY"])
 
 def _load_system_prompt() -> str:
     try:
@@ -1211,6 +1212,7 @@ def main():
 
     def runner():
         ui.wait_for_api_key()
+        start_telegram_bridge(log_func=ui.write_log)
 
         axiom = AxiomLive(ui)
         try:

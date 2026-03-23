@@ -20,5 +20,13 @@
     "mirofish_path": "",
     "automaton_path": "",
     "personaplex_path": ""
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "allowed_chat_ids": [],
+      "poll_seconds": 1.5,
+      "queue_plain_messages": true
+    }
   }
 }

@@ -58,6 +58,17 @@ def init_runtime_store() -> None:
                     details TEXT NOT NULL DEFAULT '',
                     last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+
+                CREATE TABLE IF NOT EXISTS task_runs (
+                    task_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    goal TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    result_text TEXT NOT NULL DEFAULT '',
+                    error_text TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
                 """
             )
             conn.commit()
@@ -168,5 +179,64 @@ def capability_rows() -> list[dict]:
             FROM capabilities
             ORDER BY name
             """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def upsert_task_run(
+    task_id: str,
+    goal: str,
+    status: str,
+    result_text: str = "",
+    error_text: str = "",
+    metadata: dict | None = None,
+) -> None:
+    init_runtime_store()
+    with _LOCK, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO task_runs (
+                task_id, goal, status, result_text, error_text, metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id) DO UPDATE SET
+                updated_at = CURRENT_TIMESTAMP,
+                goal = excluded.goal,
+                status = excluded.status,
+                result_text = excluded.result_text,
+                error_text = excluded.error_text,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                str(task_id or "").strip(),
+                str(goal or "").strip(),
+                str(status or "").strip(),
+                str(result_text or ""),
+                str(error_text or ""),
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+
+
+def recent_task_runs(limit: int = 10) -> list[dict]:
+    init_runtime_store()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                task_id,
+                created_at,
+                updated_at,
+                goal,
+                status,
+                result_text,
+                error_text,
+                metadata_json
+            FROM task_runs
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            (int(limit),),
         ).fetchall()
     return [dict(row) for row in rows]

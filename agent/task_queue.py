@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Any
 
+from memory.runtime_store import log_event, upsert_task_run
+
 
 class TaskStatus(Enum):
     PENDING    = "pending"
@@ -63,12 +65,24 @@ class TaskQueue:
         )
         self._worker_thread.start()
         print("[TaskQueue] ✅ Started")
+        log_event("task_queue", "started", "Task queue worker started.")
 
     def stop(self) -> None:
         self._running = False
         with self._condition:
             self._condition.notify_all()
         print("[TaskQueue] 🔴 Stopped")
+        log_event("task_queue", "stopped", "Task queue worker stopped.")
+
+    def _snapshot(self, task: Task, metadata: dict | None = None) -> None:
+        upsert_task_run(
+            task_id=task.task_id,
+            goal=task.goal,
+            status=task.status.value,
+            result_text="" if task.result is None else str(task.result),
+            error_text=task.error,
+            metadata=metadata or {"priority": task.priority},
+        )
 
     def submit(
         self,
@@ -95,6 +109,8 @@ class TaskQueue:
             self._condition.notify()
 
         print(f"[TaskQueue] 📥 Task queued: [{task_id}] {goal[:60]}")
+        self._snapshot(task)
+        log_event("task_queue", "queued", f"[{task_id}] {goal[:300]}")
         return task_id
 
     def cancel(self, task_id: str) -> bool:
@@ -109,6 +125,8 @@ class TaskQueue:
             task.cancel_flag.set()
             task.status = TaskStatus.CANCELLED
             print(f"[TaskQueue] 🚫 Task cancelled: [{task_id}]")
+            self._snapshot(task)
+            log_event("task_queue", "cancelled", f"[{task_id}] {task.goal[:300]}")
             return True
 
     def get_status(self, task_id: str) -> dict | None:
@@ -154,6 +172,8 @@ class TaskQueue:
                         self._queue.remove(task)
                     except ValueError:
                         pass
+                    self._snapshot(task)
+                    log_event("task_queue", "running", f"[{task.task_id}] {task.goal[:300]}")
 
             if task:
                 threading.Thread(
@@ -188,21 +208,31 @@ class TaskQueue:
                     task.status = TaskStatus.COMPLETED
                     task.result = result
                 self._active_count -= 1
+                self._snapshot(task)
 
-            if task.on_complete and not task.cancel_flag.is_set():
+            if task.on_complete:
                 try:
-                    task.on_complete(task.task_id, result)
+                    callback_result = result if not task.cancel_flag.is_set() else "Task cancelled."
+                    task.on_complete(task.task_id, callback_result)
                 except Exception as e:
                     print(f"[TaskQueue] ⚠️ on_complete callback error: {e}")
 
             print(f"[TaskQueue] ✅ Completed: [{task.task_id}]")
+            log_event("task_queue", "completed", f"[{task.task_id}] {task.goal[:300]}")
 
         except Exception as e:
             with self._lock:
                 task.status = TaskStatus.FAILED
                 task.error  = str(e)
                 self._active_count -= 1
+                self._snapshot(task)
             print(f"[TaskQueue] ❌ Failed: [{task.task_id}] {e}")
+            log_event("task_queue", "failed", f"[{task.task_id}] {task.goal[:300]} | {e}")
+            if task.on_complete:
+                try:
+                    task.on_complete(task.task_id, f"Task failed: {e}")
+                except Exception as callback_error:
+                    print(f"[TaskQueue] ⚠️ on_complete callback error: {callback_error}")
 
         with self._condition:
             self._condition.notify()

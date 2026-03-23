@@ -40,6 +40,14 @@ DEFAULT_RUNTIME_CONFIG = {
         "automaton_path": "",
         "personaplex_path": "",
     },
+    "channels": {
+        "telegram": {
+            "enabled": False,
+            "allowed_chat_ids": [],
+            "poll_seconds": 1.5,
+            "queue_plain_messages": True,
+        }
+    },
 }
 
 

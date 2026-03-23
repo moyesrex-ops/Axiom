@@ -27,10 +27,12 @@ Axiom is no longer just a trading shell. The current repo combines:
 - A planner/executor queue for multi-step autonomous tasks.
 - Browser, screen, desktop, file, and terminal control.
 - Long-term memory plus a durable runtime event/failure store.
+- Task lifecycle checkpoints persisted to SQLite.
 - MT5 trading with stop-loss / take-profit defaults and post-trade reflection.
 - Hardware RGB control through OpenRGB.
 - Prompt generation, public lead research, and generalized swarm reasoning.
 - Optional PersonaPlex sidecar integration for personality/voice experiments.
+- Optional Telegram bridge for remote task queuing and status checks.
 
 This repo keeps the core runtime local and stable. Larger external systems such as PersonaPlex, MiroFish, and Automaton are treated as optional integrations instead of being left as broken placeholder submodules.
 
@@ -53,7 +55,9 @@ This repo keeps the core runtime local and stable. Larger external systems such 
 | Prompting | Generate image/video prompts with Prompt Studio |
 | Swarm | Run generalized multi-role debates for research, strategy, build planning, or critique |
 | Runtime Awareness | Inspect installed integrations, recent events, and failures |
+| Task Persistence | Record task queue lifecycle checkpoints for later inspection |
 | Persona | Manage optional PersonaPlex configuration and launch instructions |
+| Channels | Optional Telegram bot bridge for remote task submission |
 
 ---
 
@@ -111,6 +115,14 @@ The repo now uses `config/runtime.json` for non-secret runtime behavior. Importa
     "repo_path": "",
     "cpu_offload": false
   },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "allowed_chat_ids": [],
+      "poll_seconds": 1.5,
+      "queue_plain_messages": true
+    }
+  },
   "integrations": {
     "mirofish_path": "",
     "automaton_path": "",
@@ -126,7 +138,7 @@ This keeps voice/model/integration settings out of the source code.
 ## New Integrated Tools
 
 ### `system_capabilities`
-Inspect the live environment, installed integrations, recent runtime events, and recent failures.
+Inspect the live environment, installed integrations, recent runtime events, recent failures, and recent task checkpoints.
 
 ### `persona_control`
 Configure optional PersonaPlex integration, inspect its status, or get launch instructions.
@@ -186,6 +198,25 @@ python -m moshi.server --ssl $ssl
 ```
 
 If GPU memory is tight, enable `cpu_offload` in `config/runtime.json`.
+
+### Telegram Bridge
+
+Axiom can optionally expose a lightweight Telegram bot bridge inspired by DeerFlow's IM channel pattern.
+
+Setup:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather).
+2. Add `telegram_bot_token` to `config/api_keys.json`, or set `AXIOM_TELEGRAM_BOT_TOKEN`.
+3. Enable `channels.telegram.enabled` in `config/runtime.json`.
+4. Optionally add your Telegram chat ID(s) to `channels.telegram.allowed_chat_ids`.
+
+Supported commands:
+
+- `/status`
+- `/tasks`
+- `/task <goal>`
+
+If `queue_plain_messages` is enabled, ordinary messages are also queued as tasks.
 
 ### MiroFish / Automaton
 
