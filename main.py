@@ -550,7 +550,7 @@ class AxiomLive:
         # Audio tweaks
         self.is_speaking       = False
         self.VOLUME_MULTIPLIER = 5.0   # Extreme volume boost for soft voices/whispering
-        self.VAD_THRESHOLD     = 3000  # Scaled up because the volume multiplier makes everything (including speakers) louder
+        self.VAD_THRESHOLD     = 2000  # Calculated solely on RAW unboosted audio to prevent speaker loop
 
     def speak(self, text: str):
         """Thread-safe speak — any thread can call this."""
@@ -817,13 +817,14 @@ class AxiomLive:
                 )
                 
                 try:
-                    # Whisper Boost
-                    audio_data = np.frombuffer(data, dtype=np.int16)
-                    audio_data = np.clip(audio_data * self.VOLUME_MULTIPLIER, -32768, 32767).astype(np.int16)
-                    boosted_data = audio_data.tobytes()
+                    raw_audio = np.frombuffer(data, dtype=np.int16)
                     
-                    # Interruption Detection (VAD) & Echo Cancellation
-                    rms = np.sqrt(np.mean(np.square(audio_data.astype(np.float32))))
+                    # Whisper Boost (API ONLY)
+                    boosted_audio = np.clip(raw_audio * self.VOLUME_MULTIPLIER, -32768, 32767).astype(np.int16)
+                    boosted_data  = boosted_audio.tobytes()
+                    
+                    # Interruption Detection (VAD) on RAW audio to prevent 5x speaker amplification trigger
+                    rms = np.sqrt(np.mean(np.square(raw_audio.astype(np.float32))))
                     
                     if self.is_speaking:
                         if rms > self.VAD_THRESHOLD:
