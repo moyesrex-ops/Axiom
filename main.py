@@ -35,6 +35,7 @@ from actions.computer_control import computer_control
 from actions.nexus_memory     import nexus_memory
 from actions.deep_analyzer    import deep_analyzer
 from actions.autonomous_researcher import autonomous_research
+from actions.mt5_trading_agent     import mt5_trading
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -518,6 +519,22 @@ TOOL_DECLARATIONS = [
         },
         "required": ["url", "query"]
     }
+},
+{
+    "name": "mt5_trading",
+    "description": (
+        "Natively executes ultra-low latency Buy/Sell orders on MetaTrader 5 via C++ socket bindings. "
+        "Use this exclusively when the user says 'start trading', 'buy EURUSD', 'sell 0.5 lots', etc."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "The action to perform: 'info', 'buy', or 'sell'."},
+            "symbol": {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
+            "volume": {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."}
+        },
+        "required": ["action"]
+    }
 }
 ]
 
@@ -746,6 +763,16 @@ class AxiomLive:
             elif name == "autonomous_researcher":
                 r = await loop.run_in_executor(
                     None, lambda: autonomous_research(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "mt5_trading":
+                r = await loop.run_in_executor(
+                    None, lambda: mt5_trading(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak
