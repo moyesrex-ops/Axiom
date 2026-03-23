@@ -1,0 +1,24 @@
+{
+  "voice_name": "Charon",
+  "voice_backend": "gemini_live",
+  "live_model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+  "text_models": {
+    "default": "gemini-2.5-flash",
+    "fast": "gemini-2.5-flash-lite",
+    "reasoning": "gemini-2.5-pro"
+  },
+  "personaplex": {
+    "enabled": false,
+    "server_url": "ws://127.0.0.1:8998/api/chat",
+    "text_prompt": "You enjoy having a good conversation. You are AXIOM, a sharp and technically capable AI operator with natural conversational rhythm.",
+    "voice_prompt": "",
+    "repo_path": "",
+    "auto_start": false,
+    "cpu_offload": false
+  },
+  "integrations": {
+    "mirofish_path": "",
+    "automaton_path": "",
+    "personaplex_path": ""
+  }
+}

@@ -16,6 +16,8 @@ import sys
 import json
 import re
 import time
+import tempfile
+import shlex
 from pathlib import Path
 
 
@@ -64,6 +66,16 @@ def _resolve_save_path(output_path: str, language: str) -> Path:
         return p if p.is_absolute() else DESKTOP / p
     ext = ext_map.get((language or "python").lower(), ".py")
     return DESKTOP / f"AXIOM_code{ext}"
+
+
+def _normalize_args(args) -> list[str]:
+    if not args:
+        return []
+    if isinstance(args, list):
+        return [str(a) for a in args]
+    if isinstance(args, str):
+        return shlex.split(args, posix=False)
+    return [str(args)]
 
 
 def _read_file(file_path: str) -> tuple[str, str]:
@@ -368,15 +380,39 @@ Explanation:"""
         return f"Could not explain code: {e}"
 
 
-def _run_action(file_path, args, timeout, player) -> str:
-    if not file_path:
-        return "Please provide a file path to run, sir."
-    p = Path(file_path)
-    if not p.exists():
-        return f"File not found: {file_path}"
+def _run_action(file_path, code, language, args, timeout, player) -> str:
+    run_args = _normalize_args(args)
+    temp_path = None
+
+    if file_path:
+        p = Path(file_path)
+        if not p.exists():
+            return f"File not found: {file_path}"
+    elif code:
+        ext = _resolve_save_path("", language).suffix
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=ext,
+            delete=False,
+            encoding="utf-8",
+        ) as handle:
+            handle.write(code)
+            temp_path = Path(handle.name)
+        p = temp_path
+    else:
+        return "Please provide a file path or inline code to run, sir."
+
     if player:
         player.write_log(f"[Code] Running {p.name}...")
-    return _run_file(p, args, timeout)
+
+    try:
+        return _run_file(p, run_args, timeout)
+    finally:
+        if temp_path:
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
 
 
 def _optimize_action(file_path, code, language, output_path, player) -> str:
@@ -568,7 +604,7 @@ def code_helper(
         return _explain_action(file_path, code, player)
 
     elif action == "run":
-        return _run_action(file_path, args, timeout, player)
+        return _run_action(file_path, code, language, args, timeout, player)
 
     elif action == "build":
         return _build(description, language, output_path, args, timeout, speak, player)

@@ -21,6 +21,7 @@ ABSOLUTE RULES:
 - NEVER use generated_code or write Python scripts. It does not exist.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
+- Use system_capabilities if the task depends on installed integrations or current environment status.
 - Use file_controller to save content to disk.
 - Use cmd_control to open files or run system commands.
 - Max 5 steps. Use the minimum steps needed.
@@ -108,6 +109,28 @@ code_helper
 dev_agent
   description: string (required)
   language: string (optional)
+
+system_capabilities
+  action: "summary" | "failures" | "events" (optional)
+  limit: integer (optional)
+
+prompt_studio
+  idea: string (required)
+  medium: string (optional)
+  style: string (optional)
+  constraints: string (optional)
+
+lead_researcher
+  query: string (optional)
+  industry: string (optional)
+  location: string (optional)
+  site: string (optional)
+  max_results: integer (optional)
+
+swarm_orchestrator
+  goal: string (required)
+  mode: "research" | "strategy" | "build" | "critique" (optional)
+  context: string (optional)
 
 EXAMPLES:
 

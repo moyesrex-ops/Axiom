@@ -17,7 +17,7 @@ CONFIG_DIR = BASE_DIR / "config"
 API_FILE   = CONFIG_DIR / "api_keys.json"
 
 SYSTEM_NAME = "A.X.I.O.M"
-MODEL_BADGE = "AXIOM v1.0"
+MODEL_BADGE = "AXIOM v4.2"
 
 # Deep blue / purple color scheme
 C_BG     = "#0a0a14"
@@ -290,7 +290,7 @@ class AxiomUI:
         c.create_rectangle(0, H - 28, W, H, fill="#0d0d1a", outline="")
         c.create_line(0, H - 28, W, H - 28, fill=C_DIM, width=1)
         c.create_text(W // 2, H - 14, fill=C_DIM, font=("Courier", 8),
-                      text="AXIOM  ·  CLASSIFIED  ·  v1.0")
+                      text="AXIOM  ·  CLASSIFIED  ·  v4.2")
 
     def write_log(self, text: str):
         self.typing_queue.append(text)

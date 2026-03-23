@@ -64,7 +64,19 @@ def analyze_error(
 
     # If we've already retried enough, escalate to replan
     if attempt >= max_attempts:
-        print(f"[ErrorHandler] ⚠️ Max attempts reached for step {step.get('step')} — forcing replan")
+        print(f"[ErrorHandler] Max attempts reached for step {step.get('step')} - forcing replan")
+        try:
+            from memory.runtime_store import log_failure
+
+            log_failure(
+                tool=step.get("tool", "unknown"),
+                description=step.get("description", ""),
+                error=error,
+                fix_suggestion="Try a completely different approach or tool",
+                resolved=False,
+            )
+        except Exception:
+            pass
         return {
             "decision":      ErrorDecision.REPLAN,
             "reason":        f"Failed {attempt} times: {error[:100]}",
@@ -107,13 +119,26 @@ Attempt number: {attempt}"""
 
         if step.get("critical") and result["decision"] == ErrorDecision.SKIP:
             result["decision"]     = ErrorDecision.REPLAN
-            result["user_message"] = "This step is critical — finding alternative approach."
+            result["user_message"] = "This step is critical - finding alternative approach."
 
-        print(f"[ErrorHandler] Decision: {result['decision'].value} — {result.get('reason', '')}")
+        try:
+            from memory.runtime_store import log_failure
+
+            log_failure(
+                tool=step.get("tool", "unknown"),
+                description=step.get("description", ""),
+                error=error,
+                fix_suggestion=result.get("fix_suggestion", ""),
+                resolved=False,
+            )
+        except Exception:
+            pass
+
+        print(f"[ErrorHandler] Decision: {result['decision'].value} - {result.get('reason', '')}")
         return result
 
     except Exception as e:
-        print(f"[ErrorHandler] ⚠️ Analysis failed: {e} — defaulting to replan")
+        print(f"[ErrorHandler] Analysis failed: {e} - defaulting to replan")
         return {
             "decision":       ErrorDecision.REPLAN,
             "reason":         str(e),
@@ -162,7 +187,7 @@ Return ONLY the Python code, no explanation."""
         }
 
     except Exception as e:
-        print(f"[ErrorHandler] ⚠️ Fix generation failed: {e}")
+        print(f"[ErrorHandler] Fix generation failed: {e}")
         return {
             "step":        step.get("step"),
             "tool":        "generated_code",

@@ -88,10 +88,10 @@ def volume_set(value: int):
             vol       = cast(interface, POINTER(IAudioEndpointVolume))
             vol_db    = -65.25 if value == 0 else max(-65.25, 20 * math.log10(value / 100))
             vol.SetMasterVolumeLevel(vol_db, None)
-            print(f"[Settings] 🔊 Volume → {value}%")
+            print(f"[Settings] Volume set to {value}%")
             return
         except Exception as e:
-            print(f"[Settings] ⚠️ pycaw failed: {e}")
+            print(f"[Settings] pycaw failed: {e}")
     elif _OS == "Darwin":
         subprocess.run(["osascript", "-e", f"set volume output volume {value}"])
         return
@@ -120,17 +120,18 @@ def brightness_down():
 
 _AXIOM_PROC_NAMES = {"python", "python3", "pythonw", "axiom"}
 
+
 def _is_axiom_process(proc) -> bool:
-    """Return True if a psutil process is Axiom itself and must not be killed."""
     import os as _os
+
     try:
         if proc.pid == _os.getpid():
             return True
-        # Only protect other Python processes if they are a parent of this process
         name = proc.name().lower().replace(".exe", "")
         if name in _AXIOM_PROC_NAMES:
             try:
                 import psutil
+
                 if proc.pid in [p.pid for p in psutil.Process(_os.getpid()).parents()]:
                     return True
             except Exception:
@@ -141,10 +142,6 @@ def _is_axiom_process(proc) -> bool:
 
 
 def force_close_process(process_name: str) -> str:
-    """
-    Kill a named process (e.g. 'chrome', 'firefox', 'notepad') using psutil.
-    Axiom's own process is always protected and will never be killed.
-    """
     try:
         import psutil
     except ImportError:
@@ -160,7 +157,6 @@ def force_close_process(process_name: str) -> str:
     for proc in psutil.process_iter(["pid", "name"]):
         try:
             pname = proc.name().lower().replace(".exe", "")
-            # Match only if the target name is contained in the process name (not vice versa)
             if target not in pname:
                 continue
             if _is_axiom_process(proc):
@@ -171,13 +167,13 @@ def force_close_process(process_name: str) -> str:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
         except Exception as e:
-            print(f"[Settings] ⚠️ Could not kill {proc}: {e}")
+            print(f"[Settings] Could not kill {proc}: {e}")
 
     if protected and not killed:
-        return f"[Settings] 🛡️ Protected Axiom process — will not self-terminate."
+        return "[Settings] Protected Axiom process and refused self-termination."
     if killed:
-        msg = f"Force-closed: {', '.join(set(killed))}."
-        print(f"[Settings] ✅ {msg}")
+        msg = f"Force-closed: {', '.join(sorted(set(killed)))}."
+        print(f"[Settings] {msg}")
         return msg
     return f"[Settings] No running process matching '{process_name}' was found."
 
@@ -192,7 +188,7 @@ def _safe_focus_target():
             ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
             title = buf.value.upper()
             if "AXIOM" in title or "JARVIS" in title:
-                print("[Settings] 🛡️ Axiom is focused. Switching window before closing to prevent self-termination.")
+                print("[Settings] Axiom is focused. Switching window before closing to prevent self-termination.")
                 pyautogui.hotkey("alt", "tab")
                 time.sleep(0.3)
         except Exception:
@@ -477,6 +473,52 @@ _RGB_COLOR_MAP = {
     "gold":          (255, 215, 0),
 }
 
+_OPENRGB_EFFECT_ALIASES = {
+    "rainbow": ["rainbow", "spectrum", "wave", "cycle"],
+    "glowing": ["breathing", "pulse", "glow"],
+    "breathing": ["breathing", "pulse"],
+    "static": ["direct", "static", "fixed", "solid"],
+}
+
+
+def _get_openrgb_client():
+    return OpenRGBClient()
+
+
+def _find_openrgb_mode(device, requested: str) -> str | None:
+    wanted = requested.lower().strip()
+    candidates = _OPENRGB_EFFECT_ALIASES.get(wanted, [wanted])
+    for alias in candidates:
+        for mode in getattr(device, "modes", []):
+            name = mode.name.lower()
+            if alias == name or alias in name or name in alias:
+                return mode.name
+    return None
+
+
+def hardware_rgb_status() -> str:
+    if not _OPENRGB:
+        return "[RGB] openrgb-python is not installed."
+
+    try:
+        client = _get_openrgb_client()
+        if not client.devices:
+            return "[RGB] OpenRGB is reachable but no devices were detected."
+
+        lines = ["[RGB] Connected devices:"]
+        for device in client.devices:
+            active = "unknown"
+            try:
+                active = device.modes[device.active_mode].name
+            except Exception:
+                pass
+            modes = ", ".join(mode.name for mode in getattr(device, "modes", [])[:8]) or "none"
+            lines.append(f"- {device.name}: active={active}; modes={modes}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"[RGB] Could not query OpenRGB: {e}"
+
+
 def change_hardware_color(color_name: str = "white") -> str:
     """
     Physically changes the RGB lights on all connected devices (keyboard, mouse, etc.)
@@ -504,12 +546,30 @@ def change_hardware_color(color_name: str = "white") -> str:
         rgb = (255, 255, 255)  # default: white
 
     try:
-        client = OpenRGBClient()
-        color  = RGBColor(*rgb)
+        client = _get_openrgb_client()
+        color = RGBColor(*rgb)
+        changed = []
+
         for device in client.devices:
-            device.set_color(color)
-        result = f"Hardware RGB color changed to '{color_name}' {rgb}."
-        print(f"[RGB] ✅ {result}")
+            matched_mode = _find_openrgb_mode(device, key)
+            if matched_mode:
+                try:
+                    device.set_mode(matched_mode, save=True)
+                    changed.append(f"{device.name}: mode={matched_mode}")
+                    time.sleep(0.05)
+                    continue
+                except Exception as mode_error:
+                    print(f"[RGB] Mode switch failed on {device.name}: {mode_error}")
+
+            device.set_color(color, fast=False)
+            changed.append(f"{device.name}: color={color_name}")
+            time.sleep(0.05)
+
+        if not changed:
+            return "[RGB] OpenRGB is reachable but no controllable devices were found."
+
+        result = f"Hardware RGB updated: {'; '.join(changed)}."
+        print(f"[RGB] {result}")
         try:
             from memory.memory_manager import save_to_nexus
             save_to_nexus("Last RGB Command", result)
@@ -659,13 +719,14 @@ ACTION_MAP = {
     "escape":                  press_escape,
     "press_escape":            press_escape,
     "cancel":                  press_escape,
-    # Safe process force-kill (never kills Axiom itself)
     "force_close":             force_close_process,
     "force_close_process":     force_close_process,
     "kill_process":            force_close_process,
     "kill":                    force_close_process,
     # RGB Hardware Control
     "change_hardware_color":   change_hardware_color,
+    "hardware_rgb_status":     hardware_rgb_status,
+    "rgb_status":              hardware_rgb_status,
     "rgb_color":               change_hardware_color,
     "keyboard_color":          change_hardware_color,
     "change_keyboard_color":   change_hardware_color,
@@ -755,10 +816,11 @@ Examples:
 - "escape'e bas" → {{"action": "escape", "value": null}}
 - "force close chrome" → {{"action": "force_close", "value": "chrome"}}
 - "kill firefox" → {{"action": "force_close", "value": "firefox"}}
-- "force kill notepad" → {{"action": "force_close", "value": "notepad"}}
 - "change keyboard color to red" → {{"action": "change_hardware_color", "value": "red"}}
 - "set keyboard lights to blue" → {{"action": "change_hardware_color", "value": "blue"}}
 - "make my keyboard glow" → {{"action": "change_hardware_color", "value": "glowing"}}
+- "make my keyboard rainbow" → {{"action": "change_hardware_color", "value": "rainbow"}}
+- "show rgb devices" → {{"action": "hardware_rgb_status", "value": null}}
 - "rgb red" → {{"action": "change_hardware_color", "value": "red"}}
 - "keyboard rengi kırmızı yap" → {{"action": "change_hardware_color", "value": "red"}}
 - "turn off rgb" → {{"action": "change_hardware_color", "value": "off"}}
@@ -775,7 +837,7 @@ IMPORTANT:
         text = __import__("re").sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
         return json.loads(text)
     except Exception as e:
-        print(f"[Settings] ⚠️ Intent detection failed: {e}")
+        print(f"[Settings] Intent detection failed: {e}")
         return {"action": description.lower().replace(" ", "_"), "value": None}
 
 def computer_settings(
@@ -792,9 +854,6 @@ def computer_settings(
         description : Kullanıcının doğal dil komutu (herhangi bir dilde)
         value       : İşleme özgü değer (ses seviyesi, yazılacak metin, tekrar sayısı vb.)
     """
-    if not _PYAUTOGUI:
-        return "pyautogui is not installed. Run: pip install pyautogui"
-
     params      = parameters or {}
     raw_action  = params.get("action", "").strip()
     description = params.get("description", "").strip()
@@ -811,7 +870,24 @@ def computer_settings(
     if not action:
         return "No action could be determined, sir."
 
-    print(f"[Settings] ⚙️ Action: {action}  Value: {value}")
+    print(f"[Settings] Action: {action}  Value: {value}")
+
+    non_gui_actions = {
+        "change_hardware_color",
+        "rgb_color",
+        "keyboard_color",
+        "change_keyboard_color",
+        "change_rgb",
+        "set_rgb",
+        "hardware_rgb_status",
+        "rgb_status",
+        "force_close",
+        "force_close_process",
+        "kill_process",
+        "kill",
+    }
+    if not _PYAUTOGUI and action not in non_gui_actions:
+        return "pyautogui is not installed. Run: pip install pyautogui"
 
 
     if action == "volume_set":
@@ -855,8 +931,11 @@ def computer_settings(
     if action in ("force_close", "force_close_process", "kill_process", "kill"):
         proc_name = str(value or params.get("process_name", params.get("description", "")))
         if not proc_name:
-            return "[Settings] Please specify the process name to force-close, sir."
+            return "[Settings] Please specify the process name to force-close."
         return force_close_process(proc_name)
+
+    if action in ("hardware_rgb_status", "rgb_status"):
+        return hardware_rgb_status()
 
     if action in ("change_hardware_color", "rgb_color", "keyboard_color",
                   "change_keyboard_color", "change_rgb", "set_rgb"):

@@ -38,7 +38,15 @@ from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
 from actions.market_predictor      import predict_market
 from actions.self_modifier         import self_modifier
+from actions.system_capabilities   import system_capabilities
+from actions.persona_control       import persona_control
+from actions.prompt_studio         import prompt_studio
+from actions.lead_researcher       import lead_researcher
+from actions.swarm_orchestrator    import swarm_orchestrator
 from agent.heartbeat               import HeartbeatDaemon
+from core.capabilities             import format_capability_status
+from core.runtime_config           import load_runtime_config
+from memory.runtime_store          import init_runtime_store
 
 def get_base_dir():
     if getattr(sys, "frozen", False):
@@ -48,7 +56,7 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-LIVE_MODEL          = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+DEFAULT_LIVE_MODEL  = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 FORMAT              = pyaudio.paInt16
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
@@ -68,7 +76,7 @@ def _load_system_prompt() -> str:
         return (
             "You are AXIOM, an advanced AI assistant. "
             "Be concise, direct, and always use the provided tools to complete tasks. "
-            "Never simulate or guess results — always call the appropriate tool."
+            "Never simulate or guess results - always call the appropriate tool."
         )
 
 _memory_turn_counter  = 0
@@ -126,13 +134,13 @@ def _update_memory_async(user_text: str, axiom_text: str) -> None:
         data = json.loads(raw)
         if data:
             update_memory(data)
-            print(f"[Memory] ✅ Updated: {list(data.keys())}")
+            print(f"[Memory] Updated: {list(data.keys())}")
 
     except json.JSONDecodeError:
         pass
     except Exception as e:
         if "429" not in str(e):
-            print(f"[Memory] ⚠️ {e}")
+            print(f"[Memory] Warning: {e}")
 
 
 TOOL_DECLARATIONS = [
@@ -141,7 +149,7 @@ TOOL_DECLARATIONS = [
         "description": (
             "Opens any application on the Windows computer. "
             "Use this whenever the user asks to open, launch, or start any app, "
-            "website, or program. Always call this tool — never just say you opened it."
+            "website, or program. Always call this tool - never just say you opened it."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -256,11 +264,11 @@ TOOL_DECLARATIONS = [
         "Controls the computer: volume, brightness, window management, keyboard shortcuts, "
         "typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, "
         "scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. "
-        "ALSO controls physical RGB hardware lighting (keyboard/mouse color) — use action: change_hardware_color with value: red/blue/green/glowing/off etc. "
-        "ALSO use for repeated actions: 'refresh 10 times', 'reload page 5 times' → action: reload_n, value: 10. "
-        "ALSO use for safely force-closing a specific app/process by name WITHOUT crashing Axiom — "
-        "use action: force_close, value: <process_name> (e.g. value: chrome). "
-        "Use for ANY single computer control command — even if repeated N times. "
+        "ALSO controls physical RGB hardware lighting (keyboard/mouse color) - use action: change_hardware_color with value: red/blue/green/glowing/off etc. "
+        "ALSO use for safely force-closing a specific app/process by name WITHOUT crashing Axiom - "
+        "use action: force_close, value: <process_name>. "
+        "ALSO use for repeated actions: 'refresh 10 times', 'reload page 5 times' -> action: reload_n, value: 10. "
+        "Use for ANY single computer control command - even if repeated N times. "
         "NEVER route simple computer commands to agent_task."
     ),
     "parameters": {
@@ -403,7 +411,7 @@ TOOL_DECLARATIONS = [
         "Examples: 'research X and save to file', 'find files and organize them', "
         "'fill a form on a website', 'write and test code'. "
         "DO NOT use for simple computer commands like volume, refresh, close, scroll, "
-        "minimize, screenshot, restart, shutdown — use computer_settings for those. "
+        "minimize, screenshot, restart, shutdown - use computer_settings for those. "
         "DO NOT use if the task can be done with a single tool call."
     ),
     "parameters": {
@@ -538,12 +546,12 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action":       {"type": "STRING", "description": "The action to perform: 'info', 'buy', or 'sell'."},
-            "symbol":       {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
-            "volume":       {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."},
-            "stop_loss":    {"type": "NUMBER", "description": "Stop-loss price level. If omitted, a 50-pip default SL is applied automatically."},
-            "take_profit":  {"type": "NUMBER", "description": "Take-profit price level. If omitted, a 50-pip default TP is applied automatically."},
-            "prompt":       {"type": "STRING", "description": "Natural language trade intent for AI extraction (e.g. 'buy 0.1 lots EURUSD with SL at 1.0800')."},
+            "action":      {"type": "STRING", "description": "The action to perform: 'info', 'buy', or 'sell'."},
+            "symbol":      {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
+            "volume":      {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."},
+            "stop_loss":   {"type": "NUMBER", "description": "Optional stop-loss price. Defaults to a 50-pip protective stop if omitted."},
+            "take_profit": {"type": "NUMBER", "description": "Optional take-profit price. Defaults to a 50-pip target if omitted."},
+            "prompt":      {"type": "STRING", "description": "Natural language trade intent for AI extraction."}
         },
         "required": ["action"]
     }
@@ -590,6 +598,93 @@ TOOL_DECLARATIONS = [
         },
         "required": ["action"]
     }
+},
+{
+    "name": "system_capabilities",
+    "description": (
+        "Inspects Axiom's current environment, installed integrations, recent runtime events, "
+        "and recorded failures. Use when the user asks what Axiom can do right now."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "summary | failures | events"},
+            "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events"}
+        },
+        "required": []
+    }
+},
+{
+    "name": "persona_control",
+    "description": (
+        "Configures optional NVIDIA PersonaPlex integration for full-duplex personality and voice control. "
+        "Use to inspect status, enable/disable it, or get launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action":       {"type": "STRING", "description": "status | enable | disable | configure | launch_instructions"},
+            "server_url":   {"type": "STRING", "description": "PersonaPlex websocket URL"},
+            "repo_path":    {"type": "STRING", "description": "Local PersonaPlex repo path"},
+            "text_prompt":  {"type": "STRING", "description": "PersonaPlex role prompt"},
+            "voice_prompt": {"type": "STRING", "description": "PersonaPlex voice prompt file or label"},
+            "cpu_offload":  {"type": "BOOLEAN", "description": "Whether PersonaPlex should use CPU offload"},
+            "auto_start":   {"type": "BOOLEAN", "description": "Whether PersonaPlex should auto-start when supported"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "prompt_studio",
+    "description": (
+        "Designs elite prompts for image generation, video generation, creative direction, and prompt optimization. "
+        "Use when the user wants strong prompts or visual ideation."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "medium":       {"type": "STRING", "description": "image | video | branding | concept"},
+            "idea":         {"type": "STRING", "description": "The concept to build prompts for"},
+            "style":        {"type": "STRING", "description": "Desired art direction or style"},
+            "constraints":  {"type": "STRING", "description": "Any constraints, exclusions, or technical requirements"},
+            "target_model": {"type": "STRING", "description": "Optional target model or platform"}
+        },
+        "required": ["idea"]
+    }
+},
+{
+    "name": "lead_researcher",
+    "description": (
+        "Researches PUBLIC business leads and extracts public contact signals such as emails, phone numbers, and social links. "
+        "Use for prospecting or public lead discovery."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "query":       {"type": "STRING", "description": "Search query for the lead hunt"},
+            "industry":    {"type": "STRING", "description": "Optional industry or niche"},
+            "location":    {"type": "STRING", "description": "Optional target geography"},
+            "site":        {"type": "STRING", "description": "Optional site/domain filter"},
+            "max_results": {"type": "INTEGER", "description": "Maximum number of leads to return"}
+        },
+        "required": []
+    }
+},
+{
+    "name": "swarm_orchestrator",
+    "description": (
+        "Runs a generalized multi-role AI swarm for research, strategy, build planning, or critique. "
+        "Use when the user wants several expert viewpoints fused into one result."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "goal":    {"type": "STRING", "description": "The objective for the swarm"},
+            "mode":    {"type": "STRING", "description": "research | strategy | build | critique"},
+            "context": {"type": "STRING", "description": "Optional extra context"}
+        },
+        "required": ["goal"]
+    }
 }
 ]
 
@@ -601,6 +696,7 @@ class AxiomLive:
         self.audio_in_queue = None
         self.out_queue      = None
         self._loop          = None
+        self.live_model     = DEFAULT_LIVE_MODEL
         
         # Audio tweaks
         self.is_speaking       = False
@@ -608,7 +704,7 @@ class AxiomLive:
         self.VAD_THRESHOLD     = 2000  # Calculated solely on RAW unboosted audio to prevent speaker loop
 
     def speak(self, text: str):
-        """Thread-safe speak — any thread can call this."""
+        """Thread-safe speak - any thread can call this."""
         if not self._loop or not self.session:
             return
         asyncio.run_coroutine_threadsafe(
@@ -624,11 +720,13 @@ class AxiomLive:
 
         memory  = load_memory()
         mem_str = format_memory_for_prompt(memory)
+        runtime = load_runtime_config()
+        capability_status = format_capability_status()
 
         sys_prompt = _load_system_prompt()
 
         now      = datetime.now()
-        time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
+        time_str = now.strftime("%A, %B %d, %Y - %I:%M %p")
         time_ctx = (
             f"[CURRENT DATE & TIME]\n"
             f"Right now it is: {time_str}\n"
@@ -637,9 +735,12 @@ class AxiomLive:
         )
 
         if mem_str:
-            sys_prompt = time_ctx + mem_str + "\n\n" + sys_prompt
+            sys_prompt = time_ctx + mem_str + "\n\n" + capability_status + "\n\n" + sys_prompt
         else:
-            sys_prompt = time_ctx + sys_prompt
+            sys_prompt = time_ctx + capability_status + "\n\n" + sys_prompt
+
+        self.live_model = runtime.get("live_model") or DEFAULT_LIVE_MODEL
+        voice_name = runtime.get("voice_name") or "Charon"
 
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -651,7 +752,7 @@ class AxiomLive:
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name="Charon"
+                        voice_name=voice_name
                     )
                 )
             ),
@@ -661,7 +762,7 @@ class AxiomLive:
         name = fc.name
         args = dict(fc.args or {})
 
-        print(f"[AXIOM] 🔧 TOOL: {name}  ARGS: {args}")
+        print(f"[AXIOM] TOOL: {name}  ARGS: {args}")
 
         loop   = asyncio.get_event_loop()
         result = "Done."
@@ -721,7 +822,7 @@ class AxiomLive:
                 ).start()
                 result = (
                     "Vision module activated. "
-                    "Stay completely silent — vision module will speak directly."
+                    "Stay completely silent - vision module will speak directly."
                 )
 
             elif name == "computer_settings":
@@ -855,6 +956,56 @@ class AxiomLive:
                 )
                 result = r or "Done."
 
+            elif name == "system_capabilities":
+                r = await loop.run_in_executor(
+                    None, lambda: system_capabilities(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "persona_control":
+                r = await loop.run_in_executor(
+                    None, lambda: persona_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "prompt_studio":
+                r = await loop.run_in_executor(
+                    None, lambda: prompt_studio(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "lead_researcher":
+                r = await loop.run_in_executor(
+                    None, lambda: lead_researcher(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "swarm_orchestrator":
+                r = await loop.run_in_executor(
+                    None, lambda: swarm_orchestrator(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
             else:
                 result = f"Unknown tool: {name}"
 
@@ -862,7 +1013,7 @@ class AxiomLive:
             result = f"Tool '{name}' failed: {e}"
             traceback.print_exc()
 
-        print(f"[AXIOM] 📤 {name} → {result[:80]}")
+        print(f"[AXIOM] RESULT {name} -> {result[:80]}")
 
         return types.FunctionResponse(
             id=fc.id,
@@ -876,7 +1027,7 @@ class AxiomLive:
             await self.session.send_realtime_input(media=msg)
 
     async def _listen_audio(self):
-        print("[AXIOM] 🎤 Mic started")
+        print("[AXIOM] Mic started")
         stream = await asyncio.to_thread(
             pya.open,
             format=FORMAT,
@@ -903,7 +1054,7 @@ class AxiomLive:
                     
                     if self.is_speaking:
                         if rms > self.VAD_THRESHOLD:
-                            print(f"[AXIOM] 🛑 Interrupted by user! (RMS: {rms:.0f})")
+                            print(f"[AXIOM] Interrupted by user (RMS: {rms:.0f})")
                             # User spoke louder than the speaker threshold. Clear playback queue.
                             while not self.audio_in_queue.empty():
                                 try: self.audio_in_queue.get_nowait()
@@ -923,13 +1074,13 @@ class AxiomLive:
                     
                 await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
         except Exception as e:
-            print(f"[AXIOM] ❌ Mic error: {e}")
+            print(f"[AXIOM] Mic error: {e}")
             raise
         finally:
             stream.close()
 
     async def _receive_audio(self):
-        print("[AXIOM] 👂 Recv started")
+        print("[AXIOM] Receive loop started")
         out_buf = []
         in_buf  = []
 
@@ -980,7 +1131,7 @@ class AxiomLive:
                     if response.tool_call:
                         fn_responses = []
                         for fc in response.tool_call.function_calls:
-                            print(f"[AXIOM] 📞 Tool call: {fc.name}")
+                            print(f"[AXIOM] Tool call: {fc.name}")
                             fr = await self._execute_tool(fc)
                             fn_responses.append(fr)
                         await self.session.send_tool_response(
@@ -988,12 +1139,12 @@ class AxiomLive:
                         )
 
         except Exception as e:
-            print(f"[AXIOM] ❌ Recv error: {e}")
+            print(f"[AXIOM] Receive error: {e}")
             traceback.print_exc()
             raise
 
     async def _play_audio(self):
-        print("[AXIOM] 🔊 Play started")
+        print("[AXIOM] Playback started")
         stream = await asyncio.to_thread(
             pya.open,
             format=FORMAT,
@@ -1009,7 +1160,7 @@ class AxiomLive:
                 if self.audio_in_queue.empty():
                     self.is_speaking = False
         except Exception as e:
-            print(f"[AXIOM] ❌ Play error: {e}")
+            print(f"[AXIOM] Playback error: {e}")
             raise
         finally:
             self.is_speaking = False
@@ -1023,11 +1174,11 @@ class AxiomLive:
 
         while True:
             try:
-                print("[AXIOM] 🔌 Connecting...")
+                print("[AXIOM] Connecting...")
                 config = self._build_config()
 
                 async with (
-                    client.aio.live.connect(model=LIVE_MODEL, config=config) as session,
+                    client.aio.live.connect(model=self.live_model, config=config) as session,
                     asyncio.TaskGroup() as tg,
                 ):
                     self.session        = session
@@ -1035,7 +1186,7 @@ class AxiomLive:
                     self.audio_in_queue = asyncio.Queue()
                     self.out_queue      = asyncio.Queue(maxsize=10)
 
-                    print("[AXIOM] ✅ Connected.")
+                    print("[AXIOM] Connected.")
                     self.ui.write_log("AXIOM online.")
 
                     heartbeat = HeartbeatDaemon(speak_func=self.speak, log_func=self.ui.write_log)
@@ -1047,14 +1198,16 @@ class AxiomLive:
                     tg.create_task(self._play_audio())
 
             except Exception as e:
-                print(f"[AXIOM] ⚠️  Error: {e}")
+                print(f"[AXIOM] Error: {e}")
                 traceback.print_exc()
 
-            print("[AXIOM] 🔄 Reconnecting in 3s...")
+            print("[AXIOM] Reconnecting in 3s...")
             await asyncio.sleep(3)
 
 def main():
-    ui = AxiomUI("face.png")
+    init_runtime_store()
+    face_path = BASE_DIR / "assets" / "face.png"
+    ui = AxiomUI(str(face_path) if face_path.exists() else "")
 
     def runner():
         ui.wait_for_api_key()
@@ -1063,7 +1216,7 @@ def main():
         try:
             asyncio.run(axiom.run())
         except KeyboardInterrupt:
-            print("\n🔴 Shutting down...")
+            print("\n[AXIOM] Shutting down...")
 
     threading.Thread(target=runner, daemon=True).start()
     ui.root.mainloop()

@@ -14,6 +14,8 @@ import inspect
 import re
 from pathlib import Path
 
+from core.runtime_config import get_voice_name, update_runtime_config
+
 
 def _get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -236,23 +238,9 @@ _AVAILABLE_VOICES = [
 
 
 def change_voice(voice_name: str) -> str:
-    """
-    Change Axiom's voice by editing the voice_name in main.py.
-    The change takes effect on the next session reconnect.
-    """
-    base = _get_base_dir()
-    main_path = base / "main.py"
-
-    if not main_path.exists():
-        return "[SelfModifier] Cannot locate main.py to change voice."
-
-    # Normalise the requested name
     requested = voice_name.strip().title()
-
-    # Soft-match against known voices
     matched = next((v for v in _AVAILABLE_VOICES if v.lower() == requested.lower()), None)
     if matched is None:
-        # Try prefix match
         matched = next((v for v in _AVAILABLE_VOICES if v.lower().startswith(requested.lower())), None)
     if matched is None:
         return (
@@ -260,28 +248,23 @@ def change_voice(voice_name: str) -> str:
             f"Available voices: {', '.join(_AVAILABLE_VOICES)}"
         )
 
+    current = get_voice_name()
+    if current.lower() == matched.lower():
+        return f"[SelfModifier] Voice is already set to '{matched}'."
+
+    update_runtime_config({"voice_name": matched})
     try:
-        source = main_path.read_text(encoding="utf-8")
-        import re as _re
-        new_source = _re.sub(
-            r'(voice_name\s*=\s*[\'"])([^\'"]+)([\'"])',
-            rf'\g<1>{matched}\g<3>',
-            source
-        )
-        if new_source == source:
-            return f"[SelfModifier] Voice is already set to '{matched}' — no change needed."
-        main_path.write_text(new_source, encoding="utf-8")
-        try:
-            from memory.memory_manager import save_to_nexus
-            save_to_nexus("Voice Setting", f"Voice changed to '{matched}'. Reconnect to apply.")
-        except Exception:
-            pass
-        return (
-            f"✅ Voice changed to '{matched}'. "
-            "This takes effect when the session reconnects (auto in ~3 seconds)."
-        )
-    except Exception as e:
-        return f"[SelfModifier] Voice change failed: {e}"
+        from memory.memory_manager import save_to_nexus
+        from memory.runtime_store import log_event
+
+        save_to_nexus("Voice Setting", f"Voice changed to '{matched}'.")
+        log_event("self_modifier", "voice_change", f"Voice changed to {matched}")
+    except Exception:
+        pass
+    return (
+        f"Voice changed to '{matched}'. "
+        "This takes effect on the next live-session reconnect."
+    )
 
 
 # ── main entry point ─────────────────────────────────────────────────────────
@@ -296,8 +279,8 @@ def self_modifier(parameters: dict = None, player=None, speak=None) -> str:
         edit_action    — Edit existing tool. Requires: tool_name, new_code
         generate_action— AI-generate new tool. Requires: tool_name, description
         list_actions   — List all action files
-        change_voice   — Change Axiom's voice. Requires: voice_name
-        list_voices    — List all available voices
+        change_voice   — Change the live voice. Requires: voice_name
+        list_voices    — List all available live voices
     """
     params = parameters or {}
     action = params.get("action", "list_actions").strip().lower()
@@ -350,4 +333,8 @@ def self_modifier(parameters: dict = None, player=None, speak=None) -> str:
         return "Available voices: " + ", ".join(_AVAILABLE_VOICES)
 
     else:
-        return f"[SelfModifier] Unknown action: '{action}'. Use read_source | write_action | edit_action | generate_action | list_actions | change_voice | list_voices."
+        return (
+            f"[SelfModifier] Unknown action: '{action}'. "
+            "Use read_source | write_action | edit_action | generate_action | "
+            "list_actions | change_voice | list_voices."
+        )

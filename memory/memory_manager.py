@@ -111,6 +111,12 @@ def save_to_nexus(topic: str, content: str) -> bool:
     memory["nexus_knowledge"][topic] = content
     save_memory(memory)
     print(f"[Nexus] 🧠 Saved new knowledge: {topic}")
+    try:
+        from memory.runtime_store import log_event
+
+        log_event("nexus", topic, str(content)[:2000])
+    except Exception:
+        pass
     return True
 
 def get_from_nexus(topic: str) -> str:

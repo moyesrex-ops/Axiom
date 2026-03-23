@@ -246,6 +246,26 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.flight_finder import flight_finder
         return flight_finder(parameters=parameters, player=None, speak=speak) or "Done."
 
+    elif tool == "system_capabilities":
+        from actions.system_capabilities import system_capabilities
+        return system_capabilities(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "persona_control":
+        from actions.persona_control import persona_control
+        return persona_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "prompt_studio":
+        from actions.prompt_studio import prompt_studio
+        return prompt_studio(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "lead_researcher":
+        from actions.lead_researcher import lead_researcher
+        return lead_researcher(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "swarm_orchestrator":
+        from actions.swarm_orchestrator import swarm_orchestrator
+        return swarm_orchestrator(parameters=parameters, player=None, speak=speak) or "Done."
+
     else:
         print(f"[Executor] ⚠️ Unknown tool '{tool}' — falling back to generated_code")
         return _run_generated_code(f"Accomplish this task: {parameters}", speak=speak)
