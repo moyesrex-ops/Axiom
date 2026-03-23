@@ -258,15 +258,17 @@ TOOL_DECLARATIONS = [
         "scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. "
         "ALSO controls physical RGB hardware lighting (keyboard/mouse color) — use action: change_hardware_color with value: red/blue/green/glowing/off etc. "
         "ALSO use for repeated actions: 'refresh 10 times', 'reload page 5 times' → action: reload_n, value: 10. "
+        "ALSO use for safely force-closing a specific app/process by name WITHOUT crashing Axiom — "
+        "use action: force_close, value: <process_name> (e.g. value: chrome). "
         "Use for ANY single computer control command — even if repeated N times. "
         "NEVER route simple computer commands to agent_task."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action":      {"type": "STRING", "description": "The action to perform (if known). For repeated reload: 'reload_n'. For RGB: 'change_hardware_color'"},
+            "action":      {"type": "STRING", "description": "The action to perform (if known). For repeated reload: 'reload_n'. For RGB: 'change_hardware_color'. For killing a process: 'force_close'."},
             "description": {"type": "STRING", "description": "Natural language description of what to do"},
-            "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, number of times, color name (red/blue/glowing/etc.)"}
+            "value":       {"type": "STRING", "description": "Optional value: volume level, text to type, number of times, color name (red/blue/glowing/etc.), or process name for force_close"}
         },
         "required": []
     }
@@ -529,14 +531,19 @@ TOOL_DECLARATIONS = [
     "name": "mt5_trading",
     "description": (
         "Natively executes ultra-low latency Buy/Sell orders on MetaTrader 5 via C++ socket bindings. "
+        "Supports stop-loss and take-profit levels. After each trade closes, Axiom automatically "
+        "reflects on the result and stores the lesson in memory to continuously improve. "
         "Use this exclusively when the user says 'start trading', 'buy EURUSD', 'sell 0.5 lots', etc."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "The action to perform: 'info', 'buy', or 'sell'."},
-            "symbol": {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
-            "volume": {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."}
+            "action":       {"type": "STRING", "description": "The action to perform: 'info', 'buy', or 'sell'."},
+            "symbol":       {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
+            "volume":       {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."},
+            "stop_loss":    {"type": "NUMBER", "description": "Stop-loss price level. If omitted, a 50-pip default SL is applied automatically."},
+            "take_profit":  {"type": "NUMBER", "description": "Take-profit price level. If omitted, a 50-pip default TP is applied automatically."},
+            "prompt":       {"type": "STRING", "description": "Natural language trade intent for AI extraction (e.g. 'buy 0.1 lots EURUSD with SL at 1.0800')."},
         },
         "required": ["action"]
     }
@@ -562,21 +569,24 @@ TOOL_DECLARATIONS = [
         "Axiom's self-modification engine. Allows Axiom to read its own source code, "
         "write new Python action scripts into the actions/ directory, edit existing ones, "
         "or use AI to generate entirely new capabilities on the fly. "
+        "ALSO allows Axiom to change its own voice using action='change_voice' with voice_name=<name>. "
+        "Use action='list_voices' to see all available voice names. "
         "Use when the user asks Axiom to add a new skill, grant itself a new tool, "
-        "edit its own behavior, or list available actions."
+        "edit its own behavior, change its voice, or list available actions."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "read_source | write_action | edit_action | generate_action | list_actions"
+                "description": "read_source | write_action | edit_action | generate_action | list_actions | change_voice | list_voices"
             },
             "file_path":    {"type": "STRING", "description": "Relative path to source file (for read_source)"},
             "tool_name":    {"type": "STRING", "description": "Snake_case name for the new/existing tool"},
             "description":  {"type": "STRING", "description": "What the tool should do (for generate_action / write_action)"},
             "code":         {"type": "STRING", "description": "Raw Python source code (for write_action)"},
-            "new_code":     {"type": "STRING", "description": "Replacement Python source code (for edit_action)"}
+            "new_code":     {"type": "STRING", "description": "Replacement Python source code (for edit_action)"},
+            "voice_name":   {"type": "STRING", "description": "Voice name for change_voice (e.g. Puck, Fenrir, Kore, Aoede, Charon)"}
         },
         "required": ["action"]
     }

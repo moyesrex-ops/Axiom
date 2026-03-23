@@ -118,6 +118,70 @@ def brightness_down():
         subprocess.run(["brightnessctl", "set", "10%-"])
 
 
+_AXIOM_PROC_NAMES = {"python", "python3", "pythonw", "axiom"}
+
+def _is_axiom_process(proc) -> bool:
+    """Return True if a psutil process is Axiom itself and must not be killed."""
+    import os as _os
+    try:
+        if proc.pid == _os.getpid():
+            return True
+        # Only protect other Python processes if they are a parent of this process
+        name = proc.name().lower().replace(".exe", "")
+        if name in _AXIOM_PROC_NAMES:
+            try:
+                import psutil
+                if proc.pid in [p.pid for p in psutil.Process(_os.getpid()).parents()]:
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
+
+
+def force_close_process(process_name: str) -> str:
+    """
+    Kill a named process (e.g. 'chrome', 'firefox', 'notepad') using psutil.
+    Axiom's own process is always protected and will never be killed.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return "[Settings] psutil is not installed. Run: pip install psutil"
+
+    if not process_name:
+        return "[Settings] No process name provided."
+
+    target = process_name.lower().replace(".exe", "").strip()
+    killed = []
+    protected = []
+
+    for proc in psutil.process_iter(["pid", "name"]):
+        try:
+            pname = proc.name().lower().replace(".exe", "")
+            # Match only if the target name is contained in the process name (not vice versa)
+            if target not in pname:
+                continue
+            if _is_axiom_process(proc):
+                protected.append(proc.name())
+                continue
+            proc.kill()
+            killed.append(proc.name())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        except Exception as e:
+            print(f"[Settings] ⚠️ Could not kill {proc}: {e}")
+
+    if protected and not killed:
+        return f"[Settings] 🛡️ Protected Axiom process — will not self-terminate."
+    if killed:
+        msg = f"Force-closed: {', '.join(set(killed))}."
+        print(f"[Settings] ✅ {msg}")
+        return msg
+    return f"[Settings] No running process matching '{process_name}' was found."
+
+
 def _safe_focus_target():
     if _OS == "Windows":
         try:
@@ -595,6 +659,11 @@ ACTION_MAP = {
     "escape":                  press_escape,
     "press_escape":            press_escape,
     "cancel":                  press_escape,
+    # Safe process force-kill (never kills Axiom itself)
+    "force_close":             force_close_process,
+    "force_close_process":     force_close_process,
+    "kill_process":            force_close_process,
+    "kill":                    force_close_process,
     # RGB Hardware Control
     "change_hardware_color":   change_hardware_color,
     "rgb_color":               change_hardware_color,
@@ -622,7 +691,7 @@ def _detect_action(description: str) -> dict:
     genai.configure(api_key=_get_api_key())
     model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
-    available = ", ".join(sorted(ACTION_MAP.keys())) + ", volume_set, type_text, write_on_screen, reload_n, press_key"
+    available = ", ".join(sorted(ACTION_MAP.keys())) + ", volume_set, type_text, write_on_screen, reload_n, press_key, force_close"
 
     prompt = f"""The user wants to control their computer. Detect their intent.
 
@@ -684,6 +753,9 @@ Examples:
 - "press f5" → {{"action": "press_key", "value": "f5"}}
 - "enter'a bas" → {{"action": "enter", "value": null}}
 - "escape'e bas" → {{"action": "escape", "value": null}}
+- "force close chrome" → {{"action": "force_close", "value": "chrome"}}
+- "kill firefox" → {{"action": "force_close", "value": "firefox"}}
+- "force kill notepad" → {{"action": "force_close", "value": "notepad"}}
 - "change keyboard color to red" → {{"action": "change_hardware_color", "value": "red"}}
 - "set keyboard lights to blue" → {{"action": "change_hardware_color", "value": "blue"}}
 - "make my keyboard glow" → {{"action": "change_hardware_color", "value": "glowing"}}
@@ -779,6 +851,12 @@ def computer_settings(
             return f"Scrolled {'up' if action == 'scroll_up' else 'down'}."
         except Exception as e:
             return f"Scroll failed: {e}"
+
+    if action in ("force_close", "force_close_process", "kill_process", "kill"):
+        proc_name = str(value or params.get("process_name", params.get("description", "")))
+        if not proc_name:
+            return "[Settings] Please specify the process name to force-close, sir."
+        return force_close_process(proc_name)
 
     if action in ("change_hardware_color", "rgb_color", "keyboard_color",
                   "change_keyboard_color", "change_rgb", "set_rgb"):
