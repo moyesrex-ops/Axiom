@@ -39,6 +39,16 @@ This repo keeps the core runtime local and stable. Larger external systems such 
 
 ---
 
+## Architecture
+
+<p align="center">
+  <img src="assets/architecture-overview.svg" alt="AXIOM architecture overview" width="100%">
+</p>
+
+This is the actual shape of the project now: a Gemini Live runtime at the center, an action/tool layer for execution, a separate task engine for longer jobs, and a persistent memory/state layer underneath it.
+
+---
+
 ## Current Capability Set
 
 | Area | What Axiom Can Do |
@@ -75,6 +85,16 @@ memory/                  Long-term memory, runtime SQLite store, trading soul
 config/runtime.json      Non-secret runtime settings
 config/api_keys.json     Local API keys (created at runtime, ignored by git)
 ```
+
+---
+
+## Startup and Memory Flow
+
+<p align="center">
+  <img src="assets/startup-memory-flow.svg" alt="AXIOM startup and memory flow" width="100%">
+</p>
+
+The important change here is that Axiom no longer relies only on shallow prompt memory. It now archives conversation turns, keeps structured long-term memory, and can search that history again later.
 
 ---
 
