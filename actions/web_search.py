@@ -9,6 +9,10 @@ import json
 import sys
 from pathlib import Path
 
+import requests
+
+from core.runtime_config import load_runtime_config
+
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -23,12 +27,40 @@ def _get_api_key() -> str:
         return json.load(f)["gemini_api_key"]
 
 
+def _runtime_models() -> dict:
+    runtime = load_runtime_config()
+    return runtime.get("text_models", {}) or {}
+
+
+def _research_config() -> dict:
+    runtime = load_runtime_config()
+    return runtime.get("research", {}) or {}
+
+
+def _reasoning_model_name() -> str:
+    models = _runtime_models()
+    return (
+        str(models.get("reasoning") or "").strip()
+        or str(models.get("default") or "").strip()
+        or "gemini-2.5-flash"
+    )
+
+
+def _fast_model_name() -> str:
+    models = _runtime_models()
+    return (
+        str(models.get("fast") or "").strip()
+        or str(models.get("default") or "").strip()
+        or "gemini-2.5-flash-lite"
+    )
+
+
 def _gemini_search(query: str) -> str:
     from google import genai
 
     client = genai.Client(api_key=_get_api_key())
     response = client.models.generate_content(
-        model="gemini-2.5-flash-lite",
+        model=_fast_model_name(),
         contents=query,
         config={"tools": [{"google_search": {}}]}
     )
@@ -39,6 +71,164 @@ def _gemini_search(query: str) -> str:
     if not text.strip():
         raise ValueError("Empty response")
     return text.strip()
+
+
+def _normalized_vane_url() -> str:
+    return str(_research_config().get("vane_url", "") or "").strip().rstrip("/")
+
+
+def _match_provider_model(providers: list, provider_hint: str, model_hint: str, model_field: str) -> dict | None:
+    provider_hint = str(provider_hint or "").strip().lower()
+    model_hint = str(model_hint or "").strip().lower()
+
+    provider_candidates = []
+    for provider in providers:
+        models = provider.get(model_field, []) or []
+        if not models:
+            continue
+        provider_id = str(provider.get("id", "") or "").strip().lower()
+        provider_name = str(provider.get("name", "") or "").strip().lower()
+        if provider_hint and provider_hint not in {provider_id, provider_name}:
+            continue
+        provider_candidates.append(provider)
+
+    if not provider_candidates:
+        provider_candidates = [provider for provider in providers if provider.get(model_field)]
+
+    for provider in provider_candidates:
+        for model in provider.get(model_field, []) or []:
+            key = str(model.get("key", "") or "").strip().lower()
+            name = str(model.get("name", "") or "").strip().lower()
+            if model_hint and model_hint not in {key, name}:
+                continue
+            return {
+                "providerId": provider.get("id"),
+                "key": model.get("key"),
+                "providerName": provider.get("name", ""),
+            }
+
+    if provider_candidates:
+        provider = provider_candidates[0]
+        models = provider.get(model_field, []) or []
+        if models:
+            return {
+                "providerId": provider.get("id"),
+                "key": models[0].get("key"),
+                "providerName": provider.get("name", ""),
+            }
+    return None
+
+
+def _format_citations(sources: list, limit: int = 6) -> str:
+    lines = []
+    for index, source in enumerate((sources or [])[:limit], 1):
+        metadata = source.get("metadata", {}) or {}
+        title = str(metadata.get("title", "") or "").strip() or f"Source {index}"
+        url = str(metadata.get("url", "") or "").strip()
+        if url:
+            lines.append(f"[{index}] {title} - {url}")
+        else:
+            lines.append(f"[{index}] {title}")
+    return "\n".join(lines)
+
+
+def _vane_search(
+    query: str,
+    optimization_mode: str = "balanced",
+    sources: list[str] | None = None,
+    system_instructions: str = "",
+    history: list | None = None,
+) -> str:
+    base_url = _normalized_vane_url()
+    if not base_url:
+        raise ValueError("Vane URL is not configured.")
+
+    research_cfg = _research_config()
+    providers_response = requests.get(f"{base_url}/api/providers", timeout=20)
+    providers_response.raise_for_status()
+    providers = (providers_response.json() or {}).get("providers", []) or []
+    if not providers:
+        raise ValueError("Vane did not return any active providers/models.")
+
+    chat_model = _match_provider_model(
+        providers,
+        research_cfg.get("vane_chat_provider", ""),
+        research_cfg.get("vane_chat_model", ""),
+        "chatModels",
+    )
+    embedding_model = _match_provider_model(
+        providers,
+        research_cfg.get("vane_embedding_provider", ""),
+        research_cfg.get("vane_embedding_model", ""),
+        "embeddingModels",
+    )
+    if not chat_model or not embedding_model:
+        raise ValueError("Could not resolve Vane chat or embedding model configuration.")
+
+    payload = {
+        "chatModel": {
+            "providerId": chat_model["providerId"],
+            "key": chat_model["key"],
+        },
+        "embeddingModel": {
+            "providerId": embedding_model["providerId"],
+            "key": embedding_model["key"],
+        },
+        "optimizationMode": optimization_mode,
+        "sources": list(sources or ["web"]),
+        "query": query,
+        "history": history or [],
+        "systemInstructions": (
+            system_instructions
+            or "Cite concrete sources, avoid filler, and be explicit about uncertainty."
+        ),
+        "stream": False,
+    }
+
+    response = requests.post(f"{base_url}/api/search", json=payload, timeout=90)
+    response.raise_for_status()
+    data = response.json() or {}
+
+    message = str(data.get("message", "") or "").strip()
+    source_rows = data.get("sources", []) or []
+    if not message:
+        raise ValueError("Vane returned an empty answer.")
+
+    citations = _format_citations(source_rows)
+    result = f"[VANE SEARCH] {query}\n\n{message}"
+    if citations:
+        result += f"\n\nSources:\n{citations}"
+
+    try:
+        from memory.memory_manager import save_to_nexus
+        from memory.runtime_store import log_event
+
+        save_to_nexus(
+            f"Vane Search: {query[:60]}",
+            result[:6000],
+            kind="research",
+            source=base_url,
+            metadata={
+                "optimization_mode": optimization_mode,
+                "sources": list(sources or ["web"]),
+                "provider": chat_model.get("providerName", ""),
+                "model": chat_model.get("key", ""),
+            },
+        )
+        log_event(
+            "research",
+            "vane_search",
+            query[:300],
+            metadata={
+                "source_count": len(source_rows),
+                "base_url": base_url,
+                "optimization_mode": optimization_mode,
+            },
+        )
+    except Exception:
+        pass
+
+    return result
 
 
 
@@ -67,6 +257,25 @@ def _format_ddg(query: str, results: list) -> str:
         if r.get("url"):     lines.append(f"   {r['url']}")
         lines.append("")
     return "\n".join(lines).strip()
+
+
+def _query_needs_repo_hunt(query: str) -> bool:
+    normalized = str(query or "").lower()
+    hints = (
+        "github",
+        "gitlab",
+        "open source",
+        "opensource",
+        "repo",
+        "repository",
+        "clone",
+        "tool",
+        "framework",
+        "agent",
+        "memory system",
+        "search engine",
+    )
+    return any(hint in normalized for hint in hints)
 
 
 def _compare(items: list, aspect: str) -> str:
@@ -122,7 +331,12 @@ def _fetch_page_content(url: str) -> str:
         return f"[PageFetch] Could not fetch {url}: {e}"
 
 
-def deep_search(query: str, speak=None) -> str:
+def deep_search(
+    query: str,
+    speak=None,
+    system_instructions: str = "",
+    sources: list[str] | None = None,
+) -> str:
     """
     Perplexity-style iterative deep search.
     1. Breaks query into 3 focused sub-queries.
@@ -132,10 +346,26 @@ def deep_search(query: str, speak=None) -> str:
     if speak:
         speak(f"Initiating deep search for: {query}")
 
+    research_cfg = _research_config()
+    research_backend = str(research_cfg.get("backend", "axiom") or "axiom").strip().lower()
+    if research_backend in ("vane", "auto") and _normalized_vane_url():
+        try:
+            return _vane_search(
+                query,
+                optimization_mode="quality",
+                sources=sources or ["web", "discussions", "academic"],
+                system_instructions=(
+                    system_instructions
+                    or "Perform a rigorous multi-source research pass. Prefer factual depth, explicit uncertainty, and citations."
+                ),
+            )
+        except Exception as e:
+            print(f"[DeepSearch] ⚠️ Vane backend failed: {e}")
+
     try:
         import google.generativeai as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel(_reasoning_model_name())
 
         # Step 1: Break query into sub-queries
         sub_query_prompt = f"""
@@ -152,6 +382,14 @@ Question: {query}
                 sub_queries = [query, f"{query} analysis", f"{query} strategy"]
         except Exception:
             sub_queries = [query, f"{query} analysis", f"{query} strategy"]
+
+        if _query_needs_repo_hunt(query):
+            repo_query = f"site:github.com {query}"
+            if not any("github.com" in str(item).lower() for item in sub_queries):
+                if len(sub_queries) >= 3:
+                    sub_queries[-1] = repo_query
+                else:
+                    sub_queries.append(repo_query)
 
         print(f"[DeepSearch] 🔍 Sub-queries: {sub_queries}")
 
@@ -197,6 +435,7 @@ INSTRUCTIONS:
 - Cite sources inline as [1], [2], [3] where relevant.
 - Extract any trading strategies, patterns, or insights if present.
 - Be specific, factual, and avoid generic filler.
+- {system_instructions or "Call out uncertainty clearly if the evidence is weak or conflicting."}
 """
         synth_resp = model.generate_content(synthesis_prompt)
         result = synth_resp.text.strip()
@@ -204,7 +443,13 @@ INSTRUCTIONS:
         # Save to Nexus Brain
         try:
             from memory.memory_manager import save_to_nexus
-            save_to_nexus(f"Deep Search: {query[:60]}", result[:2000])
+            save_to_nexus(
+                f"Deep Search: {query[:60]}",
+                result[:3000],
+                kind="research",
+                source="axiom.deep_search",
+                metadata={"sources": len(all_content[:12])},
+            )
         except Exception:
             pass
 
@@ -338,6 +583,9 @@ def web_search(
     mode   = params.get("mode", "search").lower()
     items  = params.get("items", [])
     aspect = params.get("aspect", "general")
+    sources = params.get("sources", [])
+    if not isinstance(sources, list):
+        sources = []
 
     if not query and not items:
         return "Please provide a search query, sir."
@@ -352,7 +600,11 @@ def web_search(
 
     # Deep Perplexity-style search
     if mode == "deep":
-        return deep_search(query)
+        return deep_search(
+            query,
+            system_instructions=str(params.get("context", "") or "").strip(),
+            sources=sources,
+        )
 
     # Social media analysis
     if mode == "social" and query:
@@ -365,6 +617,19 @@ def web_search(
             print("[WebSearch] ✅ Compare done.")
             return result
 
+        research_cfg = _research_config()
+        research_backend = str(research_cfg.get("backend", "axiom") or "axiom").strip().lower()
+        if mode == "search" and query and research_backend in ("vane", "auto") and _normalized_vane_url():
+            try:
+                return _vane_search(
+                    query,
+                    optimization_mode="balanced",
+                    sources=sources or ["web"],
+                    system_instructions=str(params.get("context", "") or "").strip(),
+                )
+            except Exception as e:
+                print(f"[WebSearch] ⚠️ Vane backend failed ({e}), falling back to local search.")
+
         print("[WebSearch] 🌐 Gemini search...")
         try:
             result = _gemini_search(query)
@@ -372,7 +637,12 @@ def web_search(
             # Auto-save important searches to Nexus Brain
             try:
                 from memory.memory_manager import save_to_nexus
-                save_to_nexus(f"Web Search: {query[:60]}", result[:1000])
+                save_to_nexus(
+                    f"Web Search: {query[:60]}",
+                    result[:1500],
+                    kind="research",
+                    source="axiom.google_search",
+                )
             except Exception:
                 pass
             return result

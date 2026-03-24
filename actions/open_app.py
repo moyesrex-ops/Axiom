@@ -92,7 +92,7 @@ def _launch_windows(app_name: str) -> bool:
         time.sleep(3.0)
         return True
     except Exception as e:
-        print(f"[open_app] ⚠️ Windows launch failed: {e}")
+        print(f"[open_app] Warning: Windows launch failed: {e}")
         return False
 
 def _launch_macos(app_name: str) -> bool:
@@ -122,7 +122,7 @@ def _launch_macos(app_name: str) -> bool:
         time.sleep(1.5)
         return True
     except Exception as e:
-        print(f"[open_app] ⚠️ macOS Spotlight failed: {e}")
+        print(f"[open_app] Warning: macOS Spotlight failed: {e}")
         return False
 
 
@@ -182,7 +182,7 @@ def open_app(
         return f"Unsupported OS: {system}"
 
     normalized = _normalize(app_name)
-    print(f"[open_app] 🚀 Launching: {app_name} → {normalized} ({system})")
+    print(f"[open_app] Launching: {app_name} -> {normalized} ({system})")
 
     if player:
         player.write_log(f"[open_app] {app_name}")
@@ -204,5 +204,5 @@ def open_app(
         )
 
     except Exception as e:
-        print(f"[open_app] ❌ {e}")
+        print(f"[open_app] Error: {e}")
         return f"Failed to open {app_name}, sir: {e}"

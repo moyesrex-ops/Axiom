@@ -8,7 +8,9 @@ from memory.runtime_store import (
     log_conversation_turn,
     recent_conversation_turns,
     recent_events,
+    search_knowledge_items,
     search_conversation_turns,
+    upsert_knowledge_item,
 )
 
 
@@ -111,7 +113,13 @@ def update_memory(memory_update: dict) -> dict:
 
 # --- NEXUS BRAIN FUNCTIONS ---
 
-def save_to_nexus(topic: str, content: str) -> bool:
+def save_to_nexus(
+    topic: str,
+    content: str,
+    kind: str = "nexus",
+    source: str = "memory.long_term",
+    metadata: dict | None = None,
+) -> bool:
     memory = load_memory()
     if "nexus_knowledge" not in memory:
         memory["nexus_knowledge"] = {}
@@ -122,7 +130,22 @@ def save_to_nexus(topic: str, content: str) -> bool:
     try:
         from memory.runtime_store import log_event
 
-        log_event("nexus", topic, str(content)[:2000])
+        upsert_knowledge_item(
+            kind=str(kind or "nexus"),
+            title=str(topic or "untitled"),
+            content=str(content or "")[:12000],
+            source=str(source or "memory.long_term"),
+            metadata=metadata or {},
+        )
+        log_event(
+            "nexus",
+            topic,
+            str(content)[:2000],
+            metadata={
+                "kind": str(kind or "nexus"),
+                "source": str(source or "memory.long_term"),
+            },
+        )
     except Exception:
         pass
     return True
@@ -152,19 +175,55 @@ def search_memory_archive(query: str, limit: int = 5) -> dict:
         if len(token) >= 4
     }
 
+    indexed_hits = search_knowledge_items(query, limit=max(int(limit) * 2, 8))
+    indexed_results = []
+    nexus_results = []
+    seen_titles = set()
+    for item in indexed_hits:
+        title = str(item.get("title", "")).strip()
+        content = str(item.get("content", "")).strip()
+        kind = str(item.get("kind", "general") or "general").strip() or "general"
+        source = str(item.get("source", "")).strip()
+        if not title or not content:
+            continue
+        seen_titles.add(title.lower())
+        indexed_results.append(
+            {
+                "topic": title,
+                "title": title,
+                "kind": kind,
+                "source": source,
+                "content": content[:1200],
+            }
+        )
+        if kind == "nexus" and len(nexus_results) < int(limit):
+            nexus_results.append(
+                {
+                    "topic": title,
+                    "content": content[:1200],
+                    "kind": kind,
+                    "source": source,
+                }
+            )
+
     nexus_hits = []
     for topic, content in knowledge.items():
+        if str(topic).lower() in seen_titles:
+            continue
         haystack = f"{topic}\n{content}".lower()
         score = sum(1 for token in query_terms if token in haystack)
         if score > 0:
             nexus_hits.append((score, topic, content))
     nexus_hits.sort(key=lambda item: item[0], reverse=True)
 
+    for _, topic, content in nexus_hits:
+        if len(nexus_results) >= int(limit):
+            break
+        nexus_results.append({"topic": topic, "content": str(content)[:1200]})
+
     return {
-        "nexus": [
-            {"topic": topic, "content": str(content)[:1200]}
-            for _, topic, content in nexus_hits[: int(limit)]
-        ],
+        "knowledge": indexed_results[: max(int(limit), 8)],
+        "nexus": nexus_results,
         "conversations": search_conversation_turns(query, limit=limit),
     }
 

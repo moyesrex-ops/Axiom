@@ -12,6 +12,7 @@ import time
 import subprocess
 import sys
 import platform
+import shutil
 from pathlib import Path
 
 try:
@@ -453,6 +454,169 @@ def toggle_wifi():
     else:
         subprocess.run(["nmcli", "radio", "wifi"])
 
+
+def _run_command_capture(command: list[str], timeout: int = 12) -> str:
+    try:
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        output = (completed.stdout or completed.stderr or "").strip()
+        return output
+    except Exception as e:
+        return str(e)
+
+
+def _windows_gpu_status() -> list[str]:
+    lines = []
+
+    if shutil.which("nvidia-smi"):
+        output = _run_command_capture(
+            [
+                "nvidia-smi",
+                "--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            timeout=10,
+        )
+        if output and "failed" not in output.lower():
+            for row in output.splitlines():
+                parts = [part.strip() for part in row.split(",")]
+                if len(parts) >= 5:
+                    lines.append(
+                        f"GPU: {parts[0]} | temp {parts[1]}C | util {parts[2]}% | memory {parts[3]}/{parts[4]} MiB"
+                    )
+            if lines:
+                return lines
+
+    ps_script = (
+        "Get-CimInstance Win32_VideoController | "
+        "Select-Object Name, DriverVersion | ConvertTo-Json -Compress"
+    )
+    output = _run_command_capture(["powershell", "-NoProfile", "-Command", ps_script], timeout=10)
+    try:
+        data = json.loads(output)
+        if isinstance(data, dict):
+            data = [data]
+        for item in data or []:
+            name = str(item.get("Name", "") or "").strip()
+            driver = str(item.get("DriverVersion", "") or "").strip()
+            if name:
+                lines.append(f"GPU: {name}" + (f" | driver {driver}" if driver else ""))
+    except Exception:
+        if output:
+            lines.append(f"GPU: {output[:180]}")
+
+    return lines
+
+
+def hardware_status() -> str:
+    lines = [f"Hardware status ({_OS})"]
+
+    try:
+        import psutil
+
+        cpu_name = platform.processor() or "unknown CPU"
+        lines.append(f"CPU: {cpu_name} | logical cores {psutil.cpu_count(logical=True)}")
+
+        try:
+            cpu_percent = psutil.cpu_percent(interval=0.25)
+            lines.append(f"CPU load: {cpu_percent:.1f}%")
+        except Exception:
+            pass
+
+        try:
+            mem = psutil.virtual_memory()
+            lines.append(
+                f"Memory: {mem.used / (1024**3):.1f}/{mem.total / (1024**3):.1f} GB used ({mem.percent:.0f}%)"
+            )
+        except Exception:
+            pass
+
+        try:
+            root_drive = Path.home().anchor or "C:\\"
+            disk = psutil.disk_usage(root_drive)
+            lines.append(
+                f"Disk: {disk.used / (1024**3):.1f}/{disk.total / (1024**3):.1f} GB used ({disk.percent:.0f}%)"
+            )
+        except Exception:
+            pass
+
+        try:
+            battery = psutil.sensors_battery()
+            if battery:
+                plugged = "plugged in" if battery.power_plugged else "on battery"
+                lines.append(f"Battery: {battery.percent:.0f}% | {plugged}")
+        except Exception:
+            pass
+
+        try:
+            temps = psutil.sensors_temperatures()
+            if temps:
+                first_label = None
+                first_temp = None
+                for sensor_name, entries in temps.items():
+                    if not entries:
+                        continue
+                    first = entries[0]
+                    first_label = sensor_name
+                    first_temp = getattr(first, "current", None)
+                    if first_temp is not None:
+                        lines.append(f"Temperature: {first_label} {float(first_temp):.1f}C")
+                        break
+        except Exception:
+            pass
+    except ImportError:
+        lines.append("psutil not installed; live CPU/memory telemetry unavailable.")
+
+    if _OS == "Windows":
+        lines.extend(_windows_gpu_status())
+
+        ps_script = (
+            "$cs = Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer, Model; "
+            "$bb = Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer, Product; "
+            "[PSCustomObject]@{"
+            "Manufacturer=$cs.Manufacturer; Model=$cs.Model; "
+            "BoardManufacturer=$bb.Manufacturer; BoardProduct=$bb.Product"
+            "} | ConvertTo-Json -Compress"
+        )
+        output = _run_command_capture(["powershell", "-NoProfile", "-Command", ps_script], timeout=10)
+        try:
+            data = json.loads(output)
+            manufacturer = str(data.get("Manufacturer", "") or "").strip()
+            model = str(data.get("Model", "") or "").strip()
+            board_maker = str(data.get("BoardManufacturer", "") or "").strip()
+            board_name = str(data.get("BoardProduct", "") or "").strip()
+            if manufacturer or model:
+                lines.append(f"System: {manufacturer} {model}".strip())
+            if board_maker or board_name:
+                lines.append(f"Motherboard: {board_maker} {board_name}".strip())
+        except Exception:
+            pass
+
+    if _OPENRGB:
+        try:
+            rgb = hardware_rgb_status()
+            first_rgb_line = str(rgb).splitlines()[0] if rgb else ""
+            if first_rgb_line:
+                lines.append(first_rgb_line)
+        except Exception:
+            pass
+
+    return "\n".join(lines)
+
+
+def open_device_manager():
+    if _OS == "Windows":
+        subprocess.Popen(["devmgmt.msc"])
+    elif _OS == "Darwin":
+        subprocess.Popen(["open", "/System/Library/CoreServices/Applications/System Information.app"])
+    else:
+        subprocess.Popen(["lshw"])
+
 # ── RGB Hardware Control ──────────────────────────────────────────────────────
 
 _RGB_COLOR_MAP = {
@@ -675,6 +839,12 @@ ACTION_MAP = {
     "toggle_wifi":             toggle_wifi,
     "wifi":                    toggle_wifi,
     "wifi_toggle":             toggle_wifi,
+    "hardware_status":         hardware_status,
+    "hardware_inventory":      hardware_status,
+    "system_hardware":         hardware_status,
+    "gpu_status":              hardware_status,
+    "device_manager":          open_device_manager,
+    "open_device_manager":     open_device_manager,
     "focus_search":            focus_search,
     "address_bar":             focus_search,
     "url_bar":                 focus_search,
@@ -821,6 +991,10 @@ Examples:
 - "make my keyboard glow" → {{"action": "change_hardware_color", "value": "glowing"}}
 - "make my keyboard rainbow" → {{"action": "change_hardware_color", "value": "rainbow"}}
 - "show rgb devices" → {{"action": "hardware_rgb_status", "value": null}}
+- "show hardware status" → {{"action": "hardware_status", "value": null}}
+- "what hardware do I have" → {{"action": "hardware_inventory", "value": null}}
+- "show gpu status" → {{"action": "gpu_status", "value": null}}
+- "open device manager" → {{"action": "open_device_manager", "value": null}}
 - "rgb red" → {{"action": "change_hardware_color", "value": "red"}}
 - "keyboard rengi kırmızı yap" → {{"action": "change_hardware_color", "value": "red"}}
 - "turn off rgb" → {{"action": "change_hardware_color", "value": "off"}}
@@ -881,6 +1055,12 @@ def computer_settings(
         "set_rgb",
         "hardware_rgb_status",
         "rgb_status",
+        "hardware_status",
+        "hardware_inventory",
+        "system_hardware",
+        "gpu_status",
+        "device_manager",
+        "open_device_manager",
         "force_close",
         "force_close_process",
         "kill_process",
@@ -936,6 +1116,13 @@ def computer_settings(
 
     if action in ("hardware_rgb_status", "rgb_status"):
         return hardware_rgb_status()
+
+    if action in ("hardware_status", "hardware_inventory", "system_hardware", "gpu_status"):
+        return hardware_status()
+
+    if action in ("device_manager", "open_device_manager"):
+        open_device_manager()
+        return "Opened device manager."
 
     if action in ("change_hardware_color", "rgb_color", "keyboard_color",
                   "change_keyboard_color", "change_rgb", "set_rgb"):

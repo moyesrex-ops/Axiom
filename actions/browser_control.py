@@ -4,8 +4,44 @@ import concurrent.futures
 import platform
 import shutil
 import subprocess
+import re
+from urllib.parse import quote_plus
 from pathlib import Path
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+
+
+def _normalize_youtube_kind(query: str = "", requested_kind: str = "auto") -> str:
+    requested = str(requested_kind or "auto").strip().lower()
+    if requested in {"video", "videos", "normal", "full"}:
+        return "video"
+    if requested in {"short", "shorts"}:
+        return "shorts"
+
+    q = str(query or "").lower()
+    if any(token in q for token in (" short ", " shorts", "shorts ", "#shorts", "youtube short")):
+        return "shorts"
+    return "video"
+
+
+def _youtube_search_url(query: str) -> str:
+    return f"https://www.youtube.com/results?search_query={quote_plus(str(query or '').strip())}"
+
+
+def _looks_like_youtube_watch_url(url: str) -> bool:
+    return "youtube.com/watch" in url or "youtu.be/" in url
+
+
+def _looks_like_youtube_shorts_url(url: str) -> bool:
+    return "/shorts/" in url
+
+
+def _normalize_youtube_href(href: str) -> str:
+    raw = str(href or "").strip()
+    if raw.startswith("//"):
+        return "https:" + raw
+    if raw.startswith("/"):
+        return "https://www.youtube.com" + raw
+    return raw
 
 def _get_default_browser_id() -> str:
     """Returns raw default browser identifier string for current OS."""
@@ -87,7 +123,7 @@ def _get_opera_executable() -> str | None:
                     # Strip quotes and args
                     exe  = val.strip().strip('"').split('"')[0].split(" --")[0].strip()
                     if exe and Path(exe).exists():
-                        print(f"[Browser] 🔍 Opera found via registry: {exe}")
+                        print(f"[Browser] Found Opera via registry: {exe}")
                         return exe
                 except Exception:
                     continue
@@ -130,7 +166,7 @@ def _find_browser_executable(prog_id: str) -> tuple:
         for binary in binaries:
             path = shutil.which(binary)
             if path:
-                print(f"[Browser] 🔍 Found {browser_name} at: {path}")
+                print(f"[Browser] Found {browser_name} at: {path}")
                 return "chromium", path, None
 
     if "chrome" in prog_id or not prog_id:
@@ -178,8 +214,23 @@ class _BrowserThread:
         return future.result(timeout=timeout)
     
     async def _get_page(self):
+        if self._context:
+            live_pages = [page for page in self._context.pages if not page.is_closed()]
+            if live_pages:
+                if self._page is None or self._page.is_closed() or self._page not in live_pages:
+                    self._page = live_pages[-1]
+                try:
+                    await self._page.bring_to_front()
+                except Exception:
+                    pass
+                return self._page
+
         if self._page is None or self._page.is_closed():
             await self._launch()
+        try:
+            await self._page.bring_to_front()
+        except Exception:
+            pass
         return self._page
 
     async def _launch(self):
@@ -201,12 +252,12 @@ class _BrowserThread:
             if self._browser is None or not self._browser.is_connected():
                 self._browser = await engine.launch(**launch_kwargs)
                 print(
-                    f"[Browser] ✅ Launched ({engine_name}"
+                    f"[Browser] Launched ({engine_name}"
                     f"{' / ' + channel if channel else ''}"
                     f"{' / ' + exe_path if exe_path else ''})"
                 )
         except Exception as e:
-            print(f"[Browser] ⚠️ Launch failed ({e}), falling back to built-in Chromium")
+            print(f"[Browser] Warning: launch failed ({e}), falling back to built-in Chromium")
             self._browser = await self._playwright.chromium.launch(
                 headless=False,
                 args=["--start-maximized"]
@@ -370,6 +421,201 @@ class _BrowserThread:
         await self._close()
         return "Browser closed."
 
+    async def _current_state(self) -> str:
+        page = await self._get_page()
+        pages = [item for item in (self._context.pages if self._context else []) if not item.is_closed()]
+
+        try:
+            title = (await page.title()).strip()
+        except Exception:
+            title = ""
+
+        url = str(page.url or "").strip() or "about:blank"
+        lines = [
+            f"Current page: {title or 'untitled'}",
+            f"URL: {url}",
+            f"Open tabs: {len(pages) or 1}",
+        ]
+
+        if "youtube.com" in url or "youtu.be" in url:
+            try:
+                state = await page.evaluate(
+                    """() => {
+                        const video = document.querySelector('video');
+                        return {
+                            isWatch: location.href.includes('/watch') || location.hostname === 'youtu.be',
+                            isShort: location.href.includes('/shorts/'),
+                            playing: video ? !video.paused : null,
+                            currentTime: video ? Math.floor(video.currentTime || 0) : null,
+                            duration: video ? Math.floor(video.duration || 0) : null
+                        };
+                    }"""
+                )
+            except Exception:
+                state = {}
+
+            if state.get("isShort"):
+                lines.append("YouTube mode: shorts")
+            elif state.get("isWatch"):
+                lines.append("YouTube mode: video")
+            elif "/results" in url:
+                lines.append("YouTube mode: search results")
+
+            if state.get("playing") is True:
+                lines.append("Playback: playing")
+            elif state.get("playing") is False:
+                lines.append("Playback: paused")
+
+            if state.get("currentTime") is not None and state.get("duration"):
+                lines.append(f"Position: {state['currentTime']}s / {state['duration']}s")
+
+        return "\n".join(lines)
+
+    async def _close_tab(self) -> str:
+        page = await self._get_page()
+        pages = [item for item in (self._context.pages if self._context else []) if not item.is_closed()]
+        if not pages:
+            return "No browser tab is open."
+
+        closing_title = ""
+        try:
+            closing_title = (await page.title()).strip()
+        except Exception:
+            closing_title = page.url
+
+        await page.close()
+
+        remaining = [item for item in (self._context.pages if self._context else []) if not item.is_closed()]
+        if not remaining:
+            self._page = None
+            return f"Closed current tab: {closing_title or 'untitled'}."
+
+        self._page = remaining[-1]
+        try:
+            await self._page.bring_to_front()
+            next_title = (await self._page.title()).strip() or self._page.url
+        except Exception:
+            next_title = self._page.url
+
+        return (
+            f"Closed current tab: {closing_title or 'untitled'}.\n"
+            f"Now focused: {next_title}"
+        )
+
+    async def _youtube_play(self, query: str = "", kind: str = "auto", url: str = "") -> str:
+        page = await self._get_page()
+        wanted_kind = _normalize_youtube_kind(query=query, requested_kind=kind)
+
+        if str(url or "").strip():
+            target_url = _normalize_youtube_href(url)
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=20000)
+            try:
+                title = (await page.title()).replace(" - YouTube", "").strip()
+            except Exception:
+                title = ""
+            actual_kind = "shorts" if _looks_like_youtube_shorts_url(page.url) else "video"
+            return f"Opened YouTube {actual_kind}: {title or page.url}"
+
+        query = str(query or "").strip()
+        if not query:
+            return "No YouTube query provided."
+
+        await page.goto(_youtube_search_url(query), wait_until="domcontentloaded", timeout=20000)
+        try:
+            await page.wait_for_selector("a#video-title, a[href*='/shorts/']", timeout=9000)
+        except Exception:
+            await page.wait_for_timeout(1800)
+
+        try:
+            raw_results = await page.evaluate(
+                """() => {
+                    const selectors = [
+                        'ytd-video-renderer a#video-title',
+                        'ytd-video-renderer a#thumbnail',
+                        'ytd-rich-grid-media a#video-title',
+                        'ytd-rich-grid-media a#thumbnail',
+                        'ytd-reel-shelf-renderer a[href*="/shorts/"]',
+                        'ytd-reel-item-renderer a[href*="/shorts/"]',
+                        'a#video-title',
+                        'a#thumbnail'
+                    ];
+                    const items = [];
+                    const seen = new Set();
+                    for (const selector of selectors) {
+                        for (const el of document.querySelectorAll(selector)) {
+                            const href = (el.href || el.getAttribute('href') || '').trim();
+                            if (!href || seen.has(href)) continue;
+                            seen.add(href);
+                            const title = (
+                                el.getAttribute('title') ||
+                                el.textContent ||
+                                el.getAttribute('aria-label') ||
+                                ''
+                            ).trim();
+                            const container = el.closest(
+                                'ytd-video-renderer, ytd-rich-grid-media, ytd-rich-item-renderer, ytd-reel-shelf-renderer, ytd-reel-item-renderer, ytd-item-section-renderer'
+                            );
+                            items.push({
+                                href,
+                                title,
+                                text: (container?.innerText || '').trim()
+                            });
+                        }
+                    }
+                    return items.slice(0, 80);
+                }"""
+            )
+        except Exception as error:
+            return f"YouTube search parsing failed: {error}"
+
+        candidates = []
+        fallback_candidates = []
+        for item in raw_results or []:
+            href = _normalize_youtube_href(item.get("href", ""))
+            if not href or "youtube.com" not in href and "youtu.be" not in href:
+                continue
+
+            title = str(item.get("title", "") or "").strip()
+            text = str(item.get("text", "") or "").strip()
+            lowered = href.lower()
+            is_short = _looks_like_youtube_shorts_url(lowered)
+            is_watch = _looks_like_youtube_watch_url(lowered)
+
+            entry = {
+                "href": href,
+                "title": title,
+                "text": text,
+                "is_short": is_short,
+                "is_watch": is_watch,
+            }
+            fallback_candidates.append(entry)
+
+            if wanted_kind == "shorts" and is_short:
+                candidates.append(entry)
+            elif wanted_kind == "video" and is_watch and not is_short:
+                candidates.append(entry)
+
+        if not candidates:
+            if wanted_kind == "video":
+                candidates = [item for item in fallback_candidates if item["is_watch"]]
+            elif wanted_kind == "shorts":
+                candidates = [item for item in fallback_candidates if item["is_short"]]
+
+        if not candidates:
+            return f"No suitable YouTube {wanted_kind} results found for: {query}"
+
+        target = candidates[0]
+        await page.goto(target["href"], wait_until="domcontentloaded", timeout=20000)
+        await page.wait_for_timeout(900)
+
+        try:
+            opened_title = (await page.title()).replace(" - YouTube", "").strip()
+        except Exception:
+            opened_title = target["title"]
+
+        actual_kind = "shorts" if _looks_like_youtube_shorts_url(page.url.lower()) else "video"
+        return f"Playing YouTube {actual_kind}: {opened_title or target['title'] or query}"
+
 _bt         = _BrowserThread()
 _bt_started = False
 _bt_lock    = threading.Lock()
@@ -393,7 +639,8 @@ def browser_control(
 
     parameters:
         action      : go_to | search | click | type | scroll | fill_form |
-                      smart_click | smart_type | get_text | press | close
+                      smart_click | smart_type | get_text | press | current_state |
+                      close_tab | youtube_play | close
         url         : URL for go_to
         query       : search query
         engine      : google | bing | duckduckgo (default: google)
@@ -405,6 +652,7 @@ def browser_control(
         key         : key name for press (e.g. Enter, Escape, Tab)
         fields      : {selector: value} dict for fill_form
         clear_first : bool, clear input before typing (default: True)
+        kind        : youtube_play only: video | shorts | auto
     """
     _ensure_started()
 
@@ -457,6 +705,21 @@ def browser_control(
 
         elif action == "press":
             result = _bt.run(_bt._press(parameters.get("key", "Enter")))
+
+        elif action == "current_state":
+            result = _bt.run(_bt._current_state())
+
+        elif action == "close_tab":
+            result = _bt.run(_bt._close_tab())
+
+        elif action == "youtube_play":
+            result = _bt.run(
+                _bt._youtube_play(
+                    query=parameters.get("query", ""),
+                    kind=parameters.get("kind", "auto"),
+                    url=parameters.get("url", ""),
+                )
+            )
 
         elif action == "close":
             result = _bt.run(_bt._close_browser())

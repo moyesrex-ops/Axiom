@@ -18,8 +18,22 @@
   },
   "integrations": {
     "mirofish_path": "",
+    "mirofish_url": "http://127.0.0.1:5001",
+    "mirofish_auto_start": false,
     "automaton_path": "",
+    "automaton_state_dir": "",
+    "automaton_auto_start": false,
     "personaplex_path": ""
+  },
+  "research": {
+    "backend": "auto",
+    "vane_url": "",
+    "vane_chat_provider": "",
+    "vane_chat_model": "",
+    "vane_embedding_provider": "",
+    "vane_embedding_model": "",
+    "deep_search_max_queries": 4,
+    "deep_search_results_per_query": 4
   },
   "channels": {
     "telegram": {

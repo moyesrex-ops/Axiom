@@ -36,9 +36,61 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
         log_event("capabilities", "system_context", report[:2000])
         return report
 
+    if action == "hardware":
+        try:
+            from actions.computer_settings import hardware_status
+
+            report = hardware_status()
+            log_event("capabilities", "hardware_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Hardware status failed: {error}"
+
+    if action == "integrations":
+        try:
+            from core.automaton_bridge import format_automaton_status
+            from core.mirofish_bridge import format_mirofish_status
+
+            report = f"{format_mirofish_status()}\n\n{format_automaton_status()}"
+            log_event("capabilities", "integrations_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Integration status failed: {error}"
+
+    if action == "mirofish":
+        try:
+            from core.mirofish_bridge import format_mirofish_status
+
+            report = format_mirofish_status()
+            log_event("capabilities", "mirofish_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"MiroFish status failed: {error}"
+
+    if action == "automaton":
+        try:
+            from core.automaton_bridge import format_automaton_status
+
+            report = format_automaton_status()
+            log_event("capabilities", "automaton_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Automaton status failed: {error}"
+
     if action == "failures":
         rows = recent_failures(limit=limit)
         if not rows:
+            session_rows = recent_events(limit=max(limit * 3, 18), kind="session")
+            connection_errors = [row for row in session_rows if row.get("topic") == "connection_error"]
+            reconnects = [row for row in session_rows if row.get("topic") == "reconnected"]
+            recoveries = [row for row in session_rows if row.get("topic") == "partial_turn_recovered"]
+            if connection_errors or reconnects or recoveries:
+                return (
+                    "No rows exist in the failures table, but session instability was detected.\n"
+                    f"- connection_error events: {len(connection_errors)}\n"
+                    f"- reconnected events: {len(reconnects)}\n"
+                    f"- partial_turn_recovered events: {len(recoveries)}"
+                )
             return "No recent failures recorded."
         lines = ["Recent failures"]
         for row in rows:
@@ -71,4 +123,7 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             )
         return "\n".join(lines)
 
-    return "Unknown action. Use summary, context, failures, events, or tasks."
+    return (
+        "Unknown action. Use summary, status, context, hardware, integrations, "
+        "mirofish, automaton, failures, events, or tasks."
+    )

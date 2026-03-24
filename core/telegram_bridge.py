@@ -169,6 +169,34 @@ def _text_model_name() -> str:
     )
 
 
+def _probe_bridge_state() -> dict:
+    details: dict = {}
+
+    try:
+        response = requests.get(_api_url("getMe"), timeout=15)
+        response.raise_for_status()
+        result = (response.json() or {}).get("result", {}) or {}
+        details["bot_id"] = result.get("id")
+        details["bot_username"] = result.get("username", "")
+        details["bot_name"] = result.get("first_name", "")
+    except Exception as error:
+        details["bot_probe_error"] = str(error)
+
+    try:
+        response = requests.get(_api_url("getWebhookInfo"), timeout=15)
+        response.raise_for_status()
+        result = (response.json() or {}).get("result", {}) or {}
+        details["webhook_url"] = result.get("url", "")
+        details["pending_update_count"] = int(result.get("pending_update_count", 0) or 0)
+        last_error = str(result.get("last_error_message", "") or "").strip()
+        if last_error:
+            details["webhook_last_error"] = last_error
+    except Exception as error:
+        details["webhook_probe_error"] = str(error)
+
+    return details
+
+
 def _relevant_memory_block(query: str) -> str:
     hits = search_memory_archive(query, limit=3)
     lines = []
@@ -310,6 +338,16 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
     if not chat_id:
         return
 
+    log_event(
+        "telegram",
+        "incoming_message",
+        text[:300],
+        metadata={
+            "chat_id": chat_id,
+            "message_id": message.get("message_id"),
+        },
+    )
+
     allowed = _allowed_chat_ids()
     if allowed and chat_id not in allowed:
         _send_message(chat_id, "This Telegram chat is not authorized for AXIOM.")
@@ -378,17 +416,42 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
 
 def _poll_loop(log_func: Callable | None = None) -> None:
     offset = 0
+    bridge_ready_logged = False
     log_event("telegram", "bridge_started", "Telegram bridge thread started.")
     if log_func:
         log_func("Telegram bridge started.")
 
     while True:
         if not _is_enabled():
+            bridge_ready_logged = False
             time.sleep(3)
             continue
 
         poll_seconds = float(_telegram_config().get("poll_seconds", 1.5) or 1.5)
         try:
+            if not bridge_ready_logged:
+                details = _probe_bridge_state()
+                username = str(details.get("bot_username", "") or "").strip()
+                if username:
+                    log_event("telegram", "bridge_ready", f"@{username}", metadata=details)
+                    if log_func:
+                        log_func(f"Telegram bridge ready: @{username}")
+                else:
+                    log_event("telegram", "bridge_probe", json.dumps(details, ensure_ascii=False)[:500])
+
+                webhook_url = str(details.get("webhook_url", "") or "").strip()
+                if webhook_url:
+                    log_event(
+                        "telegram",
+                        "webhook_active",
+                        webhook_url[:500],
+                        metadata={"pending_update_count": details.get("pending_update_count", 0)},
+                    )
+                    if log_func:
+                        log_func("Telegram webhook is active; polling may conflict until it is cleared.")
+
+                bridge_ready_logged = True
+
             response = requests.get(
                 _api_url("getUpdates"),
                 params={"timeout": max(1, int(poll_seconds * 10)), "offset": offset},
@@ -401,6 +464,17 @@ def _poll_loop(log_func: Callable | None = None) -> None:
                 message = update.get("message") or update.get("edited_message")
                 if message:
                     _handle_message(message, log_func=log_func)
+        except requests.HTTPError as error:
+            status_code = getattr(getattr(error, "response", None), "status_code", None)
+            if status_code == 409:
+                detail = "Telegram getUpdates conflict detected. Another poller or webhook is active."
+                log_event("telegram", "bridge_conflict", detail)
+                if log_func:
+                    log_func(detail)
+            else:
+                detail = str(error)[:500]
+                log_event("telegram", "bridge_error", detail)
+            time.sleep(5)
         except Exception as error:
             log_event("telegram", "bridge_error", str(error)[:500])
             time.sleep(5)

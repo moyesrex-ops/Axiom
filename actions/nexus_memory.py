@@ -58,6 +58,18 @@ def nexus_memory(parameters: dict, player=None) -> str:
         results = search_memory_archive(query, limit=int(parameters.get("limit", 5) or 5))
         lines = [f"Memory search results for: {query}"]
 
+        knowledge_hits = results.get("knowledge", [])
+        if knowledge_hits:
+            lines.append("Indexed knowledge matches:")
+            for item in knowledge_hits[:5]:
+                label = item.get("topic") or item.get("title") or "untitled"
+                kind = str(item.get("kind", "general")).strip() or "general"
+                source = str(item.get("source", "")).strip()
+                suffix = f" [{kind}]" if kind else ""
+                if source:
+                    suffix += f" <{source}>"
+                lines.append(f"- {label}{suffix}: {str(item.get('content', ''))[:180]}")
+
         nexus_hits = results.get("nexus", [])
         if nexus_hits:
             lines.append("Nexus matches:")

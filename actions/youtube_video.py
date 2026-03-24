@@ -19,6 +19,8 @@ import numpy as np
 import cv2
 from PIL import ImageGrab
 
+from actions.browser_control import browser_control
+
 try:
     import requests
     from bs4 import BeautifulSoup
@@ -49,6 +51,22 @@ HEADERS = {
         "Chrome/120.0.0.0 Safari/537.36"
     ),
     "Accept-Language": "en-US,en;q=0.9",
+}
+
+_GENERIC_YOUTUBE_QUERY_MAP = {
+    "nice video": "beautiful relaxing nature video 4k",
+    "nice youtube video": "beautiful relaxing nature video 4k",
+    "something nice": "beautiful relaxing nature video 4k",
+    "something cool": "cinematic amazing nature video 4k",
+    "cool video": "cinematic amazing nature video 4k",
+    "good video": "feel good inspiring short documentary",
+    "interesting video": "mind blowing science documentary clip",
+}
+
+_GENERIC_YOUTUBE_WORDS = {
+    "a", "an", "the", "some", "something", "nice", "good", "cool",
+    "interesting", "random", "youtube", "video", "videos", "watch",
+    "play", "show", "me", "find", "open",
 }
 
 
@@ -106,7 +124,7 @@ def find_video_thumbnails() -> list[tuple[int, int]]:
         return filtered
 
     except Exception as e:
-        print(f"[YouTube] ⚠️ Thumbnail detection failed: {e}")
+        print(f"[YouTube] Warning: thumbnail detection failed: {e}")
         return []
 
 
@@ -139,17 +157,41 @@ def _ask_for_url(prompt_text: str = "YouTube video URL:") -> str | None:
         )
         return url.strip() if url else None
     except Exception as e:
-        print(f"[YouTube] ⚠️ URL dialog failed: {e}")
+        print(f"[YouTube] Warning: URL dialog failed: {e}")
         return None
 
 
 def _is_valid_youtube_url(url: str) -> bool:
     return bool(re.search(r"(youtube\.com|youtu\.be)", url or ""))
 
+
+def _refine_play_query(query: str) -> str:
+    raw = str(query or "").strip()
+    normalized = re.sub(r"\s+", " ", raw.lower())
+
+    if normalized in _GENERIC_YOUTUBE_QUERY_MAP:
+        return _GENERIC_YOUTUBE_QUERY_MAP[normalized]
+
+    tokens = re.findall(r"[a-z0-9']+", normalized)
+    content_tokens = [token for token in tokens if token not in _GENERIC_YOUTUBE_WORDS]
+
+    if not content_tokens:
+        if "funny" in tokens:
+            return "funny video compilation"
+        if "relax" in tokens or "relaxing" in tokens:
+            return "relaxing nature video 4k"
+        if "music" in tokens:
+            return "beautiful music video"
+        if "short" in tokens or "shorts" in tokens:
+            return "satisfying shorts compilation"
+        return "beautiful relaxing nature video 4k"
+
+    return raw
+
 def _get_transcript(video_id: str) -> str | None:
 
     if not _TRANSCRIPT_OK:
-        print("[YouTube] ⚠️ youtube-transcript-api not installed.")
+        print("[YouTube] Warning: youtube-transcript-api not installed.")
         return None
 
     try:
@@ -178,11 +220,11 @@ def _get_transcript(video_id: str) -> str | None:
 
         fetched = transcript.fetch()
         text    = " ".join(entry["text"] for entry in fetched)
-        print(f"[YouTube] 📝 Transcript: {len(text)} chars")
+        print(f"[YouTube] Transcript: {len(text)} chars")
         return text
 
     except Exception as e:
-        print(f"[YouTube] ⚠️ Transcript fetch failed: {e}")
+        print(f"[YouTube] Warning: transcript fetch failed: {e}")
         return None
 
 def _summarize_with_gemini(transcript: str, video_url: str) -> str:
@@ -228,7 +270,7 @@ def _save_to_notepad(content: str, video_url: str) -> str:
     )
 
     filepath.write_text(header + content, encoding="utf-8")
-    print(f"[YouTube] 💾 Summary saved: {filepath}")
+    print(f"[YouTube] Summary saved: {filepath}")
 
     system  = platform.system()
     open_fn = {
@@ -279,7 +321,7 @@ def _scrape_video_info(video_id: str) -> dict:
         return info
 
     except Exception as e:
-        print(f"[YouTube] ⚠️ Info scrape failed: {e}")
+        print(f"[YouTube] Warning: info scrape failed: {e}")
         return {}
 
 def _scrape_trending(region: str = "TR", max_results: int = 8) -> list[dict]:
@@ -309,42 +351,55 @@ def _scrape_trending(region: str = "TR", max_results: int = 8) -> list[dict]:
         return results
 
     except Exception as e:
-        print(f"[YouTube] ⚠️ Trending scrape failed: {e}")
+        print(f"[YouTube] Warning: trending scrape failed: {e}")
         return []
 
 def _handle_play(parameters: dict, player) -> str:
     query = parameters.get("query", "").strip()
-    if not query:
+    url = parameters.get("url", "").strip()
+    kind = str(parameters.get("kind", "auto") or "auto").strip().lower()
+    resolved_query = _refine_play_query(query) if query else query
+
+    if not query and not url:
         return "Please tell me what you'd like to watch, sir."
 
     if player:
-        player.write_log(f"[YouTube] Searching: {query}")
+        if url:
+            player.write_log(f"[YouTube] Opening URL: {url}")
+        else:
+            player.write_log(f"[YouTube] Searching: {resolved_query}")
 
-    search_query = query.replace(" ", "+")
-    url = f"https://www.youtube.com/results?search_query={search_query}"
+    result = browser_control(
+        parameters={
+            "action": "youtube_play",
+            "query": resolved_query,
+            "url": url,
+            "kind": kind,
+        },
+        player=player,
+    )
+    return result or "YouTube playback command completed."
 
-    open_browser(url)
-    time.sleep(2.0)
 
-    thumbnails = find_video_thumbnails()
+def _handle_state(parameters: dict, player, speak) -> str:
+    result = browser_control(parameters={"action": "current_state"}, player=player)
+    if speak and result:
+        speak(result)
+    return result
 
-    if len(thumbnails) >= 2:
-        x, y = thumbnails[1]
-        print(f"[YouTube] 🎯 Clicking 2nd thumbnail at ({x}, {y})")
-        pyautogui.click(x, y)
-        return f"Playing YouTube video for: {query}"
 
-    elif len(thumbnails) == 1:
-        x, y = thumbnails[0]
-        print(f"[YouTube] ⚠️ One thumbnail found, clicking at ({x}, {y})")
-        pyautogui.click(x, y)
-        return f"Playing YouTube video for: {query}"
+def _active_youtube_url(player) -> str:
+    try:
+        state = browser_control(parameters={"action": "current_state"}, player=player)
+    except Exception:
+        return ""
 
-    else:
-        print("[YouTube] ⚠️ No thumbnails found, using fallback position")
-        screen_w, screen_h = pyautogui.size()
-        pyautogui.click(screen_w // 2, int(screen_h * 0.45))
-        return f"Attempted to play YouTube video for: {query}"
+    match = re.search(r"^URL:\s*(.+)$", str(state or ""), re.MULTILINE)
+    if not match:
+        return ""
+
+    url = match.group(1).strip()
+    return url if _is_valid_youtube_url(url) else ""
 
 
 def _handle_summarize(parameters: dict, player, speak) -> str:
@@ -355,7 +410,11 @@ def _handle_summarize(parameters: dict, player, speak) -> str:
             "Please run: pip install youtube-transcript-api"
         )
 
-    url = _ask_for_url("Please paste the YouTube video URL:")
+    url = str(parameters.get("url", "") or "").strip()
+    if not url:
+        url = _active_youtube_url(player)
+    if not url:
+        url = _ask_for_url("Please paste the YouTube video URL:")
     if not url:
         return "No URL provided, sir. Summary cancelled."
 
@@ -401,6 +460,8 @@ def _handle_summarize(parameters: dict, player, speak) -> str:
 def _handle_get_info(parameters: dict, player, speak) -> str:
     url = parameters.get("url", "").strip()
 
+    if not url:
+        url = _active_youtube_url(player)
     if not url:
         url = _ask_for_url("Please paste the YouTube video URL:")
     if not url or not _is_valid_youtube_url(url):
@@ -462,6 +523,7 @@ _ACTION_MAP = {
     "summarize": _handle_summarize,
     "get_info":  _handle_get_info,
     "trending":  _handle_trending,
+    "state":     _handle_state,
 }
 
 def youtube_video(
@@ -476,18 +538,19 @@ def youtube_video(
 
     Actions:
         play      : Search and play a video (default if no action given)
-                    parameters: query(str)
+                    parameters: query(str), url(str, optional), kind(video|shorts|auto)
         summarize : Summarize a video via transcript + Gemini
                     parameters: save(bool, optional) — save summary to Notepad
         get_info  : Get video metadata (title, channel, views, duration)
                     parameters: url(str, optional — dialog if omitted)
         trending  : Show trending videos
                     parameters: region(str, default "TR") — ISO country code
+        state     : Inspect the current browser/YouTube tab state
 
     Agent chain:
         summarize can be chained after any action that produces a YouTube URL.
-    CRITICAL RESTRICTION: This tool CANNOT close videos. If the user commands you to stop,
-    close, or turn off a video, you MUST route that command to the `computer_settings` tool!
+    This tool reuses the controlled browser tab for playback so a new request replaces the
+    current video instead of stacking overlapping playback in multiple tabs.
     """
     params = parameters or {}
     action = params.get("action", "play").lower().strip()
@@ -495,17 +558,19 @@ def youtube_video(
     if player:
         player.write_log(f"[YouTube] Action: {action}")
 
-    print(f"[YouTube] ▶️ Action: {action}  Params: {params}")
+    print(f"[YouTube] Action: {action}  Params: {params}")
 
     handler = _ACTION_MAP.get(action)
     if handler is None:
-        return f"Unknown YouTube action: '{action}'. Available: play, summarize, get_info, trending."
+        return f"Unknown YouTube action: '{action}'. Available: play, summarize, get_info, trending, state."
 
     try:
         if action == "play":
             return handler(params, player) or "Done."
+        if action == "state":
+            return handler(params, player, speak) or "Done."
         return handler(params, player, speak) or "Done."
 
     except Exception as e:
-        print(f"[YouTube] ❌ Error in {action}: {e}")
+        print(f"[YouTube] Error in {action}: {e}")
         return f"YouTube {action} failed, sir: {e}"

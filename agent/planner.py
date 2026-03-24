@@ -33,16 +33,22 @@ open_app
 
 web_search
   query: string (required) — write a clear, focused search query
-  mode: "search" or "compare" (optional, default: search)
+  mode: "search" | "compare" | "deep" | "social" (optional, default: search)
   items: list of strings (optional, for compare mode)
   aspect: string (optional, for compare mode)
+  context: string (optional, extra guidance for deep/social search)
+  sources: list of strings (optional, for deep search: web | discussions | academic)
 
 browser_control
-  action: "go_to" | "search" | "click" | "type" | "scroll" | "get_text" | "press" | "close" (required)
+  action: "go_to" | "search" | "click" | "type" | "scroll" | "fill_form" | "smart_click" | "smart_type" | "get_text" | "press" | "current_state" | "close_tab" | "youtube_play" | "close" (required)
   url: string (for go_to)
   query: string (for search)
+  kind: "video" | "shorts" | "auto" (for youtube_play)
+  selector: string (for click/type)
   text: string (for click/type)
+  description: string (for smart_click/smart_type)
   direction: "up" | "down" (for scroll)
+  key: string (for press)
 
 file_controller
   action: "write" | "create_file" | "read" | "list" | "delete" | "move" | "copy" | "find" | "disk_usage" (required)
@@ -58,6 +64,7 @@ computer_settings
   action: string (required)
   description: string — natural language description
   value: string (optional)
+  note: use hardware_status / gpu_status / open_device_manager for hardware inspection or device access
 
 computer_control
   action: "type" | "click" | "hotkey" | "press" | "scroll" | "screenshot" | "screen_find" | "screen_click" (required)
@@ -88,8 +95,12 @@ desktop_control
   task: string (optional)
 
 youtube_video
-  action: "play" | "summarize" | "trending" (required)
+  action: "play" | "summarize" | "get_info" | "trending" | "state" (required)
   query: string (for play)
+  url: string (for play/get_info/summarize)
+  kind: "video" | "shorts" | "auto" (for play)
+  region: string (for trending)
+  save: boolean (for summarize)
 
 weather_report
   city: string (required)
@@ -111,7 +122,27 @@ dev_agent
   language: string (optional)
 
 system_capabilities
-  action: "summary" | "failures" | "events" (optional)
+  action: "summary" | "status" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "failures" | "events" | "tasks" (optional)
+  limit: integer (optional)
+
+predict_market
+  asset: string (required)
+  context: string (optional)
+  source: "auto" | "axiom" | "mirofish" (optional)
+
+mirofish_control
+  action: "status" | "projects" | "simulations" | "reports" | "market_seed" | "configure" | "start_backend" | "launch_instructions" (required)
+  asset: string (for market_seed)
+  repo_path: string (optional)
+  server_url: string (optional)
+  auto_start: boolean (optional)
+  limit: integer (optional)
+
+automaton_control
+  action: "status" | "memory" | "state" | "soul" | "configure" | "start_runtime" | "launch_instructions" (required)
+  repo_path: string (optional)
+  state_dir: string (optional)
+  auto_start: boolean (optional)
   limit: integer (optional)
 
 prompt_studio

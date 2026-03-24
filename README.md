@@ -74,18 +74,59 @@ This is the actual shape of the project now: a Gemini Live runtime at the center
 
 ---
 
+## Languages Used
+
+| Layer | Languages / Formats |
+|------|----------------------|
+| Core runtime | Python |
+| Desktop launch | Batch (`Axiom.bat`) |
+| External agent runtime | TypeScript / Node.js (`automaton_upstream`) |
+| Config | JSON |
+| Durable state | SQLite / SQL |
+| Diagrams | SVG + Mermaid |
+| Shell examples | PowerShell / Bash |
+
+AXIOM itself is Python-first. The current "one brain" model coordinates Python-native tools plus optional external runtimes such as MiroFish and Conway Automaton.
+
+---
+
 ## Repo Layout
 
 ```text
-main.py                  Live Gemini runtime and tool dispatcher
-ui.py                    Desktop HUD
-actions/                 Tool modules
-agent/                   Planner, executor, queue, heartbeat
-core/                    Prompt, runtime config, capability detection, PersonaPlex bridge
-memory/                  Long-term memory, runtime SQLite store, trading soul
-config/runtime.json      Non-secret runtime settings
-config/api_keys.json     Local API keys (created at runtime, ignored by git)
+main.py                          Live Gemini runtime and tool dispatcher
+ui.py                            Desktop HUD and first-run secret setup
+actions/                         Tool modules, including mirofish_control and automaton_control
+agent/                           Planner, executor, queue, heartbeat
+core/                            Prompt, runtime config, capability detection, integration bridges
+memory/                          Long-term memory, runtime SQLite store, trading soul
+config/runtime.json              Public non-secret runtime defaults
+config/runtime.local.json        Optional local override file (ignored by git)
+config/api_keys.example.json     Public example secret file
+core/integration_manager.py      Boot-time orchestration for external integrations
+core/mirofish_bridge.py          MiroFish detection, status, context, startup bridge
+core/automaton_bridge.py         Automaton detection, status, memory snapshot, startup bridge
 ```
+
+---
+
+## Unified Boot Flow
+
+```mermaid
+flowchart TD
+    A[User runs axiom or Axiom.bat] --> B[main.py]
+    B --> C[Desktop UI loads]
+    C --> D[Secrets checked from config/api_keys.json or env]
+    D --> E[Telegram bridge start attempt]
+    E --> F[boot_integrations()]
+    F --> G[MiroFish auto-start if configured]
+    F --> H[Automaton auto-start if configured]
+    G --> I[Axiom Live runtime]
+    H --> I
+    I --> J[Planner / Executor / Action layer]
+    J --> K[Memory archive + Nexus index + runtime SQLite store]
+```
+
+The entrypoint is intentionally single-root now: start AXIOM once, then let AXIOM decide which local sidecars it can safely bring online.
 
 ---
 
@@ -120,20 +161,33 @@ git clone https://github.com/moyesrex-ops/Axiom.git
 cd Axiom
 pip install -r requirements.txt
 python -m playwright install chromium
+copy config\api_keys.example.json config\api_keys.json
 Axiom.bat
 ```
 
-On first launch, the UI will ask for your Gemini API key and write:
+If `axiom` is already on your `PATH`, you can launch with:
+
+```powershell
+axiom
+```
+
+If not, `Axiom.bat` remains the canonical Windows launcher.
+
+The public repo now ships an example file:
 
 ```json
 {
-  "gemini_api_key": "YOUR_KEY"
+  "gemini_api_key": "",
+  "telegram_bot_token": "",
+  "camera_index": 0
 }
 ```
 
-to `config/api_keys.json`.
+Copy it to `config/api_keys.json` and fill only the secrets you actually want locally, or let the UI create that file on first run.
 
-You can also create that file manually if you prefer.
+`config/api_keys.json` is intentionally ignored by git and should never contain real secrets in a public push.
+
+For machine-specific integration paths or auto-start preferences, create `config/runtime.local.json`. AXIOM merges that file on top of the tracked `config/runtime.json`.
 
 ---
 
@@ -157,18 +211,37 @@ The repo now uses `config/runtime.json` for non-secret runtime behavior. Importa
       "enabled": false,
       "allowed_chat_ids": [],
       "poll_seconds": 1.5,
-      "queue_plain_messages": true
+      "queue_plain_messages": true,
+      "startup_prompt_enabled": true
     }
   },
   "integrations": {
     "mirofish_path": "",
+    "mirofish_url": "http://127.0.0.1:5001",
+    "mirofish_auto_start": false,
     "automaton_path": "",
+    "automaton_state_dir": "",
+    "automaton_auto_start": false,
     "personaplex_path": ""
   }
 }
 ```
 
 This keeps voice/model/integration settings out of the source code.
+
+`config/runtime.local.json` is optional and ignored by git. Use it for local absolute paths like:
+
+```json
+{
+  "integrations": {
+    "mirofish_path": "C:\\Users\\you\\MiroFish",
+    "mirofish_auto_start": true,
+    "automaton_path": "C:\\Users\\you\\automaton_upstream",
+    "automaton_state_dir": "C:\\Users\\you\\.automaton",
+    "automaton_auto_start": true
+  }
+}
+```
 
 Startup behavior:
 
@@ -278,23 +351,46 @@ At startup, Telegram linking is optional. If you do not provide a bot token, Axi
 
 ### MiroFish / Automaton
 
-These are treated as external optional repos now. The runtime can detect local clones and expose their presence through `system_capabilities`, but they are not left in this repo as dead gitlinks anymore.
+AXIOM now has real bridge modules for both systems instead of only path detection:
+
+- `mirofish_control` + `core/mirofish_bridge.py`
+- `automaton_control` + `core/automaton_bridge.py`
+- `core/integration_manager.py` to boot them automatically when enabled
+
+What that means:
+
+- MiroFish can be discovered, queried for local projects/simulations/reports, used as extra market context, and auto-started at AXIOM boot when the local backend is configured correctly.
+- Automaton can be discovered, inspected, built-status checked, memory-state inspected, and launch-attempted from AXIOM. It still requires its own first-run config and Conway credentials before it becomes a fully live sub-runtime.
 
 If you want Axiom to know where they live, set:
 
 - `integrations.mirofish_path`
 - `integrations.automaton_path`
+- `integrations.automaton_state_dir`
+
+If you want AXIOM to auto-start them on boot, also set:
+
+- `integrations.mirofish_auto_start`
+- `integrations.automaton_auto_start`
 
 in `config/runtime.json`.
+
+Important Windows note:
+
+- The local MiroFish integration was validated with a writable external log directory override (`MIROFISH_LOG_DIR`) so AXIOM can launch it without colliding with repo-local log files.
+- The local Automaton integration was validated through Node 20 + `pnpm build`, but it still needs `automaton --setup` / `--provision` before AXIOM can bring it fully online.
 
 ---
 
 ## Notes
 
-- `Axiom.bat` now launches the repo directory it lives in.
+- `Axiom.bat` launches the repo directory it lives in and is the intended Windows entrypoint.
+- If your environment already provides an `axiom` wrapper or alias, it can point straight to `Axiom.bat`.
 - `memory/axiom_state.db` is created at runtime and ignored by git.
 - `config/api_keys.json` and long-term memory files are ignored by git.
-- `config/api_keys.json` is for local secrets only and should stay blank or absent in any public push.
+- `config/api_keys.example.json` is the tracked template for public pushes.
+- `config/runtime.local.json` is the intended place for machine-specific path overrides and local boot preferences.
+- Telegram is disabled in the public runtime config by default; enable it only after adding a local bot token and explicit allowed chat IDs.
 - This repo is designed around Windows first. Some tools are cross-platform, but the main UX targets Windows 10/11.
 
 ---

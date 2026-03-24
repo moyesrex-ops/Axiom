@@ -103,7 +103,8 @@ def _ensure_monitor_running():
 def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
     params = parameters or {}
     action = params.get("action", "").lower()
-    symbol = params.get("symbol", "EURUSD")
+    symbol_filter = str(params.get("symbol", "") or "").strip()
+    symbol = symbol_filter or "EURUSD"
     volume = float(params.get("volume", 0.01))
     magic = int(params.get("magic", 234000))
     prompt_raw = params.get("prompt", "")
@@ -124,10 +125,40 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         if account_info is None:
             mt5.shutdown()
             return f"Failed to get account info: {mt5.last_error()}"
-        res = (
-            f"MT5 Connected. Balance: {account_info.balance:.2f}, "
-            f"Equity: {account_info.equity:.2f}, Margin: {account_info.margin:.2f}"
+
+        positions = (
+            mt5.positions_get(symbol=symbol_filter)
+            if symbol_filter
+            else mt5.positions_get()
         )
+        positions = list(positions or [])
+        floating_pl = sum(float(getattr(position, "profit", 0.0) or 0.0) for position in positions)
+
+        lines = [
+            (
+                f"MT5 Connected. Balance: {account_info.balance:.2f}, "
+                f"Equity: {account_info.equity:.2f}, Margin: {account_info.margin:.2f}, "
+                f"Open positions: {len(positions)}, Floating P/L: {floating_pl:.2f}"
+            )
+        ]
+
+        if positions:
+            lines.append("Open positions:")
+            for position in positions[:6]:
+                side = "BUY" if getattr(position, "type", None) == mt5.ORDER_TYPE_BUY else "SELL"
+                lines.append(
+                    (
+                        f"- #{position.ticket} {position.symbol} {side} "
+                        f"{float(position.volume):.2f} lots | entry {float(position.price_open):.5f} "
+                        f"| current {float(position.price_current):.5f} | P/L {float(position.profit):.2f}"
+                    )
+                )
+            if len(positions) > 6:
+                lines.append(f"- ... {len(positions) - 6} more open positions")
+        else:
+            lines.append("No open positions right now.")
+
+        res = "\n".join(lines)
         if speak:
             speak(res)
         mt5.shutdown()

@@ -13,6 +13,7 @@ def get_base_dir() -> Path:
 BASE_DIR = get_base_dir()
 CONFIG_DIR = BASE_DIR / "config"
 RUNTIME_CONFIG_PATH = CONFIG_DIR / "runtime.json"
+RUNTIME_LOCAL_CONFIG_PATH = CONFIG_DIR / "runtime.local.json"
 
 DEFAULT_RUNTIME_CONFIG = {
     "voice_name": "Charon",
@@ -37,8 +38,22 @@ DEFAULT_RUNTIME_CONFIG = {
     },
     "integrations": {
         "mirofish_path": "",
+        "mirofish_url": "http://127.0.0.1:5001",
+        "mirofish_auto_start": False,
         "automaton_path": "",
+        "automaton_state_dir": "",
+        "automaton_auto_start": False,
         "personaplex_path": "",
+    },
+    "research": {
+        "backend": "auto",
+        "vane_url": "",
+        "vane_chat_provider": "",
+        "vane_chat_model": "",
+        "vane_embedding_provider": "",
+        "vane_embedding_model": "",
+        "deep_search_max_queries": 4,
+        "deep_search_results_per_query": 4,
     },
     "channels": {
         "telegram": {
@@ -63,16 +78,22 @@ def _merge_dicts(base: dict, updates: dict) -> dict:
 
 
 def load_runtime_config() -> dict:
-    if not RUNTIME_CONFIG_PATH.exists():
-        return deepcopy(DEFAULT_RUNTIME_CONFIG)
-
+    merged = deepcopy(DEFAULT_RUNTIME_CONFIG)
     try:
-        raw = json.loads(RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
-        if not isinstance(raw, dict):
-            return deepcopy(DEFAULT_RUNTIME_CONFIG)
-        return _merge_dicts(DEFAULT_RUNTIME_CONFIG, raw)
+        if RUNTIME_CONFIG_PATH.exists():
+            raw = json.loads(RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                merged = _merge_dicts(merged, raw)
     except Exception:
         return deepcopy(DEFAULT_RUNTIME_CONFIG)
+    try:
+        if RUNTIME_LOCAL_CONFIG_PATH.exists():
+            raw_local = json.loads(RUNTIME_LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
+            if isinstance(raw_local, dict):
+                merged = _merge_dicts(merged, raw_local)
+    except Exception:
+        pass
+    return merged
 
 
 def save_runtime_config(config: dict) -> dict:

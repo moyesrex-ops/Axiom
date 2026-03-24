@@ -246,9 +246,37 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.flight_finder import flight_finder
         return flight_finder(parameters=parameters, player=None, speak=speak) or "Done."
 
+    elif tool == "nexus_memory":
+        from actions.nexus_memory import nexus_memory
+        return nexus_memory(parameters=parameters, player=None) or "Done."
+
+    elif tool == "autonomous_researcher":
+        from actions.autonomous_researcher import autonomous_research
+        return autonomous_research(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "mt5_trading":
+        from actions.mt5_trading_agent import mt5_trading
+        return mt5_trading(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "predict_market":
+        from actions.market_predictor import predict_market
+        return predict_market(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "mirofish_control":
+        from actions.mirofish_control import mirofish_control
+        return mirofish_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "self_modifier":
+        from actions.self_modifier import self_modifier
+        return self_modifier(parameters=parameters, player=None, speak=speak) or "Done."
+
     elif tool == "system_capabilities":
         from actions.system_capabilities import system_capabilities
         return system_capabilities(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "automaton_control":
+        from actions.automaton_control import automaton_control
+        return automaton_control(parameters=parameters, player=None, speak=speak) or "Done."
 
     elif tool == "persona_control":
         from actions.persona_control import persona_control

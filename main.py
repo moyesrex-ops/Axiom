@@ -42,6 +42,8 @@ from actions.deep_analyzer    import deep_analyzer
 from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
 from actions.market_predictor      import predict_market
+from actions.mirofish_control      import mirofish_control
+from actions.automaton_control     import automaton_control
 from actions.self_modifier         import self_modifier
 from actions.system_capabilities   import system_capabilities
 from actions.persona_control       import persona_control
@@ -50,6 +52,7 @@ from actions.lead_researcher       import lead_researcher
 from actions.swarm_orchestrator    import swarm_orchestrator
 from agent.heartbeat               import HeartbeatDaemon
 from core.capabilities             import format_capability_status
+from core.integration_manager      import boot_integrations
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_secret
 from core.system_context           import format_prompt_system_context
@@ -90,6 +93,27 @@ _memory_turn_counter  = 0
 _memory_turn_lock     = threading.Lock()
 _MEMORY_EVERY_N_TURNS = 5
 _last_memory_input    = ""
+
+
+def _summarize_exception(error: BaseException, depth: int = 0) -> str:
+    if error is None:
+        return "unknown error"
+
+    nested = getattr(error, "exceptions", None)
+    if nested and depth < 2:
+        parts = []
+        for child in list(nested)[:4]:
+            child_text = _summarize_exception(child, depth + 1)
+            if child_text and child_text not in parts:
+                parts.append(child_text)
+        prefix = error.__class__.__name__
+        if parts:
+            return f"{prefix}: " + " | ".join(parts)
+
+    text = str(error or "").strip()
+    if text:
+        return f"{error.__class__.__name__}: {text}"
+    return error.__class__.__name__
 
 
 def _update_memory_async(user_text: str, axiom_text: str) -> None:
@@ -173,7 +197,7 @@ TOOL_DECLARATIONS = [
     },
 {
     "name": "web_search",
-    "description": "Searches the web for any information. Use mode='deep' for Perplexity-style iterative multi-source research. Use mode='social' with query=URL to analyze a Reddit/Twitter/X page and extract strategies.",
+    "description": "Searches the web for any information. Use mode='deep' for Perplexity-style multi-source research. If a Vane backend is configured it may be used automatically for cited deep answers. Use mode='social' with query=URL to analyze a Reddit/Twitter/X page and extract strategies.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -181,7 +205,8 @@ TOOL_DECLARATIONS = [
             "mode":    {"type": "STRING", "description": "search (default) | compare | deep | social"},
             "items":   {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Items to compare"},
             "aspect":  {"type": "STRING", "description": "price | specs | reviews"},
-            "context": {"type": "STRING", "description": "What to extract/analyze (for social mode)"}
+            "context": {"type": "STRING", "description": "What to extract/analyze or emphasize (for deep/social mode)"},
+            "sources": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional source filters for deep/Vane research: web | discussions | academic"}
         },
         "required": ["query"]
     }
@@ -226,20 +251,22 @@ TOOL_DECLARATIONS = [
     {
     "name": "youtube_video",
     "description": (
-        "Controls YouTube. Use for: playing videos, summarizing a video's content, "
-        "getting video info, or showing trending videos."
+        "Controls YouTube. Use for: playing videos, replacing the current playing video in the same controlled tab, "
+        "checking the current YouTube/browser playback state, summarizing a video's content, "
+        "getting video info, or showing trending videos. Prefer this tool over generic browser search for YouTube playback."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "action": {
                 "type": "STRING",
-                "description": "play | summarize | get_info | trending (default: play)"
+                "description": "play | summarize | get_info | trending | state (default: play)"
             },
             "query":  {"type": "STRING", "description": "Search query for play action"},
+            "kind":   {"type": "STRING", "description": "For play action: video | shorts | auto. Use video unless the user explicitly asks for Shorts."},
             "save":   {"type": "BOOLEAN", "description": "Save summary to Notepad (summarize only)"},
             "region": {"type": "STRING", "description": "Country code for trending e.g. TR, US"},
-            "url":    {"type": "STRING", "description": "Video URL for get_info action"},
+            "url":    {"type": "STRING", "description": "Video URL for get_info or direct play action"},
         },
         "required": []
     }
@@ -274,6 +301,8 @@ TOOL_DECLARATIONS = [
         "typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, "
         "scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. "
         "ALSO controls physical RGB hardware lighting (keyboard/mouse color) - use action: change_hardware_color with value: red/blue/green/glowing/off etc. "
+        "ALSO inspects local hardware state - use action: hardware_status or gpu_status to inspect CPU, memory, disk, battery, GPU, and RGB bridge status. "
+        "ALSO can open device manager - use action: open_device_manager. "
         "ALSO use for safely force-closing a specific app/process by name WITHOUT crashing Axiom - "
         "use action: force_close, value: <process_name>. "
         "ALSO use for repeated actions: 'refresh 10 times', 'reload page 5 times' -> action: reload_n, value: 10. "
@@ -295,14 +324,16 @@ TOOL_DECLARATIONS = [
         "description": (
             "Controls the web browser. Use for: opening websites, searching the web, "
             "clicking elements, filling forms, scrolling, finding cheapest products, "
-            "booking flights, any web-based task."
+            "booking flights, inspecting the current page/tab state, closing the current tab, "
+            "or handling any web-based task that needs awareness of what is already open."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action":      {"type": "STRING", "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | press | close"},
+                "action":      {"type": "STRING", "description": "go_to | search | click | type | scroll | fill_form | smart_click | smart_type | get_text | press | current_state | close_tab | youtube_play | close"},
                 "url":         {"type": "STRING", "description": "URL for go_to action"},
                 "query":       {"type": "STRING", "description": "Search query for search action"},
+                "kind":        {"type": "STRING", "description": "youtube_play only: video | shorts | auto"},
                 "selector":    {"type": "STRING", "description": "CSS selector for click/type"},
                 "text":        {"type": "STRING", "description": "Text to click or type"},
                 "description": {"type": "STRING", "description": "Element description for smart_click/smart_type"},
@@ -570,16 +601,37 @@ TOOL_DECLARATIONS = [
 {
     "name": "predict_market",
     "description": (
-        "Spawns a highly intelligent background swarm to synthesize technical and fundamental data "
-        "and predict the future trajectory of ANY market asset (Forex, Crypto, Stocks, Polymarket, Kalshi)."
+        "Runs AXIOM's market swarm and, when available, layers in real MiroFish seed/report context "
+        "to predict the trajectory of a market asset. Use source='axiom' to skip MiroFish or "
+        "source='mirofish' to strongly prefer that external context."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "asset": {"type": "STRING", "description": "The asset to predict (e.g., 'Bitcoin', 'EURUSD')."},
-            "context": {"type": "STRING", "description": "Any specific news, timeframes, or biases the user provided."}
+            "context": {"type": "STRING", "description": "Any specific news, timeframes, or biases the user provided."},
+            "source": {"type": "STRING", "description": "auto | axiom | mirofish"}
         },
         "required": ["asset"]
+    }
+},
+{
+    "name": "mirofish_control",
+    "description": (
+        "Inspects and controls the external MiroFish runtime. Use this to check real MiroFish health, "
+        "list projects/simulations/reports, pull market seed context, configure paths, or launch the backend."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | projects | simulations | reports | market_seed | configure | start_backend | launch_instructions"},
+            "asset": {"type": "STRING", "description": "Market asset for market_seed"},
+            "repo_path": {"type": "STRING", "description": "Optional local MiroFish repo path"},
+            "server_url": {"type": "STRING", "description": "Optional MiroFish backend URL"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether MiroFish should auto-start when supported"},
+            "limit": {"type": "INTEGER", "description": "Optional row/result limit"}
+        },
+        "required": ["action"]
     }
 },
 {
@@ -614,16 +666,35 @@ TOOL_DECLARATIONS = [
     "name": "system_capabilities",
     "description": (
         "Inspects Axiom's current environment, installed integrations, recent runtime events, "
-        "recorded failures, local timezone, and best-effort location context. "
+        "recorded failures, hardware snapshot, local timezone, and best-effort location context. "
         "Use when the user asks what Axiom can do right now or asks where they are / what timezone they are in."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | context | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | context | hardware | integrations | mirofish | automaton | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
+    }
+},
+{
+    "name": "automaton_control",
+    "description": (
+        "Inspects the external Conway Automaton runtime and state directory. Use this to check whether "
+        "Automaton is actually built and initialized, inspect its memory/heartbeat counts, read SOUL.md, "
+        "configure repo/state paths, start the runtime, or get launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | memory | state | soul | configure | start_runtime | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local Automaton repo path"},
+            "state_dir": {"type": "STRING", "description": "Optional Automaton state directory"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether Automaton should auto-start during AXIOM boot when launchable"},
+            "limit": {"type": "INTEGER", "description": "Optional text limit for soul action"}
+        },
+        "required": ["action"]
     }
 },
 {
@@ -712,9 +783,9 @@ class AxiomLive:
         
         # Audio tweaks
         self.is_speaking          = False
-        self.TARGET_INPUT_RMS     = 2300.0
-        self.MAX_INPUT_GAIN       = 3.4
-        self.MIN_INTERRUPT_RMS    = 1200.0
+        self.TARGET_INPUT_RMS     = 4200.0
+        self.MAX_INPUT_GAIN       = 6.2
+        self.MIN_INTERRUPT_RMS    = 850.0
         self._ambient_rms         = 120.0
         self._speaker_guard_until = 0.0
 
@@ -722,6 +793,9 @@ class AxiomLive:
         self._output_turn_buffer  = []
         self._disconnect_count    = 0
         self._last_disconnect_reason = ""
+        self._session_resumption_handle = ""
+        self._session_resumable = False
+        self._go_away_requested = False
 
     def speak(self, text: str):
         """Thread-safe speak - any thread can call this."""
@@ -736,7 +810,10 @@ class AxiomLive:
          )
 
     def _interrupt_threshold(self) -> float:
-        return max(self.MIN_INTERRUPT_RMS, self._ambient_rms * 4.25)
+        return max(self.MIN_INTERRUPT_RMS, self._ambient_rms * 3.35)
+
+    def _speaker_guard_threshold(self) -> float:
+        return max(360.0, self._ambient_rms * 2.2)
 
     def _adaptive_gain(self, rms: float) -> float:
         if rms <= 60:
@@ -789,6 +866,53 @@ class AxiomLive:
             },
         )
 
+    def _note_session_resumption_update(self, update: types.LiveServerSessionResumptionUpdate) -> None:
+        new_handle = str(getattr(update, "new_handle", "") or "").strip()
+        resumable = bool(getattr(update, "resumable", False))
+        last_index = getattr(update, "last_consumed_client_message_index", None)
+
+        metadata = {
+            "resumable": resumable,
+            "last_consumed_client_message_index": last_index,
+        }
+
+        if new_handle and new_handle != self._session_resumption_handle:
+            self._session_resumption_handle = new_handle
+            log_event(
+                "session",
+                "resumption_handle_updated",
+                new_handle[:48],
+                metadata=metadata,
+            )
+        elif not new_handle and not resumable:
+            self._session_resumption_handle = ""
+
+        self._session_resumable = resumable
+
+    async def _handle_go_away(self, go_away: types.LiveServerGoAway) -> None:
+        if self._go_away_requested:
+            return
+
+        self._go_away_requested = True
+        time_left = str(getattr(go_away, "time_left", "") or "").strip()
+        detail = time_left or "server requested reconnect"
+        self._last_disconnect_reason = f"Server requested reconnect ({detail})"
+        self.ui.write_log("SYS: Live session is rotating. Reconnecting cleanly.")
+        log_event(
+            "session",
+            "go_away",
+            detail[:500],
+            metadata={
+                "has_resumption_handle": bool(self._session_resumption_handle),
+                "resumable": self._session_resumable,
+            },
+        )
+        try:
+            if self.session:
+                await self.session.close()
+        except Exception as close_error:
+            log_event("session", "go_away_close_error", _summarize_exception(close_error)[:500])
+
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
 
@@ -826,6 +950,9 @@ class AxiomLive:
 
         self.live_model = runtime.get("live_model") or DEFAULT_LIVE_MODEL
         voice_name = runtime.get("voice_name") or "Charon"
+        session_resumption = types.SessionResumptionConfig()
+        if self._session_resumption_handle:
+            session_resumption.handle = self._session_resumption_handle
 
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
@@ -833,7 +960,7 @@ class AxiomLive:
             input_audio_transcription={},
             system_instruction=sys_prompt,
             tools=[{"function_declarations": TOOL_DECLARATIONS}],
-            session_resumption=types.SessionResumptionConfig(),
+            session_resumption=session_resumption,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -1031,6 +1158,16 @@ class AxiomLive:
                 )
                 result = r or "Done."
 
+            elif name == "mirofish_control":
+                r = await loop.run_in_executor(
+                    None, lambda: mirofish_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
             elif name == "self_modifier":
                 r = await loop.run_in_executor(
                     None, lambda: self_modifier(
@@ -1044,6 +1181,16 @@ class AxiomLive:
             elif name == "system_capabilities":
                 r = await loop.run_in_executor(
                     None, lambda: system_capabilities(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "automaton_control":
+                r = await loop.run_in_executor(
+                    None, lambda: automaton_control(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak
@@ -1149,12 +1296,12 @@ class AxiomLive:
                                 try: self.audio_in_queue.get_nowait()
                                 except: break
                             self.is_speaking = False
-                            self._speaker_guard_until = time.time() + 0.18
+                            self._speaker_guard_until = time.time() + 0.10
                             data = boosted_data
                         else:
                             data = b'\x00' * len(data)
                     else:
-                        if time.time() < self._speaker_guard_until and rms < (interrupt_threshold * 1.15):
+                        if time.time() < self._speaker_guard_until and rms < self._speaker_guard_threshold():
                             data = b'\x00' * len(data)
                         else:
                             data = boosted_data
@@ -1175,6 +1322,12 @@ class AxiomLive:
             while True:
                 turn = self.session.receive()
                 async for response in turn:
+                    if response.session_resumption_update:
+                        self._note_session_resumption_update(response.session_resumption_update)
+
+                    if response.go_away:
+                        await self._handle_go_away(response.go_away)
+                        continue
 
                     if response.data:
                         self.audio_in_queue.put_nowait(response.data)
@@ -1227,7 +1380,7 @@ class AxiomLive:
                 await asyncio.to_thread(stream.write, chunk)
                 if self.audio_in_queue.empty():
                     self.is_speaking = False
-                    self._speaker_guard_until = time.time() + 0.25
+                    self._speaker_guard_until = time.time() + 0.12
         except Exception as e:
             print(f"[AXIOM] Playback error: {e}")
             raise
@@ -1255,11 +1408,17 @@ class AxiomLive:
                     self._loop          = asyncio.get_event_loop()
                     self.audio_in_queue = asyncio.Queue()
                     self.out_queue      = asyncio.Queue(maxsize=10)
+                    self._go_away_requested = False
 
                     print("[AXIOM] Connected.")
                     if reconnecting:
                         self.ui.write_log("SYS: Live link restored. Recent context was reloaded.")
-                        log_event("session", "reconnected", self._last_disconnect_reason[:500])
+                        log_event(
+                            "session",
+                            "reconnected",
+                            self._last_disconnect_reason[:500],
+                            metadata={"used_resumption_handle": bool(self._session_resumption_handle)},
+                        )
                     else:
                         self.ui.write_log("AXIOM online.")
                         log_event("session", "connected", "Live session established.")
@@ -1275,12 +1434,16 @@ class AxiomLive:
 
             except Exception as e:
                 self._disconnect_count += 1
-                self._last_disconnect_reason = str(e) or e.__class__.__name__
+                self._last_disconnect_reason = _summarize_exception(e)
                 log_event(
                     "session",
                     "connection_error",
                     self._last_disconnect_reason[:500],
-                    metadata={"disconnect_count": self._disconnect_count},
+                    metadata={
+                        "disconnect_count": self._disconnect_count,
+                        "has_resumption_handle": bool(self._session_resumption_handle),
+                        "go_away_requested": self._go_away_requested,
+                    },
                 )
                 self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
                 print(f"[AXIOM] Error: {e}")
@@ -1291,8 +1454,9 @@ class AxiomLive:
                 self.audio_in_queue = None
                 self.out_queue = None
 
-            print("[AXIOM] Reconnecting in 3s...")
-            await asyncio.sleep(3)
+            delay_seconds = 0.5 if self._go_away_requested else 3
+            print(f"[AXIOM] Reconnecting in {delay_seconds}s...")
+            await asyncio.sleep(delay_seconds)
 
 def main():
     init_runtime_store()
@@ -1302,6 +1466,7 @@ def main():
     def runner():
         ui.wait_for_api_key()
         start_telegram_bridge(log_func=ui.write_log)
+        boot_integrations(log_func=ui.write_log)
 
         axiom = AxiomLive(ui)
         try:

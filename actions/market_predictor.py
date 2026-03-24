@@ -2,6 +2,7 @@ import json
 import asyncio
 from typing import Optional, Dict, Any
 
+
 def get_api_key() -> str:
     import sys
     from pathlib import Path
@@ -35,6 +36,55 @@ def _load_soul_lessons() -> str:
     except Exception:
         pass
     return "No past lessons recorded yet."
+
+
+def _mirofish_context_block(asset: str, source_mode: str = "auto") -> tuple[str, dict]:
+    mode = str(source_mode or "auto").strip().lower()
+    if mode == "axiom":
+        return "", {"used": False, "reason": "disabled"}
+
+    try:
+        from core.mirofish_bridge import get_mirofish_market_context
+    except Exception as error:
+        return "", {"used": False, "reason": f"bridge_unavailable: {error}"}
+
+    context = get_mirofish_market_context(asset=asset, limit=6)
+    if not context.get("available"):
+        return "", {"used": False, "reason": "repo_not_found"}
+
+    lines = [
+        f"MiroFish repo detected at: {context.get('repo_path', '')}",
+        f"MiroFish backend reachable: {'yes' if context.get('backend_reachable') else 'no'}",
+    ]
+    if context.get("seed_description"):
+        lines.append(f"Seed scenario: {context['seed_description']}")
+
+    profiles = context.get("matching_profiles", []) or []
+    if profiles:
+        lines.append("Relevant MiroFish seed personas:")
+        for row in profiles[:6]:
+            lines.append(
+                f"- {row.get('entity_name', 'unknown')} [{row.get('platform', 'seed')}]: "
+                f"bio={row.get('bio', '')} | interests={row.get('interests', '')}"
+            )
+
+    posts = context.get("matching_posts", []) or []
+    if posts:
+        lines.append("Relevant MiroFish seed posts:")
+        for row in posts[:3]:
+            lines.append(f"- {row.get('content', '')}")
+
+    report_excerpt = str(context.get("report_excerpt", "")).strip()
+    if report_excerpt:
+        lines.append("Latest matching MiroFish report excerpt:")
+        lines.append(report_excerpt)
+
+    return "\n".join(line for line in lines if line.strip()), {
+        "used": True,
+        "backend_reachable": bool(context.get("backend_reachable")),
+        "profiles_used": len(profiles),
+        "has_report_excerpt": bool(report_excerpt),
+    }
 
 
 def _run_swarm_agent(model, role: str, asset: str, soul_lessons: str, context: str) -> str:
@@ -133,9 +183,22 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
     params = parameters or {}
     asset = params.get("asset", "EURUSD")
     context = params.get("context", "")
+    source_mode = str(params.get("source", "auto") or "auto").strip().lower()
+
+    mirofish_context, mirofish_meta = _mirofish_context_block(asset, source_mode=source_mode)
+    combined_context = str(context or "").strip()
+    if mirofish_context:
+        combined_context = (
+            f"{combined_context}\n\n[MiroFish External Context]\n{mirofish_context}"
+            if combined_context
+            else f"[MiroFish External Context]\n{mirofish_context}"
+        )
 
     if speak:
-        speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
+        if mirofish_meta.get("used"):
+            speak(f"Initiating swarm prediction sequence for {asset}. I'm layering MiroFish context into the debate.")
+        else:
+            speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
 
     try:
         import google.generativeai as genai
@@ -145,19 +208,20 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
         soul_lessons = _load_soul_lessons()
 
         print(f"[SwarmPredictor] 🤖 Spawning Macro-Economist agent for {asset}...")
-        macro_report = _run_swarm_agent(model, "macro_economist", asset, soul_lessons, context)
+        macro_report = _run_swarm_agent(model, "macro_economist", asset, soul_lessons, combined_context)
 
         print(f"[SwarmPredictor] 📈 Spawning Technical Analyst agent for {asset}...")
-        technical_report = _run_swarm_agent(model, "technical_analyst", asset, soul_lessons, context)
+        technical_report = _run_swarm_agent(model, "technical_analyst", asset, soul_lessons, combined_context)
 
         print(f"[SwarmPredictor] ⚖️ Spawning Risk Manager agent for {asset}...")
-        risk_report = _run_swarm_agent(model, "risk_manager", asset, soul_lessons, context)
+        risk_report = _run_swarm_agent(model, "risk_manager", asset, soul_lessons, combined_context)
 
         print(f"[SwarmPredictor] 🔮 Synthesising swarm consensus for {asset}...")
         consensus = _synthesize_debate(model, asset, macro_report, technical_report, risk_report)
 
         full_report = (
             f"═══ AXIOM SWARM PREDICTION: {asset} ═══\n\n"
+            f"{'── EXTERNAL MIROFISH CONTEXT ──\\n' + mirofish_context + '\\n\\n' if mirofish_context else ''}"
             f"── MACRO-ECONOMIST ──\n{macro_report}\n\n"
             f"── TECHNICAL ANALYST ──\n{technical_report}\n\n"
             f"── RISK MANAGER ──\n{risk_report}\n\n"
@@ -170,10 +234,24 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
         # Neural Link: Persist to Nexus Brain for infinite context
         try:
             from memory.memory_manager import save_to_nexus
-            save_to_nexus(f"Swarm Prediction: {asset}", consensus[:2000])
-            save_to_nexus(f"Macro Report: {asset}", macro_report[:1000])
-            save_to_nexus(f"Technical Report: {asset}", technical_report[:1000])
-            save_to_nexus(f"Risk Report: {asset}", risk_report[:1000])
+            save_to_nexus(
+                f"Swarm Prediction: {asset}",
+                consensus[:2000],
+                kind="research",
+                source="axiom.predict_market",
+                metadata={"asset": asset, "source_mode": source_mode, **mirofish_meta},
+            )
+            save_to_nexus(f"Macro Report: {asset}", macro_report[:1000], kind="research", source="axiom.predict_market")
+            save_to_nexus(f"Technical Report: {asset}", technical_report[:1000], kind="research", source="axiom.predict_market")
+            save_to_nexus(f"Risk Report: {asset}", risk_report[:1000], kind="research", source="axiom.predict_market")
+            if mirofish_context:
+                save_to_nexus(
+                    f"MiroFish Context: {asset}",
+                    mirofish_context[:2500],
+                    kind="research",
+                    source="mirofish.seed",
+                    metadata={"asset": asset, **mirofish_meta},
+                )
         except Exception:
             pass
 
