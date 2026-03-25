@@ -85,8 +85,42 @@ class AgentLibraryTests(unittest.TestCase):
                 "tradingagents_path": str(repos["tradingagents"]),
             }
         }
+        source_specs = {
+            "wshobson_agents": {
+                "name": "WS Hobson Agents",
+                "config_key": "wshobson_agents_path",
+                "default_candidates": [],
+                "glob": "plugins/*/agents/*.md",
+            },
+            "awesome_subagents": {
+                "name": "Claude Code Subagents",
+                "config_key": "awesome_subagents_path",
+                "default_candidates": [],
+                "glob": "categories/**/*.md",
+            },
+            "dexter": {
+                "name": "Dexter",
+                "config_key": "dexter_path",
+                "default_candidates": [],
+                "special": "dexter",
+            },
+            "pentagi": {
+                "name": "PentAGI",
+                "config_key": "pentagi_path",
+                "default_candidates": [],
+                "special": "pentagi",
+            },
+            "tradingagents": {
+                "name": "TradingAgents",
+                "config_key": "tradingagents_path",
+                "default_candidates": [],
+                "special": "tradingagents",
+            },
+        }
 
-        with patch.object(al, "load_runtime_config", return_value=runtime):
+        with patch.object(al, "load_runtime_config", return_value=runtime), patch.object(
+            al, "_SOURCE_SPECS", source_specs
+        ):
             status = al.collect_agent_library_status(limit=6)
             entries = al.index_agent_library()
             search = al.search_agent_library("frontend", limit=3)
@@ -111,9 +145,43 @@ class AgentLibraryTests(unittest.TestCase):
                 "tradingagents_path": str(repos["tradingagents"]),
             }
         }
+        source_specs = {
+            "wshobson_agents": {
+                "name": "WS Hobson Agents",
+                "config_key": "wshobson_agents_path",
+                "default_candidates": [],
+                "glob": "plugins/*/agents/*.md",
+            },
+            "awesome_subagents": {
+                "name": "Claude Code Subagents",
+                "config_key": "awesome_subagents_path",
+                "default_candidates": [],
+                "glob": "categories/**/*.md",
+            },
+            "dexter": {
+                "name": "Dexter",
+                "config_key": "dexter_path",
+                "default_candidates": [],
+                "special": "dexter",
+            },
+            "pentagi": {
+                "name": "PentAGI",
+                "config_key": "pentagi_path",
+                "default_candidates": [],
+                "special": "pentagi",
+            },
+            "tradingagents": {
+                "name": "TradingAgents",
+                "config_key": "tradingagents_path",
+                "default_candidates": [],
+                "special": "tradingagents",
+            },
+        }
 
         with patch.object(al, "load_runtime_config", return_value=runtime), patch.object(
             al, "get_gemini_api_key", return_value=""
+        ), patch.object(
+            al, "_SOURCE_SPECS", source_specs
         ):
             result = al.delegate_agent_library(task="Build a frontend UI", limit=2)
 

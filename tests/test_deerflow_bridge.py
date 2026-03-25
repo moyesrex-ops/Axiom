@@ -54,6 +54,40 @@ class DeerFlowBridgeTests(unittest.TestCase):
         self.assertFalse(status["proxy_reachable"])
         self.assertEqual(status["local_skill_count"], 1)
 
+    def test_ensure_config_creates_managed_gemini_config(self):
+        repo = self._workspace_dir("deerflow_managed")
+        (repo / "backend").mkdir(parents=True)
+        (repo / "README.md").write_text("DeerFlow", encoding="utf-8")
+        (repo / "backend" / "pyproject.toml").write_text("[project]\nname='deerflow'\n", encoding="utf-8")
+        (repo / "config.example.yaml").write_text(
+            "models:\n"
+            "  # placeholder\n"
+            "\n"
+            "# ============================================================================\n"
+            "# Tool Groups Configuration\n",
+            encoding="utf-8",
+        )
+        (repo / ".env.example").write_text("GOOGLE_API_KEY=\n", encoding="utf-8")
+
+        runtime = {
+            "deerflow": {"repo_path": str(repo)},
+            "text_models": {
+                "fast": "gemini-2.5-flash-lite",
+                "default": "gemini-2.5-flash",
+                "reasoning": "gemini-2.5-pro",
+            },
+        }
+        with patch.object(df, "load_runtime_config", return_value=runtime):
+            result = df.ensure_deerflow_config()
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["created"])
+        config_text = (repo / "config.yaml").read_text(encoding="utf-8")
+        self.assertIn("AXIOM-managed DeerFlow config", config_text)
+        self.assertIn("langchain_google_genai:ChatGoogleGenerativeAI", config_text)
+        self.assertIn("gemini-2.5-flash-lite", config_text)
+        self.assertIn("gemini-2.5-pro", config_text)
+
     def test_run_query_parses_values_stream(self):
         status = {
             "repo_path": "C:\\Users\\moyes\\deer-flow_upstream",
@@ -84,6 +118,49 @@ class DeerFlowBridgeTests(unittest.TestCase):
         self.assertEqual(result["thread_id"], "thread-1")
         self.assertEqual(result["run_id"], "run-1")
         self.assertEqual(result["response_text"], "done")
+
+    def test_run_query_attempts_auto_start_when_enabled(self):
+        first_status = {
+            "repo_path": "C:\\Users\\moyes\\deer-flow_upstream",
+            "gateway_url": "http://127.0.0.1:8001",
+            "langgraph_url": "http://127.0.0.1:2024",
+            "proxy_reachable": False,
+            "auto_start": True,
+        }
+        second_status = {
+            "repo_path": "C:\\Users\\moyes\\deer-flow_upstream",
+            "gateway_url": "http://127.0.0.1:8001",
+            "langgraph_url": "http://127.0.0.1:2024",
+            "proxy_reachable": True,
+            "auto_start": True,
+        }
+        stream_lines = [
+            "event: metadata",
+            'data: {"run_id":"run-2"}',
+            "",
+            "event: values",
+            'data: {"messages":[{"type":"ai","content":[{"type":"text","text":"online"}]}]}',
+            "",
+        ]
+
+        with patch.object(df, "collect_deerflow_status", side_effect=[first_status, second_status]), patch.object(
+            df,
+            "start_deerflow_backend",
+            return_value={"started": True, "message": "started"},
+        ) as start_mock, patch.object(
+            df.requests,
+            "post",
+            side_effect=[
+                _FakeResponse(payload={"thread_id": "thread-2"}),
+                _FakeResponse(lines=stream_lines),
+            ],
+        ):
+            result = df.run_deerflow_query("hello", mode="pro")
+
+        start_mock.assert_called_once()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["thread_id"], "thread-2")
+        self.assertEqual(result["response_text"], "online")
 
 
 if __name__ == "__main__":

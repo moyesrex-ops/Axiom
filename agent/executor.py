@@ -220,6 +220,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.nexus_memory import memory_archive
         return memory_archive(parameters=parameters, player=None) or "Done."
 
+    elif tool == "deep_analyzer":
+        from actions.deep_analyzer import deep_analyzer
+        return deep_analyzer(parameters=parameters, player=None, speak=speak) or "Done."
+
     elif tool == "autonomous_researcher":
         from actions.autonomous_researcher import autonomous_research
         return autonomous_research(parameters=parameters, player=None, speak=speak) or "Done."
@@ -271,6 +275,22 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
     elif tool == "deerflow_control":
         from actions.deerflow_control import deerflow_control
         return deerflow_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "paperclip_control":
+        from actions.paperclip_control import paperclip_control
+        return paperclip_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "openfang_control":
+        from actions.openfang_control import openfang_control
+        return openfang_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "symphony_control":
+        from actions.symphony_control import symphony_control
+        return symphony_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "lossless_claw_control":
+        from actions.lossless_claw_control import lossless_claw_control
+        return lossless_claw_control(parameters=parameters, player=None, speak=speak) or "Done."
 
     elif tool == "dexter_control":
         from actions.dexter_control import dexter_control

@@ -27,11 +27,14 @@ ABSOLUTE RULES:
 - Use memory_archive when the task depends on saved preferences, archived instructions, or earlier durable knowledge.
 - Use skill_library when you need an external workflow, coding pattern, debugging checklist, or testing playbook.
 - Use agent_library when the task needs specialist roles, delegated review, or supervisor-style multi-agent execution.
+- Use self_modifier when the user asks AXIOM to change its own voice, add/edit tools, or modify its own behavior.
+- Use persona_control when the task is specifically about PersonaPlex status or configuration.
 - Use lightpanda_control when the task depends on an optional Lightpanda browser backend.
 - Use autoresearch_control when the task depends on the local autoresearch repo, program.md, or experiment log.
 - Use dexter_control for the imported Dexter financial research runtime and status.
 - Use pentagi_control for the imported PentAGI security runtime status and limitations.
 - Use tradingagents_control when the task depends on the imported TradingAgents runtime, trading runs, or multi-agent market analysis.
+- Use paperclip_control, openfang_control, symphony_control, or lossless_claw_control when the task is specifically about those imported repos or their runtime readiness.
 - Use file_controller to save content to disk.
 - Use cmd_control to open files or run system commands.
 - Max 5 steps. Use the minimum steps needed.
@@ -140,8 +143,17 @@ codex_builder
   timeout: integer (optional)
   open_when_done: boolean (optional)
 
+self_modifier
+  action: "read_source" | "write_action" | "edit_action" | "generate_action" | "list_actions" | "change_voice" | "list_voices" (required)
+  file_path: string (optional)
+  tool_name: string (optional)
+  description: string (optional)
+  code: string (optional)
+  new_code: string (optional)
+  voice_name: string (optional)
+
 system_capabilities
-  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 memory_archive
@@ -150,6 +162,29 @@ memory_archive
   content: string (for save)
   query: string (for search)
   limit: integer (optional)
+
+deep_analyzer
+  query: string (optional)
+  topic: string (optional)
+  scope: string (optional)
+  angle: string (optional)
+  save: boolean (optional)
+
+autonomous_researcher
+  topic: string (required)
+  depth: string (optional)
+  objective: string (optional)
+  format: string (optional)
+  save: boolean (optional)
+
+mt5_trading
+  action: string (required)
+  symbol: string (optional)
+  volume: number (optional)
+  side: string (optional)
+  stop_loss: number (optional)
+  take_profit: number (optional)
+  note: string (optional)
 
 skill_library
   action: "status" | "sources" | "search" | "recommend" | "read" (optional)
@@ -214,13 +249,35 @@ autoresearch_control
   save: boolean (optional)
 
 deerflow_control
-  action: "status" | "configure" | "query" | "launch_instructions" (required)
+  action: "status" | "configure" | "prepare" | "start" | "query" | "launch_instructions" (required)
   prompt: string (for query)
   query: string (for query)
   goal: string (for query)
   mode: "flash" | "standard" | "pro" | "ultra" (optional)
   thread_id: string (optional)
   timeout: integer (optional)
+
+paperclip_control
+  action: "status" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
+  api_url: string (optional)
+  auto_start: boolean (optional)
+
+openfang_control
+  action: "status" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
+  dashboard_url: string (optional)
+  auto_start: boolean (optional)
+
+symphony_control
+  action: "status" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
+  workflow_path: string (optional)
+
+lossless_claw_control
+  action: "status" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
+  database_path: string (optional)
 
 predict_market
   asset: string (required)
@@ -246,6 +303,15 @@ automaton_control
   state_dir: string (optional)
   auto_start: boolean (optional)
   limit: integer (optional)
+
+persona_control
+  action: "status" | "enable" | "disable" | "configure" | "launch_instructions" (required)
+  server_url: string (optional)
+  repo_path: string (optional)
+  text_prompt: string (optional)
+  voice_prompt: string (optional)
+  cpu_offload: boolean (optional)
+  auto_start: boolean (optional)
 
 prompt_studio
   idea: string (required)

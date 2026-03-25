@@ -38,6 +38,14 @@ class DoctorTests(unittest.TestCase):
         ), patch.object(
             doctor, "collect_pentagi_status", return_value={"repo_path": "pentagi", "audit_notice_present": True, "source_available": False}
         ), patch.object(
+            doctor, "collect_paperclip_status", return_value={"repo_path": "paperclip", "api_reachable": False, "api_url": "http://127.0.0.1:3100"}
+        ), patch.object(
+            doctor, "collect_openfang_status", return_value={"repo_path": "openfang", "dashboard_reachable": False, "dashboard_url": "http://127.0.0.1:4200"}
+        ), patch.object(
+            doctor, "collect_symphony_status", return_value={"repo_path": "symphony", "spec_present": True, "workflow_path": "WORKFLOW.md"}
+        ), patch.object(
+            doctor, "collect_lossless_claw_status", return_value={"repo_path": "lossless-claw", "plugin_manifest_present": True}
+        ), patch.object(
             doctor, "_has_command", return_value=True
         ):
             report = doctor.format_doctor_report(limit=4)
@@ -48,6 +56,10 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Gemini-First Startup: Base startup path is ready with Gemini; optional integrations are additive", report)
         self.assertIn("Automaton: Optional repo detected but runtime is not enabled", report)
         self.assertIn("DeerFlow: Optional harness is installed but not running", report)
+        self.assertIn("Paperclip: Repo detected; control plane is not running", report)
+        self.assertIn("OpenFang: Repo detected; agent OS is not running", report)
+        self.assertIn("Symphony: Spec and orchestration reference are available", report)
+        self.assertIn("lossless-claw: Plugin manifest ready for OpenClaw integration", report)
         self.assertIn("Codex Builder: Codex CLI available", report)
 
 

@@ -13,11 +13,15 @@ from core.automaton_bridge import collect_automaton_status
 from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status
+from core.lossless_claw_bridge import collect_lossless_claw_status
 from core.mirofish_bridge import collect_mirofish_status
+from core.openfang_bridge import collect_openfang_status
 from core.pentagi_bridge import collect_pentagi_status
+from core.paperclip_bridge import collect_paperclip_status
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_gemini_api_key, get_secret
 from core.skill_library import collect_skill_library_status
+from core.symphony_bridge import collect_symphony_status
 from core.tradingagents_bridge import collect_tradingagents_status
 
 
@@ -140,6 +144,10 @@ def collect_capabilities() -> dict:
     pentagi = collect_pentagi_status()
     tradingagents = collect_tradingagents_status(limit=3)
     deerflow = collect_deerflow_status(limit=3)
+    paperclip = collect_paperclip_status()
+    openfang = collect_openfang_status()
+    symphony = collect_symphony_status()
+    lossless_claw = collect_lossless_claw_status()
     personaplex_cfg = runtime.get("personaplex", {})
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
@@ -230,9 +238,32 @@ def collect_capabilities() -> dict:
         "deerflow_gateway_url": str(deerflow.get("gateway_url", "") or ""),
         "deerflow_langgraph_url": str(deerflow.get("langgraph_url", "") or ""),
         "deerflow_proxy_reachable": bool(deerflow.get("proxy_reachable", False)),
+        "deerflow_auto_start": bool(deerflow.get("auto_start", False)),
+        "deerflow_managed_config": bool(deerflow.get("managed_config", False)),
+        "deerflow_backend_venv_ready": bool(deerflow.get("backend_venv_ready", False)),
+        "deerflow_gemini_api_key_present": bool(deerflow.get("gemini_api_key_present", False)),
         "deerflow_local_skill_count": int(deerflow.get("local_skill_count", 0) or 0),
         "deerflow_models_count": int(deerflow.get("models_count", 0) or 0),
         "deerflow_agents_count": int(deerflow.get("agents_count", 0) or 0),
+        "paperclip_repo_path": str(paperclip.get("repo_path", "") or ""),
+        "paperclip_api_url": str(paperclip.get("api_url", "") or ""),
+        "paperclip_api_reachable": bool(paperclip.get("api_reachable", False)),
+        "paperclip_auto_start": bool(paperclip.get("auto_start", False)),
+        "paperclip_skills_count": int(paperclip.get("skills_count", 0) or 0),
+        "openfang_repo_path": str(openfang.get("repo_path", "") or ""),
+        "openfang_dashboard_url": str(openfang.get("dashboard_url", "") or ""),
+        "openfang_dashboard_reachable": bool(openfang.get("dashboard_reachable", False)),
+        "openfang_auto_start": bool(openfang.get("auto_start", False)),
+        "openfang_hands_count": int(openfang.get("bundled_hands", 0) or 0),
+        "openfang_skills_count": int(openfang.get("bundled_skills", 0) or 0),
+        "symphony_repo_path": str(symphony.get("repo_path", "") or ""),
+        "symphony_spec_present": bool(symphony.get("spec_present", False)),
+        "symphony_elixir_reference_present": bool(symphony.get("elixir_reference_present", False)),
+        "symphony_workflow_path": str(symphony.get("workflow_path", "") or ""),
+        "lossless_claw_repo_path": str(lossless_claw.get("repo_path", "") or ""),
+        "lossless_claw_openclaw_available": bool(lossless_claw.get("openclaw_available", False)),
+        "lossless_claw_plugin_manifest_present": bool(lossless_claw.get("plugin_manifest_present", False)),
+        "lossless_claw_database_path": str(lossless_claw.get("database_path", "") or ""),
         "research_backend": str(research_cfg.get("backend", "axiom") or "axiom"),
         "vane_url": vane_url,
         "vane_reachable": bool(vane_url) and _is_tcp_reachable(vane_url),
@@ -337,9 +368,34 @@ def format_capability_status() -> str:
         ),
         (
             f"DeerFlow: gateway {'up' if caps['deerflow_proxy_reachable'] else 'down'} at {caps['deerflow_gateway_url']} | "
+            f"auto_start={'yes' if caps['deerflow_auto_start'] else 'no'} | "
             f"local_skills={caps['deerflow_local_skill_count']} remote_models={caps['deerflow_models_count']} remote_agents={caps['deerflow_agents_count']}"
             if caps["deerflow_repo_path"]
             else "DeerFlow: repo not found"
+        ),
+        (
+            f"Paperclip: API {'up' if caps['paperclip_api_reachable'] else 'down'} at {caps['paperclip_api_url']} | "
+            f"auto_start={'yes' if caps['paperclip_auto_start'] else 'no'} | skills={caps['paperclip_skills_count']}"
+            if caps["paperclip_repo_path"]
+            else "Paperclip: repo not found"
+        ),
+        (
+            f"OpenFang: dashboard {'up' if caps['openfang_dashboard_reachable'] else 'down'} at {caps['openfang_dashboard_url']} | "
+            f"auto_start={'yes' if caps['openfang_auto_start'] else 'no'} | hands={caps['openfang_hands_count']} skills={caps['openfang_skills_count']}"
+            if caps["openfang_repo_path"]
+            else "OpenFang: repo not found"
+        ),
+        (
+            f"Symphony: repo at {caps['symphony_repo_path']} | spec={'yes' if caps['symphony_spec_present'] else 'no'} | "
+            f"workflow={caps['symphony_workflow_path'] or 'WORKFLOW.md'}"
+            if caps["symphony_repo_path"]
+            else "Symphony: repo not found"
+        ),
+        (
+            f"lossless-claw: repo at {caps['lossless_claw_repo_path']} | plugin_manifest={'yes' if caps['lossless_claw_plugin_manifest_present'] else 'no'} | "
+            f"openclaw={'yes' if caps['lossless_claw_openclaw_available'] else 'no'}"
+            if caps["lossless_claw_repo_path"]
+            else "lossless-claw: repo not found"
         ),
         (
             f"Deep research backend: Vane at {caps['vane_url']}"
@@ -445,9 +501,32 @@ def format_capability_report() -> str:
         f"DeerFlow repo path: {caps['deerflow_repo_path'] or 'not found'}",
         f"DeerFlow gateway URL: {caps['deerflow_gateway_url'] or 'not configured'}",
         f"DeerFlow proxy reachable: {'yes' if caps['deerflow_proxy_reachable'] else 'no'}",
+        f"DeerFlow auto-start: {'enabled' if caps['deerflow_auto_start'] else 'disabled'}",
+        f"DeerFlow managed config: {'yes' if caps['deerflow_managed_config'] else 'no'}",
+        f"DeerFlow backend venv ready: {'yes' if caps['deerflow_backend_venv_ready'] else 'no'}",
+        f"DeerFlow Gemini key available: {'yes' if caps['deerflow_gemini_api_key_present'] else 'no'}",
         f"DeerFlow local skills: {caps['deerflow_local_skill_count']}",
         f"DeerFlow remote models: {caps['deerflow_models_count']}",
         f"DeerFlow remote agents: {caps['deerflow_agents_count']}",
+        f"Paperclip repo path: {caps['paperclip_repo_path'] or 'not found'}",
+        f"Paperclip API URL: {caps['paperclip_api_url'] or 'not configured'}",
+        f"Paperclip API reachable: {'yes' if caps['paperclip_api_reachable'] else 'no'}",
+        f"Paperclip auto-start: {'enabled' if caps['paperclip_auto_start'] else 'disabled'}",
+        f"Paperclip skills: {caps['paperclip_skills_count']}",
+        f"OpenFang repo path: {caps['openfang_repo_path'] or 'not found'}",
+        f"OpenFang dashboard URL: {caps['openfang_dashboard_url'] or 'not configured'}",
+        f"OpenFang dashboard reachable: {'yes' if caps['openfang_dashboard_reachable'] else 'no'}",
+        f"OpenFang auto-start: {'enabled' if caps['openfang_auto_start'] else 'disabled'}",
+        f"OpenFang bundled hands: {caps['openfang_hands_count']}",
+        f"OpenFang bundled skills: {caps['openfang_skills_count']}",
+        f"Symphony repo path: {caps['symphony_repo_path'] or 'not found'}",
+        f"Symphony spec present: {'yes' if caps['symphony_spec_present'] else 'no'}",
+        f"Symphony Elixir reference present: {'yes' if caps['symphony_elixir_reference_present'] else 'no'}",
+        f"Symphony workflow contract path: {caps['symphony_workflow_path'] or 'WORKFLOW.md'}",
+        f"lossless-claw repo path: {caps['lossless_claw_repo_path'] or 'not found'}",
+        f"lossless-claw database path: {caps['lossless_claw_database_path'] or 'default OpenClaw path'}",
+        f"lossless-claw openclaw command: {'ready' if caps['lossless_claw_openclaw_available'] else 'missing'}",
+        f"lossless-claw plugin manifest: {'yes' if caps['lossless_claw_plugin_manifest_present'] else 'no'}",
         f"Research backend: {caps['research_backend']}",
         (
             f"Vane endpoint: reachable at {caps['vane_url']}"

@@ -5,6 +5,11 @@ from pathlib import Path
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_gemini_api_key, get_secret
 
+try:
+    import tomllib
+except Exception:  # pragma: no cover - Python <3.11 fallback
+    tomllib = None
+
 
 _SOURCE_SPECS = {
     "wshobson_agents": {
@@ -47,6 +52,38 @@ _SOURCE_SPECS = {
         ],
         "special": "tradingagents",
     },
+    "paperclip": {
+        "name": "Paperclip",
+        "config_key": "paperclip_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "paperclip",
+        ],
+        "special": "paperclip",
+    },
+    "openfang": {
+        "name": "OpenFang",
+        "config_key": "openfang_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "openfang",
+        ],
+        "special": "openfang",
+    },
+    "symphony": {
+        "name": "Symphony",
+        "config_key": "symphony_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "symphony",
+        ],
+        "special": "symphony",
+    },
+    "lossless_claw": {
+        "name": "lossless-claw",
+        "config_key": "lossless_claw_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "lossless-claw",
+        ],
+        "special": "lossless_claw",
+    },
 }
 
 _INDEX_CACHE: dict = {"signature": None, "entries": []}
@@ -78,6 +115,22 @@ _CURATED_RECOMMENDATIONS = [
     {
         "triggers": ("trading", "ticker", "portfolio", "equity", "stock", "risk", "bullish", "bearish"),
         "hints": ("trading", "market", "portfolio", "risk", "analyst", "bull", "bear", "tradingagents"),
+    },
+    {
+        "triggers": ("workflow", "ticket", "issue", "parallel", "workspace", "handoff", "implementation run"),
+        "hints": ("symphony", "orchestrator", "workflow", "ticket", "issue", "workspace"),
+    },
+    {
+        "triggers": ("autonomous", "24/7", "agent os", "browser", "lead", "research", "hands", "operate"),
+        "hints": ("openfang", "hand", "browser", "researcher", "lead", "collector", "predictor"),
+    },
+    {
+        "triggers": ("company", "org", "manager", "budget", "heartbeat", "governance", "team"),
+        "hints": ("paperclip", "company", "heartbeat", "governance", "budget", "task"),
+    },
+    {
+        "triggers": ("memory", "context", "history", "conversation", "summarize", "recall"),
+        "hints": ("lossless", "context", "memory", "conversation", "summary", "lcm"),
     },
 ]
 
@@ -198,6 +251,8 @@ def _agent_source_row(source_id: str, spec: dict, repo_path: Path) -> dict:
     }
     if spec.get("special") == "tradingagents":
         row["agent_files"] = len(_tradingagents_role_cards(repo_path))
+    elif spec.get("special") == "openfang":
+        row["agent_files"] = len(_openfang_hand_cards(repo_path))
     elif spec.get("special"):
         row["agent_files"] = 1
     elif spec.get("glob"):
@@ -233,6 +288,18 @@ def resolve_agent_library_sources() -> list[dict]:
         elif spec.get("special") == "tradingagents":
             if not (repo_path / "README.md").exists() or not (repo_path / "tradingagents").exists():
                 continue
+        elif spec.get("special") == "paperclip":
+            if not (repo_path / "README.md").exists() or not (repo_path / "skills").exists():
+                continue
+        elif spec.get("special") == "openfang":
+            if not (repo_path / "README.md").exists() or not (repo_path / "crates" / "openfang-hands").exists():
+                continue
+        elif spec.get("special") == "symphony":
+            if not (repo_path / "README.md").exists() or not (repo_path / "SPEC.md").exists():
+                continue
+        elif spec.get("special") == "lossless_claw":
+            if not (repo_path / "README.md").exists():
+                continue
         elif not any(repo_path.glob(spec["glob"])):
             continue
 
@@ -252,6 +319,39 @@ def _signature_files_for_source(source: dict) -> list[Path]:
         rows = [path for path in [repo_path / "README.md", repo_path / "pyproject.toml"] if path.exists()]
         rows.extend(path for path, _, _, _ in _tradingagents_role_cards(repo_path))
         return rows
+    if special == "paperclip":
+        return [
+            path
+            for path in [
+                repo_path / "README.md",
+                repo_path / "AGENTS.md",
+                repo_path / "skills" / "paperclip" / "SKILL.md",
+            ]
+            if path.exists()
+        ]
+    if special == "openfang":
+        rows = [path for path in [repo_path / "README.md", repo_path / "Cargo.toml"] if path.exists()]
+        for hand_dir, _, _ in _openfang_hand_cards(repo_path):
+            for path in [hand_dir / "HAND.toml", hand_dir / "SKILL.md"]:
+                if path.exists():
+                    rows.append(path)
+        return rows
+    if special == "symphony":
+        return [
+            path
+            for path in [
+                repo_path / "README.md",
+                repo_path / "SPEC.md",
+                repo_path / "elixir" / "AGENTS.md",
+            ]
+            if path.exists()
+        ]
+    if special == "lossless_claw":
+        return [
+            path
+            for path in [repo_path / "README.md", repo_path / "AGENTS.md", repo_path / "openclaw.plugin.json"]
+            if path.exists()
+        ]
     glob_pattern = str(source.get("glob", "") or "").strip()
     return sorted(path for path in repo_path.glob(glob_pattern) if path.is_file())
 
@@ -336,6 +436,131 @@ def _special_pentagi_entry(source: dict) -> dict:
     }
 
 
+def _read_toml(path: Path) -> dict:
+    if tomllib is None or not path.exists():
+        return {}
+    try:
+        with path.open("rb") as handle:
+            raw = tomllib.load(handle)
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _openfang_hand_cards(repo_path: Path) -> list[tuple[Path, str, str]]:
+    hands_root = repo_path / "crates" / "openfang-hands" / "bundled"
+    if not hands_root.exists():
+        return []
+
+    rows = []
+    for hand_dir in sorted(path for path in hands_root.iterdir() if path.is_dir()):
+        hand_payload = _read_toml(hand_dir / "HAND.toml")
+        hand_id = str(hand_payload.get("id", "") or hand_dir.name).strip() or hand_dir.name
+        name = str(hand_payload.get("name", "") or hand_dir.name.replace("-", " ").title()).strip()
+        rows.append((hand_dir, hand_id, name))
+    return rows
+
+
+def _special_paperclip_entry(source: dict) -> dict:
+    repo_path = Path(source["repo_path"])
+    skill_path = repo_path / "skills" / "paperclip" / "SKILL.md"
+    readme_path = repo_path / "README.md"
+    skill_text = _safe_read_text(skill_path, limit=3600)
+    readme_text = _safe_read_text(readme_path, limit=2400)
+    summary = (
+        "Company-scale orchestration operator for managing agent org charts, heartbeats, "
+        "budgets, governance, and ticket-based execution."
+    )
+    return {
+        "id": "paperclip:paperclip-control-plane",
+        "source_id": "paperclip",
+        "source_name": source["name"],
+        "repo_path": source["repo_path"],
+        "slug": "paperclip-control-plane",
+        "name": "Paperclip Control Plane Operator",
+        "description": summary,
+        "category": "company orchestration",
+        "model_hint": "provider-configurable",
+        "path": str(skill_path if skill_path.exists() else readme_path),
+        "content_preview": (skill_text or readme_text).strip(),
+    }
+
+
+def _special_openfang_entries(source: dict) -> list[dict]:
+    repo_path = Path(source["repo_path"])
+    entries = []
+    for hand_dir, hand_id, name in _openfang_hand_cards(repo_path):
+        hand_payload = _read_toml(hand_dir / "HAND.toml")
+        description = str(hand_payload.get("description", "") or "").strip()
+        category = str(hand_payload.get("category", "") or "autonomous execution").strip()
+        skill_path = hand_dir / "SKILL.md"
+        preview = _safe_read_text(skill_path if skill_path.exists() else hand_dir / "HAND.toml", limit=2600)
+        entries.append(
+            {
+                "id": f"openfang:{hand_id}",
+                "source_id": "openfang",
+                "source_name": source["name"],
+                "repo_path": source["repo_path"],
+                "slug": hand_id,
+                "name": name,
+                "description": description or f"OpenFang hand for {name}.",
+                "category": category,
+                "model_hint": str(((hand_payload.get("agent") or {}).get("model")) or "").strip(),
+                "path": str(skill_path if skill_path.exists() else hand_dir / "HAND.toml"),
+                "content_preview": preview.strip(),
+            }
+        )
+    return entries
+
+
+def _special_symphony_entry(source: dict) -> dict:
+    repo_path = Path(source["repo_path"])
+    spec_path = repo_path / "SPEC.md"
+    agents_path = repo_path / "elixir" / "AGENTS.md"
+    spec_text = _safe_read_text(spec_path, limit=3400)
+    agents_text = _safe_read_text(agents_path, limit=1800)
+    summary = (
+        "Issue-driven orchestrator that polls a tracker, creates isolated per-issue workspaces, "
+        "and runs coding-agent implementation sessions with workflow policy in-repo."
+    )
+    return {
+        "id": "symphony:symphony-orchestrator",
+        "source_id": "symphony",
+        "source_name": source["name"],
+        "repo_path": source["repo_path"],
+        "slug": "symphony-orchestrator",
+        "name": "Symphony Orchestrator",
+        "description": summary,
+        "category": "work orchestration",
+        "model_hint": "",
+        "path": str(spec_path if spec_path.exists() else agents_path),
+        "content_preview": (spec_text or agents_text).strip(),
+    }
+
+
+def _special_lossless_claw_entry(source: dict) -> dict:
+    repo_path = Path(source["repo_path"])
+    readme_path = repo_path / "README.md"
+    readme_text = _safe_read_text(readme_path, limit=3400)
+    summary = (
+        "Lossless context-management plugin that preserves conversation history in SQLite with "
+        "DAG-based summarization and recall tools for long-running agent sessions."
+    )
+    return {
+        "id": "lossless_claw:lossless-context-manager",
+        "source_id": "lossless_claw",
+        "source_name": source["name"],
+        "repo_path": source["repo_path"],
+        "slug": "lossless-context-manager",
+        "name": "Lossless Context Manager",
+        "description": summary,
+        "category": "memory and context",
+        "model_hint": "",
+        "path": str(readme_path),
+        "content_preview": readme_text.strip(),
+    }
+
+
 def _tradingagents_role_cards(repo_path: Path) -> list[tuple[Path, str, str, str]]:
     agents_root = repo_path / "tradingagents" / "agents"
     if not agents_root.exists():
@@ -413,6 +638,18 @@ def index_agent_library() -> list[dict]:
             continue
         if special == "tradingagents":
             entries.extend(_special_tradingagents_entries(source))
+            continue
+        if special == "paperclip":
+            entries.append(_special_paperclip_entry(source))
+            continue
+        if special == "openfang":
+            entries.extend(_special_openfang_entries(source))
+            continue
+        if special == "symphony":
+            entries.append(_special_symphony_entry(source))
+            continue
+        if special == "lossless_claw":
+            entries.append(_special_lossless_claw_entry(source))
             continue
 
         for path in repo_path.glob(source["glob"]):
@@ -560,6 +797,23 @@ def recommend_agent_library(task: str, limit: int = 8, source_id: str = "") -> l
             score += 22
         if entry["source_id"] == "pentagi" and any(
             word in task_text for word in ("security", "pentest", "red team", "vulnerability", "exploit")
+        ):
+            score += 18
+        if entry["source_id"] == "paperclip" and any(
+            word in task_text
+            for word in ("company", "org", "manager", "budget", "governance", "heartbeat", "team", "workflow", "ticket")
+        ):
+            score += 20
+        if entry["source_id"] == "openfang" and any(
+            word in task_text for word in ("autonomous", "24/7", "browser", "lead", "research", "operate", "telegram")
+        ):
+            score += 18
+        if entry["source_id"] == "symphony" and any(
+            word in task_text for word in ("ticket", "issue", "workflow", "workspace", "parallel", "orchestrate", "handoff")
+        ):
+            score += 20
+        if entry["source_id"] == "lossless_claw" and any(
+            word in task_text for word in ("memory", "context", "history", "long conversation", "recall", "summary")
         ):
             score += 18
 

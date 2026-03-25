@@ -3,7 +3,9 @@ from core.deerflow_bridge import (
     configure_deerflow,
     deerflow_launch_instructions,
     format_deerflow_status,
+    prepare_deerflow_repo,
     run_deerflow_query,
+    start_deerflow_backend,
 )
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import log_event
@@ -29,6 +31,8 @@ def deerflow_control(parameters: dict = None, player=None, speak=None) -> str:
             updates["gateway_url"] = params.get("gateway_url")
         if "langgraph_url" in params and params.get("langgraph_url") not in (None, ""):
             updates["langgraph_url"] = params.get("langgraph_url")
+        if "auto_start" in params and params.get("auto_start") not in (None, ""):
+            updates["auto_start"] = bool(params.get("auto_start"))
         if not updates:
             return format_deerflow_status(limit=limit)
         cfg = configure_deerflow(updates)
@@ -36,6 +40,25 @@ def deerflow_control(parameters: dict = None, player=None, speak=None) -> str:
         log_event("integration", "deerflow_configure", message[:2000], metadata=updates)
         save_to_nexus("DeerFlow Config", message[:2000], kind="integration", source="runtime.config")
         return "DeerFlow configuration updated."
+
+    if action == "prepare":
+        result = prepare_deerflow_repo(
+            timeout=int(params.get("timeout", 1800) or 1800),
+            install_frontend=bool(params.get("install_frontend", False)),
+        )
+        report = str(result.get("message", "DeerFlow prepare finished.")).strip()
+        log_event("integration", "deerflow_prepare", report[:2000], metadata=result)
+        if result.get("prepared"):
+            save_to_nexus("DeerFlow Prepare", report[:2000], kind="integration", source="deerflow.prepare")
+        return report
+
+    if action == "start":
+        result = start_deerflow_backend(timeout=float(params.get("timeout", 40) or 40))
+        report = str(result.get("message", "DeerFlow start finished.")).strip()
+        log_event("integration", "deerflow_start", report[:2000], metadata=result)
+        if result.get("started"):
+            save_to_nexus("DeerFlow Start", report[:2000], kind="integration", source="deerflow.start")
+        return report
 
     if action in {"query", "chat", "run"}:
         prompt = str(
@@ -81,6 +104,6 @@ def deerflow_control(parameters: dict = None, player=None, speak=None) -> str:
 
     status = collect_deerflow_status(limit=limit)
     return (
-        "Unknown action. Use status, configure, query, or launch_instructions.\n"
+        "Unknown action. Use status, configure, prepare, start, query, or launch_instructions.\n"
         f"Repo detected: {'yes' if status['repo_path'] else 'no'}."
     )

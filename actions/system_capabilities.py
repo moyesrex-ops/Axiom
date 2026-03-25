@@ -68,9 +68,13 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             from core.deerflow_bridge import format_deerflow_status
             from core.dexter_bridge import format_dexter_status
             from core.lightpanda_bridge import format_lightpanda_status
+            from core.lossless_claw_bridge import format_lossless_claw_status
             from core.mirofish_bridge import format_mirofish_status
+            from core.openfang_bridge import format_openfang_status
             from core.pentagi_bridge import format_pentagi_status
+            from core.paperclip_bridge import format_paperclip_status
             from core.tradingagents_bridge import format_tradingagents_status
+            from core.symphony_bridge import format_symphony_status
 
             report = (
                 f"{format_mirofish_status()}\n\n"
@@ -81,6 +85,10 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
                 f"{format_lightpanda_status()}\n\n"
                 f"{format_autoresearch_status(limit=limit)}\n\n"
                 f"{format_deerflow_status(limit=limit)}\n\n"
+                f"{format_paperclip_status()}\n\n"
+                f"{format_openfang_status()}\n\n"
+                f"{format_symphony_status()}\n\n"
+                f"{format_lossless_claw_status()}\n\n"
                 f"{format_agent_library_status(limit=limit)}"
             )
             log_event("capabilities", "integrations_status", report[:2000])
@@ -137,6 +145,46 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             return report
         except Exception as error:
             return f"DeerFlow status failed: {error}"
+
+    if action == "paperclip":
+        try:
+            from core.paperclip_bridge import format_paperclip_status
+
+            report = format_paperclip_status()
+            log_event("capabilities", "paperclip_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Paperclip status failed: {error}"
+
+    if action == "openfang":
+        try:
+            from core.openfang_bridge import format_openfang_status
+
+            report = format_openfang_status()
+            log_event("capabilities", "openfang_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"OpenFang status failed: {error}"
+
+    if action == "symphony":
+        try:
+            from core.symphony_bridge import format_symphony_status
+
+            report = format_symphony_status()
+            log_event("capabilities", "symphony_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Symphony status failed: {error}"
+
+    if action == "lossless_claw":
+        try:
+            from core.lossless_claw_bridge import format_lossless_claw_status
+
+            report = format_lossless_claw_status()
+            log_event("capabilities", "lossless_claw_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"lossless-claw status failed: {error}"
 
     if action == "skills":
         try:
@@ -236,5 +284,6 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
 
     return (
         "Unknown action. Use summary, status, doctor, context, hardware, integrations, "
-        "mirofish, automaton, dexter, pentagi, tradingagents, lightpanda, autoresearch, deerflow, skills, agents, failures, events, or tasks."
+        "mirofish, automaton, dexter, pentagi, tradingagents, lightpanda, autoresearch, deerflow, "
+        "paperclip, openfang, symphony, lossless_claw, skills, agents, failures, events, or tasks."
     )

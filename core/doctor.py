@@ -9,11 +9,15 @@ from core.automaton_bridge import collect_automaton_status
 from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status
+from core.lossless_claw_bridge import collect_lossless_claw_status
 from core.mirofish_bridge import collect_mirofish_status
+from core.openfang_bridge import collect_openfang_status
 from core.pentagi_bridge import collect_pentagi_status
+from core.paperclip_bridge import collect_paperclip_status
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_gemini_api_key, get_secret
 from core.skill_library import collect_skill_library_status
+from core.symphony_bridge import collect_symphony_status
 from core.tradingagents_bridge import collect_tradingagents_status
 from memory import runtime_store
 
@@ -69,6 +73,10 @@ def collect_doctor_report(limit: int = 6) -> dict:
     dexter = collect_dexter_status()
     pentagi = collect_pentagi_status()
     tradingagents = collect_tradingagents_status(limit=2)
+    paperclip = collect_paperclip_status()
+    openfang = collect_openfang_status()
+    symphony = collect_symphony_status()
+    lossless_claw = collect_lossless_claw_status()
     memory = _memory_store_status()
     integrations_cfg = runtime.get("integrations", {}) or {}
     deerflow_cfg = runtime.get("deerflow", {}) or {}
@@ -221,7 +229,11 @@ def collect_doctor_report(limit: int = 6) -> dict:
         checks.append(_status_row("info", "Autoresearch", "Repo not detected"))
 
     if deerflow.get("repo_path"):
-        deerflow_expected = bool(deerflow_cfg.get("gateway_url") or deerflow_cfg.get("langgraph_url"))
+        deerflow_expected = bool(
+            deerflow_cfg.get("auto_start", False)
+            or deerflow_cfg.get("gateway_url")
+            or deerflow_cfg.get("langgraph_url")
+        )
         checks.append(
             _status_row(
                 "pass" if deerflow.get("proxy_reachable") else "warn" if deerflow_expected else "info",
@@ -229,7 +241,7 @@ def collect_doctor_report(limit: int = 6) -> dict:
                 (
                     "Gateway reachable and super-agent harness is live"
                     if deerflow.get("proxy_reachable")
-                    else "Repo detected but DeerFlow gateway is offline"
+                    else "Repo detected but managed DeerFlow startup is not yet online"
                     if deerflow_expected
                     else "Optional harness is installed but not running"
                 ),
@@ -312,6 +324,70 @@ def collect_doctor_report(limit: int = 6) -> dict:
         )
     else:
         checks.append(_status_row("info", "TradingAgents", "Repo not detected"))
+
+    if paperclip.get("repo_path"):
+        checks.append(
+            _status_row(
+                "pass" if paperclip.get("api_reachable") else "info",
+                "Paperclip",
+                (
+                    "Control plane reachable"
+                    if paperclip.get("api_reachable")
+                    else "Repo detected; control plane is not running"
+                ),
+                paperclip.get("api_url", ""),
+            )
+        )
+    else:
+        checks.append(_status_row("info", "Paperclip", "Repo not detected"))
+
+    if openfang.get("repo_path"):
+        checks.append(
+            _status_row(
+                "pass" if openfang.get("dashboard_reachable") else "info",
+                "OpenFang",
+                (
+                    "Dashboard reachable"
+                    if openfang.get("dashboard_reachable")
+                    else "Repo detected; agent OS is not running"
+                ),
+                openfang.get("dashboard_url", ""),
+            )
+        )
+    else:
+        checks.append(_status_row("info", "OpenFang", "Repo not detected"))
+
+    if symphony.get("repo_path"):
+        checks.append(
+            _status_row(
+                "pass" if symphony.get("spec_present") else "warn",
+                "Symphony",
+                (
+                    "Spec and orchestration reference are available"
+                    if symphony.get("spec_present")
+                    else "Repo detected but SPEC.md is missing"
+                ),
+                symphony.get("workflow_path", ""),
+            )
+        )
+    else:
+        checks.append(_status_row("info", "Symphony", "Repo not detected"))
+
+    if lossless_claw.get("repo_path"):
+        checks.append(
+            _status_row(
+                "pass" if lossless_claw.get("plugin_manifest_present") else "warn",
+                "lossless-claw",
+                (
+                    "Plugin manifest ready for OpenClaw integration"
+                    if lossless_claw.get("plugin_manifest_present")
+                    else "Repo detected but plugin manifest is missing"
+                ),
+                lossless_claw.get("repo_path", ""),
+            )
+        )
+    else:
+        checks.append(_status_row("info", "lossless-claw", "Repo not detected"))
 
     counts = {"pass": 0, "warn": 0, "fail": 0, "info": 0}
     for row in checks:

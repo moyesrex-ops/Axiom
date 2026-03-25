@@ -1,6 +1,6 @@
 from core.agent_library import collect_agent_library_status
 from core.automaton_bridge import collect_automaton_status, start_automaton_runtime
-from core.deerflow_bridge import collect_deerflow_status
+from core.deerflow_bridge import collect_deerflow_status, start_deerflow_backend
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status, start_lightpanda_backend
 from core.mirofish_bridge import collect_mirofish_status, start_mirofish_backend
@@ -126,8 +126,22 @@ def boot_integrations(log_func=None) -> list[str]:
         _emit(log_func, line)
         log_event("integration", "tradingagents_detected", line[:2000], metadata=tradingagents_status)
 
+    deerflow_cfg = runtime.get("deerflow", {}) or {}
     deerflow_status = collect_deerflow_status(limit=2)
-    if deerflow_status.get("repo_path"):
+    if deerflow_cfg.get("auto_start", False):
+        try:
+            result = start_deerflow_backend(timeout=20.0)
+        except Exception as exc:
+            result = {"started": False, "message": f"DeerFlow boot raised an exception: {exc}"}
+        msg = str(result.get("message", "DeerFlow auto-start attempted.")).strip()
+        if result.get("started"):
+            line = f"[INTEGRATION] DeerFlow: {msg}"
+        else:
+            line = f"[INTEGRATION] DeerFlow blocked: {msg}"
+        messages.append(line)
+        _emit(log_func, line)
+        log_event("integration", "deerflow_boot", line[:2000], metadata=result)
+    elif deerflow_status.get("repo_path"):
         line = (
             "[INTEGRATION] DeerFlow detected. Gateway is live and queryable."
             if deerflow_status.get("proxy_reachable")

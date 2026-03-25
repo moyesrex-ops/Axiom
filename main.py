@@ -50,6 +50,9 @@ from actions.automaton_control     import automaton_control
 from actions.autoresearch_control  import autoresearch_control
 from actions.deerflow_control      import deerflow_control
 from actions.lightpanda_control    import lightpanda_control
+from actions.lossless_claw_control import lossless_claw_control
+from actions.openfang_control      import openfang_control
+from actions.paperclip_control     import paperclip_control
 from actions.self_modifier         import self_modifier, get_dynamic_tool
 from actions.skill_library         import skill_library
 from actions.agent_library         import agent_library
@@ -60,6 +63,7 @@ from actions.persona_control       import persona_control
 from actions.prompt_studio         import prompt_studio
 from actions.lead_researcher       import lead_researcher
 from actions.swarm_orchestrator    import swarm_orchestrator
+from actions.symphony_control      import symphony_control
 from agent.heartbeat               import HeartbeatDaemon
 from core.capabilities             import format_capability_status
 from core.doctor                   import boot_doctor_lines
@@ -749,8 +753,9 @@ TOOL_DECLARATIONS = [
     "name": "skill_library",
     "description": (
         "Searches and reads integrated external skill libraries from Everything Claude Code, "
-        "Superpowers, Antigravity, DeerFlow, and local skills. Use this for coding workflows, debugging patterns, "
-        "testing playbooks, review checklists, or implementation strategy references."
+        "Superpowers, Antigravity, DeerFlow, Impeccable, gstack, CLI-Anything, Uncodixfy, Paperclip, OpenFang, "
+        "and local skills. Use this for coding workflows, debugging patterns, testing playbooks, UI design guidance, "
+        "review checklists, or implementation strategy references."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -805,7 +810,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | skills | agents | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -904,24 +909,92 @@ TOOL_DECLARATIONS = [
     "name": "deerflow_control",
     "description": (
         "Inspects and optionally queries the local DeerFlow super-agent harness. Use this to check "
-        "whether DeerFlow is live, configure repo or URLs, run a deep delegated query through its API, "
-        "or get launch instructions."
+        "whether DeerFlow is live, configure repo or URLs, prepare dependencies, start the managed "
+        "headless harness, run a deep delegated query through its API, or get launch instructions."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "status | configure | query | launch_instructions"},
+            "action": {"type": "STRING", "description": "status | configure | prepare | start | query | launch_instructions"},
             "repo_path": {"type": "STRING", "description": "Optional DeerFlow repo path"},
             "url": {"type": "STRING", "description": "Optional DeerFlow base URL, usually http://127.0.0.1:2026"},
             "gateway_url": {"type": "STRING", "description": "Optional DeerFlow gateway URL"},
             "langgraph_url": {"type": "STRING", "description": "Optional DeerFlow LangGraph URL"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether AXIOM should auto-start DeerFlow during boot when launchable"},
             "prompt": {"type": "STRING", "description": "Prompt for DeerFlow query"},
             "query": {"type": "STRING", "description": "Alternate prompt field for DeerFlow query"},
             "goal": {"type": "STRING", "description": "Alternate prompt field for DeerFlow query"},
             "mode": {"type": "STRING", "description": "flash | standard | pro | ultra"},
             "thread_id": {"type": "STRING", "description": "Optional DeerFlow thread id to continue"},
             "timeout": {"type": "INTEGER", "description": "Optional query timeout in seconds"},
-            "limit": {"type": "INTEGER", "description": "Optional status row limit"}
+            "limit": {"type": "INTEGER", "description": "Optional status row limit"},
+            "install_frontend": {"type": "BOOLEAN", "description": "Whether prepare should also install DeerFlow frontend dependencies"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "paperclip_control",
+    "description": (
+        "Inspects and configures the imported Paperclip control plane. Use this to check repo health, API reachability, "
+        "configure the repo path or API URL, or get launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local Paperclip repo path"},
+            "api_url": {"type": "STRING", "description": "Optional Paperclip API URL"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether AXIOM should auto-start Paperclip when supported"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "openfang_control",
+    "description": (
+        "Inspects and configures the imported OpenFang agent OS. Use this to check repo health, dashboard reachability, "
+        "configure the repo path or dashboard URL, or get launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local OpenFang repo path"},
+            "dashboard_url": {"type": "STRING", "description": "Optional OpenFang dashboard URL"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether AXIOM should auto-start OpenFang when supported"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "symphony_control",
+    "description": (
+        "Inspects and configures the imported Symphony orchestration spec/runtime reference. "
+        "Use this to inspect the repo, workflow contract path, or get launch/setup instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local Symphony repo path"},
+            "workflow_path": {"type": "STRING", "description": "Optional workflow contract path for the target repo"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "lossless_claw_control",
+    "description": (
+        "Inspects and configures the imported lossless-claw context-management plugin for OpenClaw. "
+        "Use this to inspect repo health, configure repo/database paths, or get launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local lossless-claw repo path"},
+            "database_path": {"type": "STRING", "description": "Optional lossless-claw database path"}
         },
         "required": ["action"]
     }
@@ -1485,6 +1558,46 @@ class AxiomLive:
             elif name == "deerflow_control":
                 r = await loop.run_in_executor(
                     None, lambda: deerflow_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "paperclip_control":
+                r = await loop.run_in_executor(
+                    None, lambda: paperclip_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "openfang_control":
+                r = await loop.run_in_executor(
+                    None, lambda: openfang_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "symphony_control":
+                r = await loop.run_in_executor(
+                    None, lambda: symphony_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "lossless_claw_control":
+                r = await loop.run_in_executor(
+                    None, lambda: lossless_claw_control(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak

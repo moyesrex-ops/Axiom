@@ -34,6 +34,61 @@ _SOURCE_SPECS = {
             Path.home() / "Axiom_research" / "external" / "deer-flow",
         ],
     },
+    "impeccable": {
+        "name": "Impeccable",
+        "config_key": "impeccable_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "impeccable",
+        ],
+        "skills_subdir": "source/skills",
+    },
+    "gstack": {
+        "name": "gstack",
+        "config_key": "gstack_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "gstack",
+        ],
+        "skills_subdir": ".",
+    },
+    "cli_anything": {
+        "name": "CLI-Anything",
+        "config_key": "cli_anything_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "CLI-Anything",
+        ],
+        "skills_subdir": ".",
+    },
+    "uncodixfy": {
+        "name": "Uncodixfy",
+        "config_key": "uncodixfy_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "Uncodixfy",
+        ],
+        "skills_subdir": ".",
+    },
+    "paperclip": {
+        "name": "Paperclip Skills",
+        "config_key": "paperclip_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "paperclip",
+        ],
+    },
+    "openfang_skills": {
+        "name": "OpenFang Skills",
+        "config_key": "openfang_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "openfang",
+        ],
+        "skills_subdir": "crates/openfang-skills/bundled",
+    },
+    "openfang_hands": {
+        "name": "OpenFang Hands",
+        "config_key": "openfang_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "openfang",
+        ],
+        "skills_subdir": "crates/openfang-hands/bundled",
+    },
     "local_skills": {
         "name": "Local Skills",
         "config_key": "local_skills_path",
@@ -87,6 +142,47 @@ _CURATED_RECOMMENDATIONS = [
             "subagent-driven-development",
             "using-git-worktrees",
             "workflow",
+        ),
+    },
+    {
+        "triggers": ("frontend", "ui", "ux", "website", "landing page", "dashboard", "design system", "web page"),
+        "hints": (
+            "frontend-design",
+            "impeccable",
+            "uncodix",
+            "design-review",
+            "design-consultation",
+            "typeset",
+            "arrange",
+            "polish",
+            "normalize",
+            "critique",
+            "react-expert",
+            "css-expert",
+        ),
+    },
+    {
+        "triggers": ("agent", "workflow", "orchestrate", "ticket", "heartbeat", "company", "parallel", "delegate"),
+        "hints": (
+            "paperclip",
+            "gstack",
+            "autoplan",
+            "office-hours",
+            "plan-",
+            "review",
+            "openfang",
+            "project-manager",
+        ),
+    },
+    {
+        "triggers": ("browser", "automation", "control software", "desktop app", "cli", "agent-native"),
+        "hints": (
+            "cli-anything",
+            "browser",
+            "openfang",
+            "browse",
+            "qa",
+            "terminal",
         ),
     },
 ]
@@ -246,7 +342,7 @@ def _should_index_skill(path: Path, skills_dir: Path) -> bool:
         return False
 
     if not relative_parts:
-        return False
+        return path.name == "SKILL.md"
     return not any(part.lower() in _SKIP_PARTS for part in relative_parts)
 
 
@@ -269,7 +365,7 @@ def index_skill_library() -> list[dict]:
             raw = _safe_read_text(skill_path, limit=4000)
             frontmatter, body = _frontmatter_payload(raw)
             relative_parts = list(skill_path.relative_to(skills_dir).parts[:-1])
-            slug = _normalize_slug(relative_parts)
+            slug = _normalize_slug(relative_parts) or skill_path.parent.name.replace("_", "-").replace(" ", "-").lower()
             readme_path = skill_path.parent / "README.md"
             summary = (
                 frontmatter.get("description", "").strip()
@@ -427,6 +523,26 @@ def recommend_skill_library(task: str, limit: int = 8) -> list[dict]:
                 if source_id in {"superpowers", "everything_claude_code"}:
                     score += 35
 
+        if source_id in {"impeccable", "uncodixfy"} and any(
+            word in task_text
+            for word in ("frontend", "ui", "ux", "website", "landing", "dashboard", "web", "design")
+        ):
+            score += 26
+        if source_id == "gstack" and any(
+            word in task_text
+            for word in ("plan", "review", "qa", "ship", "orchestrate", "parallel", "workflow", "design")
+        ):
+            score += 18
+        if source_id == "cli_anything" and any(
+            word in task_text
+            for word in ("cli", "desktop", "software", "browser", "automation", "app", "native")
+        ):
+            score += 18
+        if source_id in {"paperclip", "openfang_skills", "openfang_hands"} and any(
+            word in task_text
+            for word in ("agent", "autonomous", "team", "company", "research", "browser", "workflow", "operate")
+        ):
+            score += 14
         if source_id in {"superpowers", "everything_claude_code"} and any(
             word in task_text for word in ("debug", "test", "review", "plan", "execute", "branch", "patch")
         ):

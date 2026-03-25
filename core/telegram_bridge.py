@@ -2,6 +2,7 @@ import threading
 import time
 import re
 import difflib
+import json
 from typing import Callable
 
 import requests
@@ -70,6 +71,10 @@ _CHAT_PHRASES = {
 }
 _TASK_HINTS = (
     "open ",
+    "run ",
+    "use ",
+    "create ",
+    "make ",
     "change ",
     "change my",
     "set ",
@@ -88,6 +93,7 @@ _TASK_HINTS = (
     "summarize ",
     "write ",
     "build ",
+    "deploy ",
     "fix ",
     "install ",
     "download ",
@@ -100,6 +106,7 @@ _TASK_HINTS = (
     "sell ",
     "find ",
 )
+_PLAIN_MESSAGE_MODES = {"operator", "smart", "legacy", "chat_only"}
 
 
 def _telegram_config() -> dict:
@@ -133,6 +140,11 @@ def _chat_can_execute(chat_id: str) -> bool:
 
 def _is_enabled() -> bool:
     return bool(_telegram_config().get("enabled", False)) and bool(_telegram_token())
+
+
+def _plain_message_mode() -> str:
+    mode = str(_telegram_config().get("plain_message_mode", "operator") or "operator").strip().lower()
+    return mode if mode in _PLAIN_MESSAGE_MODES else "operator"
 
 
 def _api_url(method: str) -> str:
@@ -169,7 +181,26 @@ def _looks_like_capability_question(text: str) -> bool:
             "do u have access",
         )
     ) or (
-        any(token in normalized for token in ("lightpanda", "tradingagents", "mt5", "telegram", "mirofish", "automaton", "skill", "skills", "agent", "agents"))
+        any(
+            token in normalized
+            for token in (
+                "lightpanda",
+                "tradingagents",
+                "mt5",
+                "telegram",
+                "mirofish",
+                "automaton",
+                "skill",
+                "skills",
+                "agent",
+                "agents",
+                "paperclip",
+                "openfang",
+                "symphony",
+                "lossless",
+                "deerflow",
+            )
+        )
         and any(token in normalized for token in ("can you", "can u", "do you", "do u", "able to", "access", "deploy", "use"))
     )
 
@@ -430,6 +461,146 @@ def _contextualize_task_goal(chat_id: str, text: str) -> str:
     return original
 
 
+def _extract_json_object(text: str) -> dict:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if not match:
+        return {}
+    try:
+        payload = json.loads(match.group(0))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _heuristic_plain_message_decision(text: str, chat_id: str = "") -> dict:
+    original = str(text or "").strip()
+    if _looks_like_chat_message(original):
+        return {"kind": "chat", "goal": original, "source": "heuristic"}
+    if _looks_like_task_request(original):
+        return {
+            "kind": "task",
+            "goal": _contextualize_task_goal(chat_id, original),
+            "source": "heuristic",
+        }
+    return {"kind": "chat", "goal": original, "source": "heuristic"}
+
+
+def _llm_plain_message_decision(text: str, chat_id: str = "") -> dict:
+    api_key = get_secret("gemini_api_key", ["GEMINI_API_KEY"])
+    if not api_key:
+        return {}
+
+    try:
+        import google.generativeai as genai
+
+        genai.configure(api_key=api_key)
+        active_task = _active_task_snapshot(chat_id)
+        last_result = _LAST_CHAT_TASK_RESULTS.get(str(chat_id or "").strip()) or {}
+
+        context_parts = []
+        if active_task:
+            context_parts.append(
+                "[ACTIVE TASK]\n"
+                f"Task ID: {active_task.get('task_id', '')}\n"
+                f"Goal: {str(active_task.get('goal', ''))[:260]}\n"
+                f"Status: {active_task.get('status', '')}"
+            )
+        if last_result:
+            context_parts.append(
+                "[LAST TASK RESULT]\n"
+                f"Task ID: {last_result.get('task_id', '')}\n"
+                f"Goal: {str(last_result.get('goal', ''))[:260]}\n"
+                f"Result:\n{str(last_result.get('result', ''))[:1200]}"
+            )
+
+        prompt = (
+            "You are routing one Telegram message for AXIOM.\n"
+            "Decide whether AXIOM should reply conversationally or execute work through its full task system.\n"
+            "Return strict JSON only with this schema:\n"
+            "{\"kind\":\"chat|task\",\"goal\":\"rewritten explicit task or original message\",\"confidence\":0.0,\"reason\":\"short reason\"}\n\n"
+            "Choose \"task\" when the user wants AXIOM to do real work: run commands, control apps, operate browser, "
+            "change settings, use hardware, research, build, fix, create files, use skills/agents, or continue a prior artifact/action.\n"
+            "Choose \"chat\" for normal conversation, small talk, capability questions, status questions, clarification, or discussion.\n"
+            "If the message refers to a previous task with pronouns like it/that, rewrite the goal explicitly when possible.\n"
+            "Do not choose chat just because the message is short.\n\n"
+            + ("\n\n".join(context_parts) + "\n\n" if context_parts else "")
+            + f"[MESSAGE]\n{text.strip()}"
+        )
+
+        model = genai.GenerativeModel(_text_model_name())
+        response = model.generate_content(prompt)
+        payload = _extract_json_object(getattr(response, "text", "") or "")
+        if not payload:
+            return {}
+        kind = str(payload.get("kind", "") or "").strip().lower()
+        if kind not in {"chat", "task"}:
+            return {}
+        goal = str(payload.get("goal", "") or text).strip() or str(text or "").strip()
+        return {
+            "kind": kind,
+            "goal": goal,
+            "confidence": float(payload.get("confidence", 0.0) or 0.0),
+            "reason": str(payload.get("reason", "") or "").strip(),
+            "source": "llm_router",
+        }
+    except Exception as error:
+        log_event("telegram", "plain_message_router_error", str(error)[:500])
+        return {}
+
+
+def _decide_plain_message_action(text: str, chat_id: str = "") -> dict:
+    original = str(text or "").strip()
+    mode = _plain_message_mode()
+    if mode == "chat_only":
+        return {"kind": "chat", "goal": original, "source": "chat_only"}
+    if mode == "legacy":
+        return _heuristic_plain_message_decision(original, chat_id=chat_id)
+    if mode == "operator":
+        if (
+            _looks_like_chat_message(original)
+            or _looks_like_capability_question(original)
+            or _looks_like_runtime_status_question(original)
+        ):
+            return {"kind": "chat", "goal": original, "source": "operator_chat_guard"}
+
+        decision = _llm_plain_message_decision(original, chat_id=chat_id)
+        if not decision:
+            decision = _heuristic_plain_message_decision(original, chat_id=chat_id)
+
+        if str(decision.get("kind", "")).strip().lower() == "task":
+            decision["goal"] = _contextualize_task_goal(chat_id, str(decision.get("goal", original) or original))
+            return decision
+
+        if _looks_like_task_request(original) or (len(original.split()) <= 3 and not original.endswith("?")):
+            return {
+                "kind": "task",
+                "goal": _contextualize_task_goal(chat_id, original),
+                "source": "operator_default",
+            }
+
+        decision["goal"] = original
+        return decision
+
+    decision = _llm_plain_message_decision(original, chat_id=chat_id)
+    if not decision:
+        decision = _heuristic_plain_message_decision(original, chat_id=chat_id)
+
+    if str(decision.get("kind", "")).strip().lower() == "task":
+        decision["goal"] = _contextualize_task_goal(chat_id, str(decision.get("goal", original) or original))
+    else:
+        decision["goal"] = original
+    return decision
+
+
 def _generate_chat_reply(user_text: str, chat_id: str = "") -> str:
     api_key = get_secret("gemini_api_key", ["GEMINI_API_KEY"])
     if not api_key:
@@ -486,13 +657,13 @@ def _generate_chat_reply(user_text: str, chat_id: str = "") -> str:
         response = model.generate_content("\n\n".join(part for part in prompt_parts if part))
         reply = _trim_message(getattr(response, "text", "") or "")
         if not reply:
-            reply = "I'm here. Send a clear instruction or /task for a longer execution job."
+            reply = "I'm here. Send a clear instruction. I can either reply normally or execute the work directly."
         remember_conversation_turn(user_text, reply)
         log_event("telegram", "chat_reply", user_text[:300], metadata={"reply_preview": reply[:220]})
         return reply
     except Exception as error:
         log_event("telegram", "chat_reply_error", str(error)[:500])
-        return "Telegram chat hit a model error just now. Execution via /task is still available."
+        return "Telegram chat hit a model error just now, but execution is still available."
 
 
 def _reply_to_chat(chat_id: str, text: str, reply_to_message_id: int | None) -> None:
@@ -596,9 +767,9 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
                 "AXIOM Telegram bridge\n\n"
                 "/status - capability summary\n"
                 "/tasks - recent task checkpoints\n"
-                "/task <goal> - queue a task\n"
-                "Plain chat gets a normal reply.\n"
-                "Operational messages can auto-execute when plain-message execution is enabled.\n"
+                "/task <goal> - optional explicit force-execute\n"
+                "Plain messages default to execution when they look actionable.\n"
+                "Normal conversation still gets a normal reply.\n"
                 f"Execution from this chat: {'enabled' if execution_enabled else 'locked'}"
             ),
             reply_to_message_id=reply_to_message_id,
@@ -658,44 +829,46 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         _send_message(chat_id, _format_active_task_status(chat_id), reply_to_message_id=reply_to_message_id)
         return
 
-    if _looks_like_chat_message(text):
-        _reply_to_chat(chat_id, text, reply_to_message_id)
-        return
-
-    if _telegram_config().get("queue_plain_messages", True) and _looks_like_task_request(text):
-        if active_task:
-            _send_message(
-                chat_id,
-                (
-                    f"Task [{active_task['task_id']}] is already running for this chat.\n"
-                    f"Goal: {str(active_task.get('goal', ''))[:260]}\n\n"
-                    "I am not queueing a second execution on top of it. Wait for the current result first."
-                ),
-                reply_to_message_id=reply_to_message_id,
-            )
-            return
-        if not execution_enabled:
-            _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
-            log_event("telegram", "execution_blocked", text[:200], metadata={"chat_id": chat_id})
-            return
-        resolved_goal = _contextualize_task_goal(chat_id, text)
-        if resolved_goal != text:
-            log_event(
-                "telegram",
-                "task_goal_rewritten",
-                resolved_goal[:300],
-                metadata={"chat_id": chat_id, "original_goal": text[:300]},
-            )
-        _queue_task(chat_id, resolved_goal, reply_to_message_id, log_func)
-        return
-
-    if _looks_like_task_request(text):
-        _send_message(
-            chat_id,
-            "That sounds like an execution request. Send /task <goal> if you want it run from Telegram.",
-            reply_to_message_id=reply_to_message_id,
+    if _telegram_config().get("queue_plain_messages", True):
+        decision = _decide_plain_message_action(text, chat_id=chat_id)
+        kind = str(decision.get("kind", "chat") or "chat").strip().lower()
+        goal = str(decision.get("goal", text) or text).strip() or text
+        log_event(
+            "telegram",
+            "plain_message_routed",
+            f"{kind}: {goal[:260]}",
+            metadata={
+                "chat_id": chat_id,
+                "source": str(decision.get("source", "") or ""),
+                "reason": str(decision.get("reason", "") or "")[:240],
+                "confidence": decision.get("confidence", 0.0),
+            },
         )
-        return
+        if kind == "task":
+            if active_task:
+                _send_message(
+                    chat_id,
+                    (
+                        f"Task [{active_task['task_id']}] is already running for this chat.\n"
+                        f"Goal: {str(active_task.get('goal', ''))[:260]}\n\n"
+                        "I am not queueing a second execution on top of it. Wait for the current result first."
+                    ),
+                    reply_to_message_id=reply_to_message_id,
+                )
+                return
+            if not execution_enabled:
+                _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
+                log_event("telegram", "execution_blocked", goal[:200], metadata={"chat_id": chat_id})
+                return
+            if goal != text:
+                log_event(
+                    "telegram",
+                    "task_goal_rewritten",
+                    goal[:300],
+                    metadata={"chat_id": chat_id, "original_goal": text[:300]},
+                )
+            _queue_task(chat_id, goal, reply_to_message_id, log_func)
+            return
 
     _reply_to_chat(chat_id, text, reply_to_message_id)
 
