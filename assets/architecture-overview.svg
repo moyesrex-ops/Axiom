@@ -1,92 +1,101 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
-  <title id="title">Axiom System Architecture</title>
-  <desc id="desc">Architecture diagram showing user inputs, Axiom live runtime, task orchestration, tool layer, memory and state, and external systems.</desc>
+  <title id="title">AXIOM Runtime Architecture</title>
+  <desc id="desc">Architecture diagram showing entrypoint, live runtime, task engine, action layer, memory spine, and optional integrations.</desc>
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%" stop-color="#09111d"/>
-      <stop offset="100%" stop-color="#14263b"/>
+      <stop offset="0%" stop-color="#0a141d"/>
+      <stop offset="100%" stop-color="#142739"/>
     </linearGradient>
-    <linearGradient id="card" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%" stop-color="#13263a"/>
-      <stop offset="100%" stop-color="#102030"/>
+    <linearGradient id="cardA" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#153247"/>
+      <stop offset="100%" stop-color="#112335"/>
+    </linearGradient>
+    <linearGradient id="cardB" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#1f2e24"/>
+      <stop offset="100%" stop-color="#17221a"/>
+    </linearGradient>
+    <linearGradient id="cardC" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="#34261f"/>
+      <stop offset="100%" stop-color="#251a16"/>
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#021018" flood-opacity="0.55"/>
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#021018" flood-opacity="0.44"/>
     </filter>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7edcff"/>
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#86e7ff"/>
     </marker>
     <style>
-      .title { font: 700 40px 'Segoe UI', Arial, sans-serif; fill: #f3f7fb; }
-      .subtitle { font: 400 18px 'Segoe UI', Arial, sans-serif; fill: #b9cad8; }
-      .h { font: 700 24px 'Segoe UI', Arial, sans-serif; fill: #f6fbff; }
-      .p { font: 400 17px 'Segoe UI', Arial, sans-serif; fill: #d0deea; }
-      .mono { font: 600 15px Consolas, 'Courier New', monospace; fill: #8fe3ff; }
-      .small { font: 400 14px 'Segoe UI', Arial, sans-serif; fill: #b8c7d5; }
-      .line { stroke: #7edcff; stroke-width: 4; fill: none; marker-end: url(#arrow); }
-      .dimline { stroke: #4aa6cf; stroke-width: 3; fill: none; marker-end: url(#arrow); opacity: 0.9; }
+      .title { font: 700 40px 'Segoe UI', Arial, sans-serif; fill: #f5fbff; }
+      .subtitle { font: 400 18px 'Segoe UI', Arial, sans-serif; fill: #bfd0dc; }
+      .h { font: 700 25px 'Segoe UI', Arial, sans-serif; fill: #f7fbff; }
+      .p { font: 400 17px 'Segoe UI', Arial, sans-serif; fill: #d7e5ef; }
+      .small { font: 400 15px 'Segoe UI', Arial, sans-serif; fill: #bfd0dc; }
+      .mono { font: 700 15px Consolas, 'Courier New', monospace; fill: #97ebff; }
+      .line { stroke: #86e7ff; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .line2 { stroke: #aeeaa4; stroke-width: 4; fill: none; marker-end: url(#arrow); }
+      .line3 { stroke: #ffc785; stroke-width: 4; fill: none; marker-end: url(#arrow); }
     </style>
   </defs>
 
   <rect width="1600" height="980" fill="url(#bg)"/>
-  <circle cx="1280" cy="140" r="180" fill="#1d4f62" opacity="0.14"/>
-  <circle cx="180" cy="820" r="220" fill="#29445b" opacity="0.12"/>
+  <circle cx="1320" cy="140" r="210" fill="#25566a" opacity="0.12"/>
+  <circle cx="200" cy="860" r="260" fill="#5f3726" opacity="0.10"/>
 
-  <text x="80" y="80" class="title">A.X.I.O.M Runtime Architecture</text>
-  <text x="80" y="118" class="subtitle">Live voice shell, autonomous task engine, persistent memory, and optional external channels</text>
+  <text x="80" y="82" class="title">AXIOM Runtime Architecture</text>
+  <text x="80" y="118" class="subtitle">The repo centers on one live runtime, one task engine, one execution layer, and one memory spine</text>
 
-  <rect x="70" y="190" width="290" height="180" rx="24" fill="#112232" stroke="#55d0ff" stroke-width="2.5" filter="url(#shadow)"/>
-  <text x="100" y="238" class="h">User Surface</text>
-  <text x="100" y="278" class="p">Voice conversation</text>
-  <text x="100" y="308" class="p">Desktop HUD</text>
-  <text x="100" y="338" class="p">Optional Telegram bot</text>
+  <rect x="80" y="180" width="290" height="180" rx="28" fill="#102231" stroke="#74dfff" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="115" y="234" class="h">Entrypoint</text>
+  <text x="115" y="274" class="p"><tspan class="mono">axiom</tspan> or <tspan class="mono">Axiom.bat</tspan></text>
+  <text x="115" y="304" class="p">loads config, secrets, UI</text>
+  <text x="115" y="334" class="small">Single-root local boot path</text>
 
-  <rect x="430" y="150" width="420" height="250" rx="26" fill="url(#card)" stroke="#7edcff" stroke-width="3" filter="url(#shadow)"/>
-  <text x="465" y="205" class="h">Live Runtime</text>
-  <text x="465" y="242" class="mono">main.py</text>
-  <text x="465" y="278" class="p">Gemini Live session</text>
-  <text x="465" y="308" class="p">Audio send / receive loop</text>
-  <text x="465" y="338" class="p">Function-call router</text>
-  <text x="465" y="368" class="p">Capability-aware system prompt</text>
+  <rect x="450" y="140" width="420" height="260" rx="30" fill="url(#cardA)" stroke="#78e0ff" stroke-width="3" filter="url(#shadow)"/>
+  <text x="485" y="198" class="h">Live Runtime</text>
+  <text x="485" y="238" class="mono">main.py</text>
+  <text x="485" y="276" class="p">Gemini Live session</text>
+  <text x="485" y="306" class="p">audio send / receive loop</text>
+  <text x="485" y="336" class="p">tool-call routing</text>
+  <text x="485" y="366" class="p">capability-aware prompt context</text>
 
-  <rect x="930" y="150" width="570" height="250" rx="26" fill="url(#card)" stroke="#89ffcb" stroke-width="3" filter="url(#shadow)"/>
-  <text x="965" y="205" class="h">Action Layer</text>
-  <text x="965" y="242" class="mono">actions/</text>
-  <text x="965" y="278" class="p">Browser + screen + desktop + terminal</text>
-  <text x="965" y="308" class="p">Prompt Studio + lead research + swarm orchestration</text>
-  <text x="965" y="338" class="p">Trading + RGB hardware + file/code helpers</text>
-  <text x="965" y="368" class="p">System capability inspection + optional Persona/Telegram controls</text>
+  <rect x="950" y="140" width="560" height="260" rx="30" fill="url(#cardB)" stroke="#aceea8" stroke-width="3" filter="url(#shadow)"/>
+  <text x="985" y="198" class="h">Execution Layer</text>
+  <text x="985" y="238" class="mono">actions/</text>
+  <text x="985" y="276" class="p">browser, screen, desktop, terminal, and files</text>
+  <text x="985" y="306" class="p">prompting, research, YouTube, lead extraction, swarm tools</text>
+  <text x="985" y="336" class="p">trading, RGB hardware, and integration control actions</text>
+  <text x="985" y="366" class="small">Real machine-facing work happens here</text>
 
-  <rect x="430" y="470" width="420" height="220" rx="26" fill="url(#card)" stroke="#ffc66d" stroke-width="3" filter="url(#shadow)"/>
-  <text x="465" y="525" class="h">Task Orchestration</text>
-  <text x="465" y="562" class="mono">agent/</text>
-  <text x="465" y="598" class="p">planner.py</text>
-  <text x="465" y="626" class="p">executor.py</text>
-  <text x="465" y="654" class="p">task_queue.py + heartbeat.py</text>
+  <rect x="450" y="470" width="420" height="220" rx="30" fill="url(#cardA)" stroke="#ffd18a" stroke-width="3" filter="url(#shadow)"/>
+  <text x="485" y="526" class="h">Task Engine</text>
+  <text x="485" y="566" class="mono">agent/</text>
+  <text x="485" y="604" class="p">planner.py</text>
+  <text x="485" y="632" class="p">executor.py</text>
+  <text x="485" y="660" class="p">task_queue.py and heartbeat.py</text>
 
-  <rect x="930" y="470" width="570" height="220" rx="26" fill="url(#card)" stroke="#ff9b77" stroke-width="3" filter="url(#shadow)"/>
-  <text x="965" y="525" class="h">Memory and State</text>
-  <text x="965" y="562" class="mono">memory/ + runtime_store.py</text>
-  <text x="965" y="598" class="p">long_term.json for user facts + nexus knowledge</text>
-  <text x="965" y="626" class="p">axiom_state.db for events, failures, task checkpoints</text>
-  <text x="965" y="654" class="p">conversation archive with searchable cross-session recall</text>
+  <rect x="950" y="470" width="560" height="220" rx="30" fill="url(#cardC)" stroke="#ffbf86" stroke-width="3" filter="url(#shadow)"/>
+  <text x="985" y="526" class="h">Memory and State</text>
+  <text x="985" y="566" class="mono">memory/ + runtime_store.py</text>
+  <text x="985" y="604" class="p">conversation archive in SQLite</text>
+  <text x="985" y="632" class="p">task checkpoints, failures, capability snapshots, runtime events</text>
+  <text x="985" y="660" class="p">long-term memory and Nexus recall</text>
 
-  <rect x="70" y="760" width="1430" height="150" rx="26" fill="#0f1e2d" stroke="#718da4" stroke-width="2.5" filter="url(#shadow)"/>
-  <text x="110" y="814" class="h">External Systems and Optional Integrations</text>
-  <text x="110" y="852" class="p">Gemini Live API • Playwright • OpenRGB • MetaTrader 5 • CCXT • Telegram Bot API • Optional PersonaPlex / MiroFish / Automaton paths</text>
-  <text x="110" y="882" class="small">Axiom stays locally runnable even when optional integrations are disabled.</text>
+  <rect x="80" y="770" width="1430" height="140" rx="30" fill="#101f2d" stroke="#9eb7c8" stroke-width="2.5" filter="url(#shadow)"/>
+  <text x="116" y="822" class="h">Optional Attached Systems</text>
+  <text x="116" y="858" class="p">Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, and autoresearch</text>
+  <text x="116" y="888" class="small">These can be discovered, reported, and sometimes auto-started without becoming mandatory for local boot.</text>
 
-  <path class="line" d="M 360 280 C 385 280, 392 275, 430 275"/>
-  <path class="line" d="M 850 275 C 885 275, 890 275, 930 275"/>
-  <path class="dimline" d="M 640 400 C 640 430, 640 440, 640 470"/>
-  <path class="dimline" d="M 1040 400 C 1040 440, 1040 445, 1040 470"/>
-  <path class="dimline" d="M 850 580 C 885 580, 890 580, 930 580"/>
-  <path class="dimline" d="M 640 690 C 640 725, 640 735, 640 760"/>
-  <path class="dimline" d="M 1210 690 C 1210 725, 1210 735, 1210 760"/>
-  <path class="dimline" d="M 250 370 C 250 550, 250 550, 430 580"/>
+  <path class="line" d="M 370 270 C 402 270, 412 270, 450 270"/>
+  <path class="line2" d="M 870 270 C 902 270, 912 270, 950 270"/>
+  <path class="line3" d="M 660 400 C 660 432, 660 440, 660 470"/>
+  <path class="line3" d="M 1100 400 C 1100 432, 1100 440, 1100 470"/>
+  <path class="line2" d="M 870 580 C 902 580, 912 580, 950 580"/>
+  <path class="line" d="M 660 690 C 660 725, 660 736, 660 770"/>
+  <path class="line3" d="M 1230 690 C 1230 725, 1230 736, 1230 770"/>
+  <path class="line" d="M 220 360 C 220 510, 280 560, 450 580"/>
 
-  <text x="102" y="407" class="small">Telegram remains optional and does not block local startup.</text>
-  <text x="884" y="436" class="small">Tool calls</text>
-  <text x="662" y="445" class="small">task escalation</text>
-  <text x="1080" y="438" class="small">persistent writes</text>
+  <text x="401" y="250" class="small">boot</text>
+  <text x="894" y="250" class="small">tool calls</text>
+  <text x="682" y="447" class="small">task escalation</text>
+  <text x="1120" y="447" class="small">state writes</text>
 </svg>

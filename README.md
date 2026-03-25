@@ -1,156 +1,64 @@
 # A.X.I.O.M v4.3
-### Live Voice Operator, Autonomous Execution, Research, Memory, and Channel Control
+### Windows-first live operator with real execution, persistent memory, and optional research sidecars
 
 <p align="center">
   <img src="assets/banner.png" alt="AXIOM Banner" width="100%">
 </p>
 
 <p align="center">
-  <b>Windows-first autonomous operator built around Gemini Live.</b><br>
-  Voice I/O · Agent Tasks · Browser + Vision + Desktop Control · Prompt Studio · Public Lead Research
+  <b>One local runtime, one command, real tool execution.</b><br>
+  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Optional Telegram, MiroFish, Automaton, Lightpanda, and Autoresearch
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Gemini-Live%20API-purple?style=flat-square&logo=google&logoColor=white" alt="Gemini">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-black?style=flat-square" alt="Platform">
+  <img src="https://img.shields.io/badge/Memory-SQLite%20%2B%20Nexus-1f7a8c?style=flat-square" alt="Memory">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
 </p>
 
 ---
 
-## What This Repo Is
+## What AXIOM Is
 
-Axiom is no longer just a trading shell. The current repo combines:
+AXIOM is a local operator built around a Gemini Live voice runtime, a task engine, a real machine execution layer, and a persistent memory/state spine.
 
-- A real-time Gemini Live voice loop for spoken interaction.
-- A planner/executor queue for multi-step autonomous tasks.
-- Browser, screen, desktop, file, and terminal control.
-- Long-term memory plus a durable runtime event/failure store.
-- Task lifecycle checkpoints persisted to SQLite.
-- Archived conversation turns with searchable cross-session recall.
-- Live system context awareness for timezone, locale, and best-effort location.
-- MT5 trading with stop-loss / take-profit defaults and post-trade reflection.
-- Hardware RGB control through OpenRGB.
-- Prompt generation, public lead research, and generalized swarm reasoning.
-- Optional PersonaPlex sidecar integration for personality/voice experiments.
-- Optional Telegram bridge for remote chat, task queuing, and status checks.
+It is meant to boot as one root process and stay usable even when optional integrations are disabled.
 
-This repo keeps the core runtime local and stable. Larger external systems such as PersonaPlex, MiroFish, and Automaton are treated as optional integrations instead of being left as broken placeholder submodules.
+Core ideas:
+
+- `axiom` or `Axiom.bat` should be the normal local entrypoint.
+- The live runtime, planner, executor, tools, and memory all belong to one connected system.
+- Local state lives in SQLite and long-term memory files instead of vanishing with the last prompt.
+- External systems like Telegram, MiroFish, Automaton, PersonaPlex, Lightpanda, and `autoresearch` are sidecars, not hard requirements for local boot.
+- Public repo files stay portable; machine-specific paths and secrets belong in ignored local config files.
 
 ---
 
-## Architecture
+## Operating Model
 
 <p align="center">
-  <img src="assets/architecture-overview.svg" alt="AXIOM architecture overview" width="100%">
+  <img src="assets/operating-model.svg" alt="AXIOM operating model" width="100%">
 </p>
 
-This is the actual shape of the project now: a Gemini Live runtime at the center, an action/tool layer for execution, a separate task engine for longer jobs, and a persistent memory/state layer underneath it.
+The repo is organized around a stable core path and controlled optional expansion. That matters because the project is doing real OS-level work and should not become fragile just because a sidecar repo or backend is missing.
 
 ---
 
-## Current Capability Set
+## What Works Today
 
-| Area | What Axiom Can Do |
-|------|--------------------|
-| Voice | Real-time Gemini Live conversation with configurable runtime voice |
-| Agent Tasks | Break down and execute multi-step tasks through the task queue |
-| Browser | Search, navigate, click, type, scrape, and automate pages |
-| Vision | Analyze the screen or webcam |
-| Computer Control | Keyboard, mouse, windows, tabs, scrolling, screenshots |
-| Terminal | Generate and run shell commands with safer visible-mode behavior |
-| Files | Read, write, search, organize, and inspect files |
-| Hardware | Change RGB hardware colors/effects and inspect OpenRGB device status |
-| Trading | Execute MT5 orders with SL/TP and closed-trade reflection |
-| Research | Deep search, public lead extraction, YouTube/channel research |
-| Prompting | Generate image/video prompts with Prompt Studio |
-| Swarm | Run generalized multi-role debates for research, strategy, build planning, or critique |
-| Runtime Awareness | Inspect installed integrations, recent events, failures, timezone, and system context |
-| Task Persistence | Record task queue lifecycle checkpoints for later inspection |
-| Memory Recall | Search old nexus knowledge and archived conversation turns |
-| Persona | Manage optional PersonaPlex configuration and launch instructions |
-| Channels | Optional Telegram bot bridge for remote chat and task submission |
+| Tier | Included | What to Expect |
+|------|----------|----------------|
+| Core runtime | Gemini Live, planner, executor, action routing, Playwright browser control, file/desktop/terminal tools, memory archive, runtime SQLite store, system context | This is the normal local boot path and the part AXIOM is built around |
+| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, `autoresearch` | Enabled through local config; useful when present, but not required for `axiom` to start |
+| Experimental path | Lightpanda browser backend | Wired into AXIOM and launchable, but Playwright remains the safe default backend |
 
----
+Short version:
 
-## Languages Used
-
-| Layer | Languages / Formats |
-|------|----------------------|
-| Core runtime | Python |
-| Desktop launch | Batch (`Axiom.bat`) |
-| External agent runtime | TypeScript / Node.js (`automaton_upstream`) |
-| Config | JSON |
-| Durable state | SQLite / SQL |
-| Diagrams | SVG + Mermaid |
-| Shell examples | PowerShell / Bash |
-
-AXIOM itself is Python-first. The current "one brain" model coordinates Python-native tools plus optional external runtimes such as MiroFish and Conway Automaton.
-
----
-
-## Repo Layout
-
-```text
-main.py                          Live Gemini runtime and tool dispatcher
-ui.py                            Desktop HUD and first-run secret setup
-actions/                         Tool modules, including mirofish_control and automaton_control
-agent/                           Planner, executor, queue, heartbeat
-core/                            Prompt, runtime config, capability detection, integration bridges
-memory/                          Long-term memory, runtime SQLite store, trading soul
-config/runtime.json              Public non-secret runtime defaults
-config/runtime.local.json        Optional local override file (ignored by git)
-config/api_keys.example.json     Public example secret file
-core/integration_manager.py      Boot-time orchestration for external integrations
-core/mirofish_bridge.py          MiroFish detection, status, context, startup bridge
-core/automaton_bridge.py         Automaton detection, status, memory snapshot, startup bridge
-```
-
----
-
-## Unified Boot Flow
-
-```mermaid
-flowchart TD
-    A[User runs axiom or Axiom.bat] --> B[main.py]
-    B --> C[Desktop UI loads]
-    C --> D[Secrets checked from config/api_keys.json or env]
-    D --> E[Telegram bridge start attempt]
-    E --> F[boot_integrations()]
-    F --> G[MiroFish auto-start if configured]
-    F --> H[Automaton auto-start if configured]
-    G --> I[Axiom Live runtime]
-    H --> I
-    I --> J[Planner / Executor / Action layer]
-    J --> K[Memory archive + Nexus index + runtime SQLite store]
-```
-
-The entrypoint is intentionally single-root now: start AXIOM once, then let AXIOM decide which local sidecars it can safely bring online.
-
----
-
-## Startup and Memory Flow
-
-<p align="center">
-  <img src="assets/startup-memory-flow.svg" alt="AXIOM startup and memory flow" width="100%">
-</p>
-
-The important change here is that Axiom no longer relies only on shallow prompt memory. It now archives conversation turns, keeps structured long-term memory, and can search that history again later.
-
----
-
-## Live Runtime Recovery
-
-<p align="center">
-  <img src="assets/live-runtime-resilience.svg" alt="AXIOM live runtime resilience" width="100%">
-</p>
-
-The live runtime now does three extra things:
-
-- Uses adaptive input gain and stricter speaker-echo guards so softer or accented speech is easier to catch without letting Axiom talk to itself.
-- Replies conversationally over Telegram for normal chat instead of queueing everything like a batch task.
-- Preserves partial transcript state through reconnects and reloads recent context when the live session comes back.
+- If you only configure Gemini and Playwright, AXIOM should still boot and work locally.
+- If you add sidecars, AXIOM can discover them, report status, and bring some of them online automatically.
+- If a sidecar is missing, AXIOM should degrade instead of collapsing.
 
 ---
 
@@ -162,73 +70,153 @@ cd Axiom
 pip install -r requirements.txt
 python -m playwright install chromium
 copy config\api_keys.example.json config\api_keys.json
-Axiom.bat
 ```
 
-If `axiom` is already on your `PATH`, you can launch with:
+Put your Gemini key into `config/api_keys.json`, then start AXIOM with:
 
 ```powershell
 axiom
 ```
 
-If not, `Axiom.bat` remains the canonical Windows launcher.
+If `axiom` is not on your `PATH`, use:
 
-The public repo now ships an example file:
-
-```json
-{
-  "gemini_api_key": "",
-  "telegram_bot_token": "",
-  "camera_index": 0
-}
+```powershell
+Axiom.bat
 ```
 
-Copy it to `config/api_keys.json` and fill only the secrets you actually want locally, or let the UI create that file on first run.
+Public repo files:
 
-`config/api_keys.json` is intentionally ignored by git and should never contain real secrets in a public push.
+- `config/api_keys.example.json` is the tracked template.
+- `config/api_keys.json` is ignored by git.
+- `config/runtime.json` is the tracked shared config.
+- `config/runtime.local.json` is ignored by git and is the right place for machine-specific paths and local boot preferences.
 
-For machine-specific integration paths or auto-start preferences, create `config/runtime.local.json`. AXIOM merges that file on top of the tracked `config/runtime.json`.
-When `config/runtime.local.json` exists, AXIOM now writes future runtime updates there by default so tracked `config/runtime.json` can stay clean.
+---
+
+## First Local Boot
+
+The startup path is intentionally single-root:
+
+1. You run `axiom` or `Axiom.bat`.
+2. AXIOM loads tracked defaults from `config/runtime.json`.
+3. AXIOM overlays `config/runtime.local.json` if it exists.
+4. AXIOM checks secrets from `config/api_keys.json` or environment variables.
+5. The UI can prompt for missing Gemini or optional Telegram setup on first run.
+6. `boot_integrations()` attempts only the sidecars you explicitly enabled.
+7. The Gemini Live runtime, planner/executor, action layer, and memory/state services come online as one connected system.
+
+When local runtime updates are written later, AXIOM now prefers `config/runtime.local.json` so the tracked config can stay clean.
+
+---
+
+## Architecture
+
+<p align="center">
+  <img src="assets/architecture-overview.svg" alt="AXIOM architecture overview" width="100%">
+</p>
+
+The architecture is not "LLM plus random scripts". It has four real layers:
+
+- `main.py` runs the live session and function-call routing.
+- `agent/` handles multi-step planning, queueing, execution, and heartbeat.
+- `actions/` is the machine execution layer for browser, desktop, terminal, files, prompts, research, trading, and system inspection.
+- `memory/` and `core/` provide persistence, capability awareness, prompt context, runtime config, and external bridges.
+
+That is the repo's actual mental model: one brain, one execution layer, one memory spine, optional sidecars.
+
+---
+
+## Startup, Memory, and Recall
+
+<p align="center">
+  <img src="assets/startup-memory-flow.svg" alt="AXIOM startup and memory flow" width="100%">
+</p>
+
+AXIOM no longer relies only on short prompt context.
+
+It now persists:
+
+- archived conversation turns
+- runtime events and failures
+- task lifecycle checkpoints
+- structured long-term memory
+- searchable Nexus knowledge
+
+That gives the runtime an actual recall loop across sessions instead of pretending memory exists because the prompt says so.
+
+---
+
+## Live Recovery and Runtime Behavior
+
+<p align="center">
+  <img src="assets/live-runtime-resilience.svg" alt="AXIOM live runtime resilience" width="100%">
+</p>
+
+The live layer is built around three practical concerns:
+
+- better capture of softer or accented speech through adaptive gain behavior
+- cleaner Telegram chat behavior instead of treating every message like a batch job
+- reconnect recovery that restores recent context and logs runtime instability
+
+---
+
+## Repo Layout
+
+```text
+main.py                          Live Gemini runtime and tool dispatcher
+ui.py                            Desktop HUD and first-run setup
+actions/                         Real tool modules and external integration actions
+agent/                           Planner, executor, queue, heartbeat
+core/                            Prompt, config, capabilities, integration bridges
+memory/                          Long-term memory and runtime SQLite state
+assets/                          GitHub-facing diagrams and illustrations
+config/runtime.json              Public non-secret runtime defaults
+config/runtime.local.json        Local override file, ignored by git
+config/api_keys.example.json     Public secret template
+memory/axiom_state.db            Runtime state database, created locally
+```
+
+Important bridge modules:
+
+- `core/integration_manager.py`
+- `core/mirofish_bridge.py`
+- `core/automaton_bridge.py`
+- `core/lightpanda_bridge.py`
+- `core/autoresearch_bridge.py`
+- `core/skill_library.py`
 
 ---
 
 ## Runtime Config
 
-The repo now uses `config/runtime.json` for non-secret runtime behavior. Important fields:
+Tracked shared config lives in `config/runtime.json`.
+
+Important high-level keys:
 
 ```json
 {
   "voice_name": "Charon",
   "voice_backend": "gemini_live",
   "live_model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
-  "personaplex": {
-    "enabled": false,
-    "server_url": "ws://127.0.0.1:8998/api/chat",
-    "repo_path": "",
-    "cpu_offload": false
-  },
   "channels": {
     "telegram": {
       "enabled": false,
       "allowed_chat_ids": [],
-      "poll_seconds": 1.5,
-      "queue_plain_messages": true,
       "startup_prompt_enabled": true
     }
   },
   "integrations": {
     "mirofish_path": "",
-    "mirofish_url": "http://127.0.0.1:5001",
     "mirofish_auto_start": false,
     "automaton_path": "",
     "automaton_state_dir": "",
-    "automaton_auto_start": false,
-    "personaplex_path": ""
+    "automaton_auto_start": false
   },
   "browser": {
     "backend": "playwright",
     "lightpanda_endpoint": "http://127.0.0.1:9222",
     "lightpanda_auto_connect": false,
+    "lightpanda_auto_start": false,
     "lightpanda_repo_path": "",
     "lightpanda_wsl_binary_path": ""
   },
@@ -236,8 +224,7 @@ The repo now uses `config/runtime.json` for non-secret runtime behavior. Importa
     "enabled": true,
     "everything_claude_code_path": "",
     "superpowers_path": "",
-    "antigravity_skills_path": "",
-    "search_limit": 8
+    "antigravity_skills_path": ""
   },
   "research_repos": {
     "autoresearch_path": ""
@@ -248,9 +235,7 @@ The repo now uses `config/runtime.json` for non-secret runtime behavior. Importa
 }
 ```
 
-This keeps voice/model/integration settings out of the source code.
-
-`config/runtime.local.json` is optional and ignored by git. Use it for local absolute paths like:
+Example local override:
 
 ```json
 {
@@ -272,210 +257,136 @@ This keeps voice/model/integration settings out of the source code.
 }
 ```
 
-Startup behavior:
+Behavioral notes:
 
-- If Gemini is not configured, the first-run setup panel asks for the Gemini key and offers optional Telegram linking.
-- If Gemini is configured but Telegram is not, Axiom can show a separate optional Telegram link prompt at startup.
-- Telegram remains optional. Skip it and Axiom continues to run locally.
-- System context is inferred at runtime and injected into the live prompt, so reminders and time-sensitive responses use the local machine context by default.
-- Public IP geolocation is opt-in through `system_context.enable_public_ip_lookup`. The default path stays local-first and relies on timezone/locale hints only.
-
----
-
-## New Integrated Tools
-
-### `system_capabilities`
-Inspect the live environment, installed integrations, recent runtime events, recent failures, recent task checkpoints, and live system context.
-
-### `skill_library`
-Search and read integrated external skill libraries from:
-
-- Everything Claude Code
-- Superpowers
-- Antigravity Awesome Skills
-
-This gives AXIOM a searchable library of workflows, testing patterns, debugging playbooks, and implementation guidance.
-
-### `nexus_memory`
-The memory tool now supports:
-
-- `save`
-- `recall`
-- `list`
-- `recent`
-- `search`
-
-That means Axiom can search both saved nexus topics and archived conversation turns instead of relying only on the latest saved note.
-
-### `persona_control`
-Configure optional PersonaPlex integration, inspect its status, or get launch instructions.
-
-### `lightpanda_control`
-Inspect, configure, or start the optional Lightpanda CDP backend. AXIOM can now detect a WSL-installed Lightpanda binary, resolve the usable websocket endpoint, and report whether the backend is actually reachable from Windows.
-
-### `autoresearch_control`
-Inspect the local `autoresearch` repo, read `program.md`, prepare the dataset/tokenizer, run a real training baseline, inspect `results.tsv`, and check whether the experiment loop is ready to run.
-
-### `prompt_studio`
-Generate strong image/video prompts, variations, and negative prompts.
-
-### `lead_researcher`
-Extract public business lead signals such as emails, phones, and social links from public pages.
-
-### `swarm_orchestrator`
-Run generalized multi-role debates for research, strategy, build planning, or critique.
+- Telegram is optional.
+- Public IP lookup is opt-in.
+- Browser default stays on Playwright unless you explicitly opt into Lightpanda.
+- Later runtime writes prefer `runtime.local.json` when it exists.
 
 ---
 
-## Optional Integrations
+## Built-In Tooling
 
-### OpenRGB
+High-signal integrated tools:
 
-Hardware RGB control depends on:
+- `system_capabilities` for live environment, failures, events, integrations, and context
+- `nexus_memory` for save / recall / recent / search flows
+- `skill_library` for searchable external workflow libraries
+- `lightpanda_control` for inspecting and starting the optional Lightpanda backend
+- `autoresearch_control` for repo readiness, dataset prep, baseline training, and results inspection
+- `persona_control` for PersonaPlex inspection and setup
+- `prompt_studio`, `lead_researcher`, and `swarm_orchestrator` for creative, research, and multi-role reasoning workflows
 
-- `openrgb-python` installed
-- OpenRGB desktop app running
-- OpenRGB SDK server reachable on the local machine
+---
 
-Once that is active, Axiom can change colors/effects and inspect connected RGB devices.
-
-### MetaTrader 5
-
-Trading depends on:
-
-- MetaTrader 5 desktop installed and logged in
-- Python `MetaTrader5` package available
-
-The repo now applies default SL/TP values when the user does not provide them and monitors closed positions to reflect on trade outcomes.
-
-### PersonaPlex
-
-PersonaPlex is integrated as an optional sidecar, not as a forced replacement for the Gemini Live loop.
-
-High-level flow:
-
-1. Clone `NVIDIA/personaplex` somewhere local.
-2. Accept the model license on Hugging Face.
-3. Set `HF_TOKEN`.
-4. Point `config/runtime.json` `personaplex.repo_path` to that clone, or let Axiom detect it.
-5. Use `persona_control` to inspect/configure it.
-6. Launch the PersonaPlex server when needed.
-
-The built-in launch pattern is:
-
-```powershell
-Set-Location 'C:\path\to\personaplex'
-$ssl = Join-Path $env:TEMP 'personaplex-ssl'
-New-Item -ItemType Directory -Force $ssl | Out-Null
-python -m moshi.server --ssl $ssl
-```
-
-If GPU memory is tight, enable `cpu_offload` in `config/runtime.json`.
+## External Integrations
 
 ### Telegram Bridge
 
-Axiom can optionally expose a lightweight Telegram bot bridge inspired by DeerFlow's IM channel pattern.
+Telegram is optional and can stay disabled without affecting local boot.
 
 Setup:
 
 1. Create a bot with [@BotFather](https://t.me/BotFather).
-2. Add `telegram_bot_token` to `config/api_keys.json`, or set `AXIOM_TELEGRAM_BOT_TOKEN`.
-3. Enable `channels.telegram.enabled` in `config/runtime.json`.
-4. Optionally add your Telegram chat ID(s) to `channels.telegram.allowed_chat_ids`.
+2. Add `telegram_bot_token` to `config/api_keys.json` or set `AXIOM_TELEGRAM_BOT_TOKEN`.
+3. Enable `channels.telegram.enabled`.
+4. Add explicit allowed chat IDs if you want remote execution, not just chat replies.
 
-Supported commands:
+Design choice:
 
-- `/status`
-- `/tasks`
-- `/task <goal>`
+- ordinary chat should feel conversational
+- queued task execution should stay permissioned
+- empty allowed lists should not silently allow execution
 
-Plain chat messages get a conversational reply.
-If `queue_plain_messages` is enabled, operational plain messages can auto-execute as tasks only for explicitly allowed chat IDs. If the allowed list is empty, chat replies still work but execution is locked.
+### MiroFish and Automaton
 
-At startup, Telegram linking is optional. If you do not provide a bot token, Axiom stays local-only and the rest of the runtime still works.
-
-### MiroFish / Automaton
-
-AXIOM now has real bridge modules for both systems instead of only path detection:
-
-- `mirofish_control` + `core/mirofish_bridge.py`
-- `automaton_control` + `core/automaton_bridge.py`
-- `core/integration_manager.py` to boot them automatically when enabled
+AXIOM has dedicated bridge modules for both systems.
 
 What that means:
 
-- MiroFish can be discovered, queried for local projects/simulations/reports, used as extra market context, and auto-started at AXIOM boot when the local backend is configured correctly.
-- Automaton can be discovered, inspected, built-status checked, memory-state inspected, and launch-attempted from AXIOM. It still requires its own first-run config and Conway credentials before it becomes a fully live sub-runtime.
+- MiroFish can be discovered, queried, used as extra market context, and auto-started when configured correctly.
+- Automaton can be discovered, built-status checked, memory-state inspected, and launch-attempted from AXIOM.
 
-If you want Axiom to know where they live, set:
-
-- `integrations.mirofish_path`
-- `integrations.automaton_path`
-- `integrations.automaton_state_dir`
-
-If you want AXIOM to auto-start them on boot, also set:
-
-- `integrations.mirofish_auto_start`
-- `integrations.automaton_auto_start`
-
-in `config/runtime.json`.
-
-Important Windows note:
-
-- The local MiroFish integration was validated with a writable external log directory override (`MIROFISH_LOG_DIR`) so AXIOM can launch it without colliding with repo-local log files.
-- The local Automaton integration was validated through Node 20 + `pnpm build`, but it still needs `automaton --setup` / `--provision` before AXIOM can bring it fully online.
+Use `integrations.mirofish_path`, `integrations.automaton_path`, and `integrations.automaton_state_dir` in local config if you want them attached to the runtime.
 
 ### Lightpanda
 
-AXIOM now understands an optional Lightpanda browser backend:
+AXIOM understands Lightpanda as an optional browser backend.
 
-- `lightpanda_control` inspects repo state, CDP endpoint readiness, start status, and launch instructions.
-- `lightpanda_control start` can launch a WSL-installed Lightpanda binary and verify the Windows-visible CDP endpoint.
-- `browser.lightpanda_wsl_binary_path` can be set in `runtime.local.json` when WSL discovery is unreliable or you want AXIOM to use a fixed known binary path.
-- `browser_control` can connect to Lightpanda over CDP when `browser.backend` is set to `lightpanda` or `lightpanda_auto_connect` is enabled and the endpoint is reachable.
-- The safe default remains `browser.backend = "playwright"` so existing browser behavior does not change unless you opt in.
-- On current Windows setups, Lightpanda is best treated as an optional beta backend. AXIOM now prefers the stable local browser path by default and can fall back to it if a Lightpanda navigation target collapses.
+Current stance:
+
+- AXIOM can inspect repo state, endpoint readiness, and launch instructions.
+- AXIOM can launch a WSL-installed Lightpanda binary when configured.
+- AXIOM can connect over CDP when you opt into that backend.
+- Playwright remains the safe default browser backend.
+
+In other words, Lightpanda is integrated, but it is not treated as the primary stable browser path yet.
 
 ### External Skill Libraries
 
-AXIOM can now index and search external skill repos if they are cloned locally:
+AXIOM can index local copies of:
 
 - `everything-claude-code`
 - `superpowers`
 - `antigravity-awesome-skills`
 
-Point the runtime config at those repos through `skill_library.*_path` fields, or let AXIOM auto-detect them under `C:\Users\<you>\Axiom_research\external\`.
+Point the `skill_library.*_path` fields at those repos, or let AXIOM auto-detect them under a local external workspace.
 
 ### Autoresearch
 
-AXIOM now has a bridge for Karpathy's `autoresearch` repo:
+AXIOM has a bridge for Karpathy's `autoresearch` repo so it can inspect more than just whether the repo exists.
 
-- It checks whether `uv` is installed.
-- It checks whether an NVIDIA GPU is visible.
-- It inspects `~/.cache/autoresearch/` for data shards and tokenizer artifacts.
-- It can run `prepare.py`, train a real baseline, and parse `results.tsv` afterward.
-- The local Windows/RTX validation path now uses a low-VRAM fallback profile and writes `results.tsv` rows so AXIOM can inspect real experiment outcomes.
+It can report:
 
-That means AXIOM can report real readiness for autonomous ML experiments instead of just knowing the repo exists.
+- whether `uv` is available
+- whether a GPU is visible
+- whether dataset shards and tokenizer artifacts exist
+- whether `results.tsv` is present
+- whether the local experiment loop has real outputs to inspect
 
-Verification:
+### PersonaPlex, OpenRGB, and MT5
+
+These stay optional, but AXIOM knows how to inspect and use them when they are present.
+
+- PersonaPlex is a sidecar, not a replacement for the main Gemini Live runtime.
+- OpenRGB remains the hardware RGB control path.
+- MT5 remains the trading execution path with default SL/TP behavior and post-trade reflection support.
+
+---
+
+## Verification
+
+Useful checks:
 
 ```powershell
 python -m unittest discover -s tests -p "test_*.py" -v
+python -m compileall .
+python -c "from actions.system_capabilities import system_capabilities; print(system_capabilities({'action':'summary'}))"
+```
+
+Practical startup check:
+
+```powershell
+axiom
+```
+
+If `axiom` is not on your `PATH`, run:
+
+```powershell
+Axiom.bat
 ```
 
 ---
 
-## Notes
+## Security and Local Files
 
-- `Axiom.bat` launches the repo directory it lives in and is the intended Windows entrypoint.
-- If your environment already provides an `axiom` wrapper or alias, it can point straight to `Axiom.bat`.
-- `memory/axiom_state.db` is created at runtime and ignored by git.
-- `config/api_keys.json` and long-term memory files are ignored by git.
-- `config/api_keys.example.json` is the tracked template for public pushes.
-- `config/runtime.local.json` is the intended place for machine-specific path overrides and local boot preferences.
-- Telegram is disabled in the public runtime config by default; enable it only after adding a local bot token and explicit allowed chat IDs.
-- This repo is designed around Windows first. Some tools are cross-platform, but the main UX targets Windows 10/11.
+- `config/api_keys.json` is ignored by git.
+- `config/runtime.local.json` is ignored by git.
+- `memory/axiom_state.db` is ignored by git.
+- `config/api_keys.example.json` contains placeholders only.
+- Public IP geolocation is off by default.
+- The public repo is meant to carry portable defaults, not machine-specific secrets or absolute local paths.
 
 ---
 
