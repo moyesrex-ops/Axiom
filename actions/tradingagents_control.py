@@ -1,3 +1,5 @@
+import re
+
 from core.tradingagents_bridge import (
     collect_tradingagents_status,
     configure_tradingagents,
@@ -8,8 +10,121 @@ from core.tradingagents_bridge import (
     run_tradingagents_analysis,
     tradingagents_launch_instructions,
 )
+from actions.mt5_trading_agent import mt5_trading
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import log_event
+
+
+def _extract_first_number(pattern: str, text: str) -> float | None:
+    match = re.search(pattern, str(text or ""), flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+def _classify_trade_action(text: str) -> str:
+    normalized = str(text or "").lower()
+    if not normalized:
+        return ""
+
+    decision_lines = [
+        line.strip()
+        for line in re.split(r"[\r\n]+", normalized)
+        if any(token in line for token in ("decision", "verdict", "action", "trade"))
+    ]
+    haystacks = decision_lines + [normalized]
+
+    for haystack in haystacks:
+        if any(token in haystack for token in (" buy", "buy", " long", "bullish")):
+            return "buy"
+        if any(token in haystack for token in (" sell", "sell", " short", "bearish")):
+            return "sell"
+        if any(token in haystack for token in (" avoid", "avoid", " hold", "neutral", "no trade")):
+            return "hold"
+    return ""
+
+
+def _build_mt5_handoff(result: dict, params: dict) -> dict:
+    signal_text = "\n".join(
+        str(result.get(key, "") or "")
+        for key in ("final_trade_decision", "decision", "trader_investment_plan", "investment_plan")
+    )
+    action = _classify_trade_action(signal_text)
+    confidence = _extract_first_number(r"confidence[^0-9]{0,12}(\d{1,3}(?:\.\d+)?)", signal_text)
+    stop_loss = _extract_first_number(r"(?:stop[- ]?loss|sl)[^0-9]{0,12}(-?\d+(?:\.\d+)?)", signal_text)
+    take_profit = _extract_first_number(r"(?:take[- ]?profit|tp)[^0-9]{0,12}(-?\d+(?:\.\d+)?)", signal_text)
+
+    symbol = str(params.get("symbol", "") or result.get("ticker", "") or "").strip().upper()
+    volume = float(params.get("volume", 0.01) or 0.01)
+    min_confidence = params.get("min_confidence")
+    min_confidence = int(min_confidence) if min_confidence not in (None, "") else None
+    max_volume = float(params.get("max_volume", 0.10) or 0.10)
+    allowed_symbols = params.get("allowed_symbols", [])
+    if isinstance(allowed_symbols, str):
+        allowed_symbols = [part.strip().upper() for part in allowed_symbols.split(",") if part.strip()]
+    else:
+        allowed_symbols = [str(item).strip().upper() for item in (allowed_symbols or []) if str(item).strip()]
+
+    blocked_reasons = []
+    if action not in ("buy", "sell"):
+        blocked_reasons.append("TradingAgents did not produce a clear BUY or SELL signal.")
+    if volume > max_volume:
+        blocked_reasons.append(f"Requested volume {volume:.2f} exceeds max_volume {max_volume:.2f}.")
+    if allowed_symbols and symbol not in allowed_symbols:
+        blocked_reasons.append(f"Symbol {symbol} is outside allowed_symbols.")
+    if min_confidence is not None and confidence is not None and confidence < min_confidence:
+        blocked_reasons.append(f"Confidence {confidence:.1f}% is below min_confidence {min_confidence}%.")
+
+    return {
+        "action": action,
+        "symbol": symbol,
+        "volume": volume,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+        "confidence": confidence,
+        "confirm": bool(params.get("confirm", False)),
+        "dry_run": bool(params.get("dry_run", False)),
+        "min_confidence": min_confidence,
+        "max_volume": max_volume,
+        "allowed_symbols": allowed_symbols,
+        "blocked_reasons": blocked_reasons,
+    }
+
+
+def _format_mt5_handoff(result: dict, handoff: dict, execution_result: str = "") -> str:
+    lines = [
+        f"TradingAgents -> MT5 handoff for {result.get('ticker', '')} @ {result.get('trade_date', '')}",
+        f"Derived action: {handoff.get('action') or 'none'}",
+        f"MT5 symbol: {handoff.get('symbol', '') or 'n/a'}",
+        f"Volume: {handoff.get('volume', 0.0):.2f}",
+        (
+            f"Confidence: {handoff['confidence']:.1f}%"
+            if handoff.get("confidence") is not None
+            else "Confidence: not provided by TradingAgents output"
+        ),
+    ]
+    if handoff.get("stop_loss") is not None:
+        lines.append(f"Stop loss: {handoff['stop_loss']}")
+    if handoff.get("take_profit") is not None:
+        lines.append(f"Take profit: {handoff['take_profit']}")
+    if handoff.get("blocked_reasons"):
+        lines.append("Execution blocked:")
+        for reason in handoff["blocked_reasons"]:
+            lines.append(f"- {reason}")
+    elif not handoff.get("confirm") or handoff.get("dry_run"):
+        lines.append("Execution mode: dry run only. No live MT5 order was sent.")
+        if not handoff.get("confirm"):
+            lines.append("Set confirm=true to allow live execution after reviewing the handoff.")
+    else:
+        lines.append("Execution mode: live MT5 order requested.")
+    if execution_result:
+        lines.append(f"MT5 result: {execution_result}")
+    if result.get("run_file"):
+        lines.append(f"TradingAgents run log: {result['run_file']}")
+    return "\n".join(lines)
 
 
 def tradingagents_control(parameters: dict = None, player=None, speak=None) -> str:
@@ -103,6 +218,65 @@ def tradingagents_control(parameters: dict = None, player=None, speak=None) -> s
             )
         return report
 
+    if action == "execute_mt5":
+        ticker = str(params.get("ticker", "") or params.get("asset", "") or "").strip().upper()
+        if not ticker:
+            return "Use action='execute_mt5' with ticker=<symbol>."
+        if speak:
+            speak(f"Running TradingAgents analysis and preparing an MT5 handoff for {ticker}.")
+
+        result = run_tradingagents_analysis(params)
+        if not result.get("ok"):
+            report = format_tradingagents_analysis(result)
+            log_event("trading", "tradingagents_mt5_handoff_failed", report[:2000], metadata={"ticker": ticker})
+            return report
+
+        handoff = _build_mt5_handoff(result, params)
+        execution_result = ""
+
+        if not handoff["blocked_reasons"] and handoff["confirm"] and not handoff["dry_run"]:
+            execution_result = mt5_trading(
+                {
+                    "action": handoff["action"],
+                    "symbol": handoff["symbol"],
+                    "volume": handoff["volume"],
+                    "stop_loss": handoff["stop_loss"],
+                    "take_profit": handoff["take_profit"],
+                },
+                player=player,
+                speak=speak,
+            )
+
+        report = _format_mt5_handoff(result, handoff, execution_result=execution_result)
+        log_event(
+            "trading",
+            "tradingagents_mt5_handoff",
+            report[:2000],
+            metadata={
+                "ticker": ticker,
+                "trade_date": result.get("trade_date", ""),
+                "action": handoff.get("action", ""),
+                "symbol": handoff.get("symbol", ""),
+                "confirm": handoff.get("confirm", False),
+                "dry_run": handoff.get("dry_run", False),
+                "blocked": bool(handoff.get("blocked_reasons")),
+            },
+        )
+        save_to_nexus(
+            f"TradingAgents MT5 Handoff: {ticker}",
+            report[:4000],
+            kind="trading",
+            source="tradingagents.execute_mt5",
+            metadata={
+                "ticker": ticker,
+                "trade_date": result.get("trade_date", ""),
+                "action": handoff.get("action", ""),
+                "symbol": handoff.get("symbol", ""),
+                "confirm": handoff.get("confirm", False),
+            },
+        )
+        return report
+
     if action == "launch_instructions":
         report = tradingagents_launch_instructions()
         log_event("integration", "tradingagents_launch_instructions", report[:2000])
@@ -110,6 +284,6 @@ def tradingagents_control(parameters: dict = None, player=None, speak=None) -> s
 
     status = collect_tradingagents_status(limit=limit)
     return (
-        "Unknown action. Use status, runs, configure, prepare, analyze, or launch_instructions.\n"
+        "Unknown action. Use status, runs, configure, prepare, analyze, execute_mt5, or launch_instructions.\n"
         f"Repo detected: {'yes' if status['repo_path'] else 'no'}."
     )

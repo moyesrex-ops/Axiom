@@ -23,6 +23,22 @@ _BRIDGE_LOCK = threading.Lock()
 _BRIDGE_THREAD: threading.Thread | None = None
 _STOP_EVENT = threading.Event()
 _PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
+_ACTIVE_CHAT_TASKS: dict[str, str] = {}
+_LAST_CHAT_TASK_RESULTS: dict[str, dict] = {}
+_COLOR_HINTS = (
+    "red",
+    "green",
+    "blue",
+    "white",
+    "yellow",
+    "orange",
+    "purple",
+    "pink",
+    "cyan",
+    "off",
+    "rainbow",
+    "glowing",
+)
 _CHAT_PHRASES = {
     "hi",
     "hello",
@@ -136,6 +152,56 @@ def _looks_like_capability_question(text: str) -> bool:
             "capabilities",
             "what do you do",
             "what are you able to do",
+            "can you access",
+            "can u access",
+            "can you deploy",
+            "can u deploy",
+            "do you have access",
+            "do u have access",
+        )
+    ) or (
+        any(token in normalized for token in ("lightpanda", "tradingagents", "mt5", "telegram", "mirofish", "automaton", "skill", "skills", "agent", "agents"))
+        and any(token in normalized for token in ("can you", "can u", "do you", "do u", "able to", "access", "deploy", "use"))
+    )
+
+
+def _looks_like_runtime_status_question(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(
+        phrase in normalized
+        for phrase in (
+            "what's happening",
+            "whats happening",
+            "what are you doing",
+            "what r you doing",
+            "status",
+            "still working",
+            "how's it going",
+            "hows it going",
+        )
+    )
+
+
+def _looks_like_task_followup(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(
+        phrase in normalized
+        for phrase in (
+            "where is it",
+            "where is the",
+            "where's the",
+            "done yet",
+            "is it done",
+            "finished yet",
+            "link",
+            "open it",
+            "open the",
+            "browser",
+            "still working",
+            "how much longer",
+            "i'm waiting",
+            "im waiting",
+            "okay?",
         )
     )
 
@@ -214,11 +280,11 @@ def _relevant_memory_block(query: str) -> str:
     hits = search_memory_archive(query, limit=3)
     lines = []
 
-    for item in hits.get("nexus", [])[:2]:
-        topic = str(item.get("topic", "")).strip()
+    for item in hits.get("knowledge", [])[:2]:
+        topic = str(item.get("topic", "") or item.get("title", "")).strip()
         content = str(item.get("content", "")).strip()
         if topic and content:
-            lines.append(f"- Nexus {topic}: {content[:220]}")
+            lines.append(f"- Memory {topic}: {content[:220]}")
 
     for row in hits.get("conversations", [])[:2]:
         user_text = str(row.get("user_text", "")).strip()
@@ -228,13 +294,124 @@ def _relevant_memory_block(query: str) -> str:
         if ai_text:
             lines.append(f"- Earlier Axiom: {ai_text[:180]}")
 
+    for row in hits.get("graph", [])[:2]:
+        source = str(row.get("source_name", "")).strip()
+        relation = str(row.get("relation", "")).strip().replace("_", " ")
+        target = str(row.get("target_name", "")).strip()
+        if source and relation and target:
+            lines.append(f"- Graph memory: {source} -> {relation} -> {target}")
+
     if not lines:
         return ""
 
     return "[RELEVANT MEMORY]\n" + "\n".join(lines)
 
 
-def _generate_chat_reply(user_text: str) -> str:
+def _active_task_snapshot(chat_id: str) -> dict | None:
+    task_id = _ACTIVE_CHAT_TASKS.get(str(chat_id or "").strip())
+    if not task_id:
+        return None
+    status = get_queue().get_status(task_id)
+    if not status or status.get("status") not in ("pending", "running"):
+        _ACTIVE_CHAT_TASKS.pop(str(chat_id or "").strip(), None)
+        return None
+    return status
+
+
+def _format_active_task_status(chat_id: str) -> str:
+    status = _active_task_snapshot(chat_id)
+    if not status:
+        return "No active Telegram task is running for this chat right now."
+    return (
+        f"Active task [{status['task_id']}]\n"
+        f"Status: {status['status']}\n"
+        f"Goal: {str(status.get('goal', ''))[:260]}"
+    )
+
+
+def _render_task_completion_message(result: str) -> str:
+    text = str(result or "").strip()
+    lowered = text.lower()
+    if lowered.startswith(("task failed", "task aborted", "task cancelled", "i couldn't", "i could not")):
+        return text
+    return f"Task complete.\n\n{text}".strip()
+
+
+def _extract_color_hint(text: str) -> str:
+    normalized = _normalize_text(text)
+    for color in _COLOR_HINTS:
+        if re.search(rf"\b{re.escape(color)}\b", normalized):
+            return color
+    return ""
+
+
+def _looks_like_rgb_context(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(term in normalized for term in ("rgb", "keyboard", "lighting", "lights", "backlight", "color"))
+
+
+def _extract_artifact_reference(result: str) -> str:
+    text = str(result or "").strip()
+    if not text:
+        return ""
+
+    line_prefixes = (
+        "open target:",
+        "entry file:",
+        "project directory:",
+        "saved to:",
+        "opened:",
+        "url:",
+        "link:",
+    )
+    lines = [raw_line.strip() for raw_line in text.splitlines() if raw_line.strip()]
+    for prefix in line_prefixes:
+        for line in lines:
+            lower = line.lower()
+            if lower.startswith(prefix):
+                value = line.split(":", 1)[1].strip()
+                if value and value.lower() != "not identified":
+                    return value
+
+    url_match = re.search(r"(https?://\S+|file:///+\S+)", text)
+    if url_match:
+        return url_match.group(1).rstrip(").,")
+
+    path_match = re.search(r"([A-Za-z]:\\[^\r\n]+)", text)
+    if path_match:
+        return path_match.group(1).strip()
+
+    return ""
+
+
+def _contextualize_task_goal(chat_id: str, text: str) -> str:
+    original = str(text or "").strip()
+    if not original:
+        return original
+
+    last_result = _LAST_CHAT_TASK_RESULTS.get(str(chat_id or "").strip()) or {}
+    if not last_result:
+        return original
+
+    context_blob = (
+        f"{str(last_result.get('goal', '')).strip()}\n"
+        f"{str(last_result.get('result', '')).strip()}"
+    )
+    normalized = _normalize_text(original)
+    color = _extract_color_hint(original)
+
+    if color and ("it" in normalized or "back" in normalized) and _looks_like_rgb_context(context_blob):
+        return f"change the keyboard lighting to {color}"
+
+    if re.search(r"\bopen (it|that|the game|the site|the app)\b", normalized):
+        artifact = _extract_artifact_reference(str(last_result.get("result", "") or ""))
+        if artifact:
+            return f"open this artifact: {artifact}"
+
+    return original
+
+
+def _generate_chat_reply(user_text: str, chat_id: str = "") -> str:
     api_key = get_secret("gemini_api_key", ["GEMINI_API_KEY"])
     if not api_key:
         return "Gemini is not configured yet, so Telegram chat replies are offline right now."
@@ -259,6 +436,19 @@ def _generate_chat_reply(user_text: str) -> str:
 
         if _looks_like_capability_question(user_text):
             prompt_parts.append("[LIVE CAPABILITIES]\n" + format_capability_status())
+        if _looks_like_runtime_status_question(user_text):
+            prompt_parts.append("[RECENT TASKS]\n" + _format_recent_tasks(limit=5))
+        active_task = _active_task_snapshot(chat_id)
+        if active_task:
+            prompt_parts.append("[ACTIVE TASK]\n" + _format_active_task_status(chat_id))
+        last_result = _LAST_CHAT_TASK_RESULTS.get(str(chat_id or "").strip())
+        if last_result and _looks_like_task_followup(user_text):
+            prompt_parts.append(
+                "[LAST TASK RESULT]\n"
+                f"Task ID: {last_result.get('task_id', '')}\n"
+                f"Goal: {str(last_result.get('goal', ''))[:260]}\n"
+                f"Result:\n{str(last_result.get('result', ''))[:1800]}"
+            )
 
         prompt_parts.extend(
             [
@@ -287,7 +477,7 @@ def _generate_chat_reply(user_text: str) -> str:
 
 
 def _reply_to_chat(chat_id: str, text: str, reply_to_message_id: int | None) -> None:
-    _send_message(chat_id, _generate_chat_reply(text), reply_to_message_id=reply_to_message_id)
+    _send_message(chat_id, _generate_chat_reply(text, chat_id=chat_id), reply_to_message_id=reply_to_message_id)
 
 
 def _send_message(chat_id: str | int, text: str, reply_to_message_id: int | None = None) -> None:
@@ -321,7 +511,13 @@ def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_fu
 
     def _on_complete(task_id: str, result: str) -> None:
         try:
-            final_text = f"Finished.\n\n{result}".strip()
+            _ACTIVE_CHAT_TASKS.pop(chat_id, None)
+            _LAST_CHAT_TASK_RESULTS[chat_id] = {
+                "task_id": task_id,
+                "goal": goal,
+                "result": result,
+            }
+            final_text = _render_task_completion_message(result)
             _send_message(chat_id, final_text)
             remember_conversation_turn(goal, result)
             log_event("telegram", "task_finished", f"[{task_id}] {goal[:200]}")
@@ -334,7 +530,8 @@ def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_fu
         speak=None,
         on_complete=_on_complete,
     )
-    ack = f"On it. Executing that now.\n\nGoal: {goal[:300]}"
+    _ACTIVE_CHAT_TASKS[chat_id] = task_id
+    ack = f"On it. Executing that now.\n\nTask ID: {task_id}\nGoal: {goal[:300]}"
     _send_message(chat_id, ack, reply_to_message_id=reply_to_message_id)
     log_event("telegram", "task_queued", f"[{task_id}] {goal[:200]}")
     if log_func:
@@ -410,11 +607,36 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         if not goal:
             _send_message(chat_id, "Usage: /task <goal>", reply_to_message_id=reply_to_message_id)
             return
+        active_task = _active_task_snapshot(chat_id)
+        if active_task:
+            _send_message(
+                chat_id,
+                (
+                    f"Task [{active_task['task_id']}] is already running for this chat.\n"
+                    f"Goal: {str(active_task.get('goal', ''))[:260]}\n\n"
+                    "Wait for that result before queueing another execution request."
+                ),
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
         if not execution_enabled:
             _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
             log_event("telegram", "execution_blocked", goal[:200], metadata={"chat_id": chat_id})
             return
-        _queue_task(chat_id, goal, reply_to_message_id, log_func)
+        resolved_goal = _contextualize_task_goal(chat_id, goal)
+        if resolved_goal != goal:
+            log_event(
+                "telegram",
+                "task_goal_rewritten",
+                resolved_goal[:300],
+                metadata={"chat_id": chat_id, "original_goal": goal[:300]},
+            )
+        _queue_task(chat_id, resolved_goal, reply_to_message_id, log_func)
+        return
+
+    active_task = _active_task_snapshot(chat_id)
+    if active_task and _looks_like_task_followup(text):
+        _send_message(chat_id, _format_active_task_status(chat_id), reply_to_message_id=reply_to_message_id)
         return
 
     if _looks_like_chat_message(text):
@@ -422,11 +644,30 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         return
 
     if _telegram_config().get("queue_plain_messages", True) and _looks_like_task_request(text):
+        if active_task:
+            _send_message(
+                chat_id,
+                (
+                    f"Task [{active_task['task_id']}] is already running for this chat.\n"
+                    f"Goal: {str(active_task.get('goal', ''))[:260]}\n\n"
+                    "I am not queueing a second execution on top of it. Wait for the current result first."
+                ),
+                reply_to_message_id=reply_to_message_id,
+            )
+            return
         if not execution_enabled:
             _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
             log_event("telegram", "execution_blocked", text[:200], metadata={"chat_id": chat_id})
             return
-        _queue_task(chat_id, text, reply_to_message_id, log_func)
+        resolved_goal = _contextualize_task_goal(chat_id, text)
+        if resolved_goal != text:
+            log_event(
+                "telegram",
+                "task_goal_rewritten",
+                resolved_goal[:300],
+                metadata={"chat_id": chat_id, "original_goal": text[:300]},
+            )
+        _queue_task(chat_id, resolved_goal, reply_to_message_id, log_func)
         return
 
     if _looks_like_task_request(text):

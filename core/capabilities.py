@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import os
+import shutil
 import socket
 import sys
 from pathlib import Path
@@ -78,6 +79,10 @@ def _telegram_token_configured() -> bool:
             ["AXIOM_TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_TOKEN"],
         )
     )
+
+
+def _command_available(command: str) -> str:
+    return shutil.which(command) or ""
 
 
 def _integration_candidates() -> dict:
@@ -161,9 +166,18 @@ def collect_capabilities() -> dict:
         "automaton_state_dir": str(automaton.get("state_dir", "") or ""),
         "automaton_state_present": bool(automaton.get("state_exists", False)),
         "automaton_built": bool(automaton.get("built_entry")),
+        "automaton_configured": bool(automaton.get("config_path")),
+        "automaton_db_present": bool(automaton.get("db_path")),
+        "automaton_soul_present": bool(automaton.get("soul_path")),
+        "automaton_api_key_present": bool(automaton.get("api_key_present", False)),
         "automaton_turn_count": int((automaton.get("db_snapshot", {}) or {}).get("turn_count", 0) or 0),
         "automaton_memory_ready": bool(
             automaton.get("db_path") or automaton.get("soul_path")
+        ),
+        "automaton_runtime_ready": bool(
+            automaton.get("built_entry")
+            and automaton.get("config_path")
+            and automaton.get("api_key_present", False)
         ),
         "automaton_auto_start": bool(runtime.get("integrations", {}).get("automaton_auto_start", False)),
         "personaplex_path": _first_repo_path(candidates["personaplex"], ("README.md", "moshi", "client")),
@@ -179,6 +193,8 @@ def collect_capabilities() -> dict:
         "agent_library_enabled": bool(agent_library.get("enabled", False)),
         "agent_library_sources_count": int(agent_library.get("sources_count", 0) or 0),
         "agent_library_total_agents": int(agent_library.get("total_agents", 0) or 0),
+        "codex_cli_path": _command_available("codex"),
+        "codex_cli_available": bool(_command_available("codex")),
         "dexter_repo_path": str(dexter.get("repo_path", "") or ""),
         "dexter_bun_available": bool(dexter.get("bun_available", False)),
         "dexter_tool_count": int(dexter.get("tool_count", 0) or 0),
@@ -233,7 +249,8 @@ def format_capability_status() -> str:
             else "MiroFish: repo not found"
         ),
         (
-            f"Automaton: repo at {caps['automaton_path']} | state {'present' if caps['automaton_state_present'] else 'missing'} | "
+            f"Automaton: repo at {caps['automaton_path']} | configured={'yes' if caps['automaton_configured'] else 'no'} | "
+            f"memory={'yes' if caps['automaton_memory_ready'] else 'no'} | api_key={'yes' if caps['automaton_api_key_present'] else 'no'} | "
             f"built={'yes' if caps['automaton_built'] else 'no'} | auto_start={'yes' if caps['automaton_auto_start'] else 'no'} | turns={caps['automaton_turn_count']}"
             if caps["automaton_path"]
             else "Automaton: repo not found"
@@ -257,6 +274,11 @@ def format_capability_status() -> str:
             f"Agent library: {caps['agent_library_total_agents']} indexed agents across {caps['agent_library_sources_count']} sources"
             if caps["agent_library_enabled"] and caps["agent_library_sources_count"]
             else "Agent library: no external agent sources detected"
+        ),
+        (
+            f"Codex CLI builder: ready at {caps['codex_cli_path']}"
+            if caps["codex_cli_available"]
+            else "Codex CLI builder: not installed"
         ),
         (
             f"Dexter: repo at {caps['dexter_repo_path']} | bun={'yes' if caps['dexter_bun_available'] else 'no'} | tools={caps['dexter_tool_count']}"
@@ -324,8 +346,13 @@ def format_capability_report() -> str:
         f"MiroFish local state: projects={caps['mirofish_project_count']} simulations={caps['mirofish_simulation_count']} reports={caps['mirofish_report_count']}",
         f"Automaton path: {caps['automaton_path'] or 'not found'}",
         f"Automaton state dir: {caps['automaton_state_dir'] or 'not configured'}",
-        f"Automaton state present: {'yes' if caps['automaton_state_present'] else 'no'}",
+        f"Automaton state dir exists: {'yes' if caps['automaton_state_present'] else 'no'}",
         f"Automaton built: {'yes' if caps['automaton_built'] else 'no'}",
+        f"Automaton config present: {'yes' if caps['automaton_configured'] else 'no'}",
+        f"Automaton API key present: {'yes' if caps['automaton_api_key_present'] else 'no'}",
+        f"Automaton DB present: {'yes' if caps['automaton_db_present'] else 'no'}",
+        f"Automaton SOUL present: {'yes' if caps['automaton_soul_present'] else 'no'}",
+        f"Automaton runtime ready: {'yes' if caps['automaton_runtime_ready'] else 'no'}",
         f"Automaton auto-start: {'enabled' if caps['automaton_auto_start'] else 'disabled'}",
         f"Automaton turns: {caps['automaton_turn_count']}",
         f"PersonaPlex path: {caps['personaplex_path'] or 'not found'}",
@@ -354,6 +381,7 @@ def format_capability_report() -> str:
             if caps["agent_library_enabled"] and caps["agent_library_sources_count"]
             else "Agent library: disabled or no sources detected"
         ),
+        f"Codex CLI: {caps['codex_cli_path'] or 'not installed'}",
         f"Dexter repo path: {caps['dexter_repo_path'] or 'not found'}",
         f"Dexter Bun ready: {'yes' if caps['dexter_bun_available'] else 'no'}",
         f"Dexter tool modules: {caps['dexter_tool_count']}",

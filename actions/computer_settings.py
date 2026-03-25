@@ -12,6 +12,7 @@ import time
 import subprocess
 import sys
 import platform
+import re
 import shutil
 from pathlib import Path
 
@@ -660,6 +661,14 @@ def _find_openrgb_mode(device, requested: str) -> str | None:
     return None
 
 
+def _extract_rgb_color_hint(*parts: object) -> str:
+    text = " ".join(str(part or "") for part in parts).lower()
+    for color in _RGB_COLOR_MAP:
+        if color and re.search(rf"\b{re.escape(color)}\b", text):
+            return color
+    return ""
+
+
 def hardware_rgb_status() -> str:
     if not _OPENRGB:
         return "[RGB] openrgb-python is not installed."
@@ -1128,6 +1137,19 @@ def computer_settings(
                   "change_keyboard_color", "change_rgb", "set_rgb"):
         color = str(value or params.get("color", "white"))
         return change_hardware_color(color)
+
+    inferred_color = _extract_rgb_color_hint(raw_action, value, params.get("color"), params.get("description"))
+    description_text = str(params.get("description", "") or "").lower()
+    rgb_context = any(
+        term in f"{raw_action} {description_text}".lower()
+        for term in ("rgb", "keyboard", "lighting", "lights", "color", "backlight")
+    )
+    if inferred_color and rgb_context:
+        return change_hardware_color(inferred_color)
+    if raw_action in ("status", "show") and "rgb" in description_text:
+        return hardware_rgb_status()
+    if raw_action in ("status", "show") and "hardware" in description_text:
+        return hardware_status()
 
     func = ACTION_MAP.get(action)
     if not func:

@@ -24,6 +24,20 @@ _STOPWORDS = {
     "want", "were", "what", "when", "where", "which", "while", "with", "would",
     "your", "you're", "axiom",
 }
+_GRAPH_COMPONENT_NAMES = {
+    "axiom": ("AXIOM", "assistant"),
+    "telegram": ("Telegram", "channel"),
+    "mirofish": ("MiroFish", "integration"),
+    "automaton": ("Automaton", "integration"),
+    "tradingagents": ("TradingAgents", "integration"),
+    "lightpanda": ("Lightpanda", "integration"),
+    "dexter": ("Dexter", "integration"),
+    "pentagi": ("PentAGI", "integration"),
+    "codex": ("Codex CLI", "builder"),
+    "playwright": ("Playwright", "browser"),
+    "openrgb": ("OpenRGB", "hardware"),
+    "mt5": ("MetaTrader5", "trading"),
+}
 
 
 def _connect() -> sqlite3.Connection:
@@ -96,6 +110,99 @@ def _create_fts_tables(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _normalize_entity_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(name or "").lower()).strip()
+
+
+def _clean_fact_value(value: str, limit: int = 72) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value or "")).strip(" \t\r\n,.;:!?\"'")
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit].rstrip(" ,.;:!?") + "..."
+    return cleaned
+
+
+def _title_case_value(value: str) -> str:
+    words = [part for part in re.split(r"\s+", str(value or "").strip()) if part]
+    if not words:
+        return ""
+    return " ".join(word[:1].upper() + word[1:] for word in words)
+
+
+def _extract_graph_facts(primary_text: str, secondary_text: str = "", source_kind: str = "conversation") -> list[dict]:
+    facts: list[dict] = []
+    user_text = str(primary_text or "").strip()
+    secondary = str(secondary_text or "").strip()
+    combined = f"{user_text}\n{secondary}".strip()
+    lower_combined = combined.lower()
+
+    user_patterns = (
+        (r"\bmy name is ([a-z][a-z0-9' -]{1,40})", "name_is", "person"),
+        (r"\bcall me ([a-z][a-z0-9' -]{1,40})", "prefers_address", "person"),
+        (r"\baddress me as ([a-z][a-z0-9' -]{1,40})", "prefers_address", "person"),
+        (r"\bi live in ([a-z][a-z0-9' -]{1,48})", "located_in", "place"),
+        (r"\bi work (?:at|for) ([a-z][a-z0-9'&., -]{1,56})", "works_at", "organization"),
+        (r"\bi prefer to be addressed as ([a-z][a-z0-9' -]{1,40})", "prefers_address", "person"),
+        (r"\bi prefer ([a-z][a-z0-9'&., -]{1,56})", "prefers", "preference"),
+        (r"\bi like ([a-z][a-z0-9'&., -]{1,56})", "likes", "interest"),
+        (r"\bi love ([a-z][a-z0-9'&., -]{1,56})", "likes", "interest"),
+    )
+    for pattern, relation, target_kind in user_patterns:
+        match = re.search(pattern, user_text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_value = _clean_fact_value(match.group(1))
+        if not raw_value:
+            continue
+        target = _title_case_value(raw_value)
+        facts.append(
+            {
+                "source_name": "User",
+                "source_kind": "person",
+                "relation": relation,
+                "target_name": target,
+                "target_kind": target_kind,
+                "evidence": user_text[:220],
+                "metadata": {"source_kind": source_kind},
+            }
+        )
+
+    mentioned_components = []
+    for needle, (display_name, target_kind) in _GRAPH_COMPONENT_NAMES.items():
+        if re.search(rf"\b{re.escape(needle)}\b", lower_combined, flags=re.IGNORECASE):
+            mentioned_components.append((display_name, target_kind))
+    for display_name, target_kind in mentioned_components[:8]:
+        facts.append(
+            {
+                "source_name": "AXIOM",
+                "source_kind": "assistant",
+                "relation": "tracks",
+                "target_name": display_name,
+                "target_kind": target_kind,
+                "evidence": combined[:220],
+                "metadata": {"source_kind": source_kind},
+            }
+        )
+
+    return facts
+
+
+def _index_graph_from_text(primary_text: str, secondary_text: str = "", source_kind: str = "conversation") -> None:
+    try:
+        facts = _extract_graph_facts(primary_text, secondary_text, source_kind=source_kind)
+        for fact in facts:
+            upsert_graph_relation(
+                source_name=fact["source_name"],
+                relation=fact["relation"],
+                target_name=fact["target_name"],
+                source_kind=fact["source_kind"],
+                target_kind=fact["target_kind"],
+                evidence=fact["evidence"],
+                metadata=fact["metadata"],
+            )
+    except Exception:
+        pass
+
+
 def init_runtime_store() -> None:
     global _INITIALIZED
     with _LOCK:
@@ -160,6 +267,30 @@ def init_runtime_store() -> None:
                     source TEXT NOT NULL DEFAULT '',
                     metadata_json TEXT NOT NULL DEFAULT '{}',
                     UNIQUE(kind, title)
+                );
+
+                CREATE TABLE IF NOT EXISTS graph_entities (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    name TEXT NOT NULL,
+                    normalized_name TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL DEFAULT 'entity',
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS graph_relations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    source_entity_id INTEGER NOT NULL,
+                    relation TEXT NOT NULL,
+                    target_entity_id INTEGER NOT NULL,
+                    evidence TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    UNIQUE(source_entity_id, relation, target_entity_id),
+                    FOREIGN KEY(source_entity_id) REFERENCES graph_entities(id),
+                    FOREIGN KEY(target_entity_id) REFERENCES graph_entities(id)
                 );
                 """
             )
@@ -261,6 +392,7 @@ def log_conversation_turn(user_text: str, assistant_text: str = "") -> None:
         except sqlite3.OperationalError:
             pass
         conn.commit()
+    _index_graph_from_text(user_text, assistant_text, source_kind="conversation")
 
 
 def upsert_knowledge_item(
@@ -323,7 +455,102 @@ def upsert_knowledge_item(
             pass
 
         conn.commit()
-        return item_id
+    _index_graph_from_text(title, content, source_kind=f"knowledge:{kind}")
+    return item_id
+
+
+def upsert_graph_entity(name: str, kind: str = "entity", metadata: dict | None = None) -> int:
+    init_runtime_store()
+    display_name = re.sub(r"\s+", " ", str(name or "").strip())
+    normalized_name = _normalize_entity_name(display_name)
+    if not normalized_name:
+        return 0
+
+    with _LOCK, _connect() as conn:
+        row = conn.execute(
+            "SELECT id FROM graph_entities WHERE normalized_name = ?",
+            (normalized_name,),
+        ).fetchone()
+        payload = json.dumps(metadata or {}, ensure_ascii=False)
+        if row:
+            entity_id = int(row["id"])
+            conn.execute(
+                """
+                UPDATE graph_entities
+                SET updated_at = CURRENT_TIMESTAMP,
+                    name = ?,
+                    kind = ?,
+                    metadata_json = ?
+                WHERE id = ?
+                """,
+                (display_name, str(kind or "entity"), payload, entity_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO graph_entities (name, normalized_name, kind, metadata_json)
+                VALUES (?, ?, ?, ?)
+                """,
+                (display_name, normalized_name, str(kind or "entity"), payload),
+            )
+            entity_id = int(cursor.lastrowid)
+        conn.commit()
+        return entity_id
+
+
+def upsert_graph_relation(
+    source_name: str,
+    relation: str,
+    target_name: str,
+    source_kind: str = "entity",
+    target_kind: str = "entity",
+    evidence: str = "",
+    metadata: dict | None = None,
+) -> int:
+    init_runtime_store()
+    normalized_relation = _normalize_entity_name(relation).replace(" ", "_")
+    if not normalized_relation:
+        return 0
+
+    source_id = upsert_graph_entity(source_name, kind=source_kind)
+    target_id = upsert_graph_entity(target_name, kind=target_kind)
+    if not source_id or not target_id:
+        return 0
+
+    with _LOCK, _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id FROM graph_relations
+            WHERE source_entity_id = ? AND relation = ? AND target_entity_id = ?
+            """,
+            (int(source_id), normalized_relation, int(target_id)),
+        ).fetchone()
+        payload = json.dumps(metadata or {}, ensure_ascii=False)
+        if row:
+            relation_id = int(row["id"])
+            conn.execute(
+                """
+                UPDATE graph_relations
+                SET updated_at = CURRENT_TIMESTAMP,
+                    evidence = ?,
+                    metadata_json = ?
+                WHERE id = ?
+                """,
+                (str(evidence or "")[:600], payload, relation_id),
+            )
+        else:
+            cursor = conn.execute(
+                """
+                INSERT INTO graph_relations (
+                    source_entity_id, relation, target_entity_id, evidence, metadata_json
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (int(source_id), normalized_relation, int(target_id), str(evidence or "")[:600], payload),
+            )
+            relation_id = int(cursor.lastrowid)
+        conn.commit()
+        return relation_id
 
 
 def search_knowledge_items(
@@ -419,6 +646,33 @@ def recent_events(limit: int = 10, kind: str | None = None) -> list[dict]:
                 """,
                 (int(limit),),
             ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def recent_graph_relations(limit: int = 8) -> list[dict]:
+    init_runtime_store()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                r.id,
+                r.created_at,
+                r.updated_at,
+                r.relation,
+                r.evidence,
+                r.metadata_json,
+                s.name AS source_name,
+                s.kind AS source_kind,
+                t.name AS target_name,
+                t.kind AS target_kind
+            FROM graph_relations r
+            JOIN graph_entities s ON s.id = r.source_entity_id
+            JOIN graph_entities t ON t.id = r.target_entity_id
+            ORDER BY r.updated_at DESC, r.id DESC
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -576,6 +830,53 @@ def search_conversation_turns(query: str, limit: int = 5, window: int = 250) -> 
         if overlap <= 0:
             continue
         scored.append((overlap, int(data["id"]), data))
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [item[2] for item in scored[: int(limit)]]
+
+
+def search_graph_memory(query: str, limit: int = 5) -> list[dict]:
+    init_runtime_store()
+    query_terms = set(_tokenize(query))
+    if not query_terms:
+        return recent_graph_relations(limit=limit)
+
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                r.id,
+                r.created_at,
+                r.updated_at,
+                r.relation,
+                r.evidence,
+                r.metadata_json,
+                s.name AS source_name,
+                s.kind AS source_kind,
+                t.name AS target_name,
+                t.kind AS target_kind
+            FROM graph_relations r
+            JOIN graph_entities s ON s.id = r.source_entity_id
+            JOIN graph_entities t ON t.id = r.target_entity_id
+            ORDER BY r.updated_at DESC, r.id DESC
+            LIMIT ?
+            """,
+            (max(int(limit) * 10, 40),),
+        ).fetchall()
+
+    scored: list[tuple[int, int, dict]] = []
+    for row in rows:
+        data = dict(row)
+        haystack = (
+            f"{data.get('source_name', '')}\n"
+            f"{data.get('relation', '')}\n"
+            f"{data.get('target_name', '')}\n"
+            f"{data.get('evidence', '')}"
+        ).lower()
+        score = sum(1 for token in query_terms if token in haystack)
+        if score <= 0:
+            continue
+        scored.append((score, int(data["id"]), data))
 
     scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return [item[2] for item in scored[: int(limit)]]

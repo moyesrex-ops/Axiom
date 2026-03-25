@@ -204,6 +204,10 @@ class TaskQueue:
             with self._lock:
                 if task.cancel_flag.is_set():
                     task.status = TaskStatus.CANCELLED
+                elif _looks_like_failed_result(result):
+                    task.status = TaskStatus.FAILED
+                    task.error = str(result or "")[:2000]
+                    task.result = result
                 else:
                     task.status = TaskStatus.COMPLETED
                     task.result = result
@@ -217,8 +221,8 @@ class TaskQueue:
                 except Exception as e:
                     print(f"[TaskQueue] ⚠️ on_complete callback error: {e}")
 
-            print(f"[TaskQueue] ✅ Completed: [{task.task_id}]")
-            log_event("task_queue", "completed", f"[{task.task_id}] {task.goal[:300]}")
+            print(f"[TaskQueue] ✅ Finished: [{task.task_id}] {task.status.value}")
+            log_event("task_queue", task.status.value, f"[{task.task_id}] {task.goal[:300]}")
 
         except Exception as e:
             with self._lock:
@@ -249,3 +253,18 @@ def get_queue() -> TaskQueue:
             _queue.start()
             _queue_started = True
     return _queue
+
+
+def _looks_like_failed_result(result: Any) -> bool:
+    text = str(result or "").strip().lower()
+    if not text:
+        return False
+    return text.startswith(
+        (
+            "task failed",
+            "task aborted",
+            "i couldn't create a valid plan",
+            "i could not create a valid plan",
+            "task cancelled",
+        )
+    )

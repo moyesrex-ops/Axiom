@@ -179,7 +179,7 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
 
     Spawns three AI analyst agents (Macro-Economist, Technical Analyst, Risk Manager)
     that each independently analyse the asset and then debate to reach a consensus.
-    All results are automatically persisted to the Nexus Brain.
+    All results are automatically persisted to AXIOM's durable memory archive.
     """
     params = parameters or {}
     asset = params.get("asset", "EURUSD")
@@ -273,7 +273,7 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
         if speak:
             speak(f"Swarm debate complete for {asset}. Consensus achieved. Full diagnostic is now in the logs.")
 
-        # Neural Link: Persist to Nexus Brain for infinite context
+        # Persist to durable memory for later retrieval
         try:
             from memory.memory_manager import save_to_nexus
             save_to_nexus(

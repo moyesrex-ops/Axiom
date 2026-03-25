@@ -140,7 +140,7 @@ def _save_to_nexus_brain(thesis_content: str, title: str):
             
         print("[Research] 🧠 Master strategy physically written to Nexus brain (long_term.json).")
     except Exception as e:
-        print(f"[Research] ⚠️ Failed to save to Nexus Brain: {e}")
+        print(f"[Research] ⚠️ Failed to save to memory archive: {e}")
 
 def autonomous_research(
     parameters: dict,
@@ -150,7 +150,7 @@ def autonomous_research(
 ) -> str:
     """
     Scrapes an entire YouTube channel/playlist, dumps all transcripts into Gemini,
-    synthesizes a master strategy, and instantly saves to Nexus Brain.
+    synthesizes a master strategy, and instantly saves to the memory archive.
     """
     params = parameters or {}
     url = params.get("url")
@@ -193,11 +193,11 @@ def autonomous_research(
     # 3. Synthesize Strategy
     thesis = _synthesize_strategy(master_text, query, player)
     
-    # 4. Save to Nexus Brain
+    # 4. Save to memory archive
     _save_to_nexus_brain(thesis, f"Autonomous Channel Extraction: {url}")
     
     if speak:
-        speak("Evolution complete. I have ripped the entire channel, developed the master strategy, and permanently uploaded it into my Nexus Brain. You can ask me about it anytime.")
+        speak("Evolution complete. I have ripped the entire channel, developed the master strategy, and saved it to my memory archive. You can ask me about it anytime.")
         
     # Also save a copy to the Desktop for the user to read
     try:

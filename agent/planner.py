@@ -18,10 +18,13 @@ PLANNER_PROMPT = """You are the planning module of AXIOM, a personal AI assistan
 Your job: break any user goal into a sequence of steps using ONLY the tools listed below.
 
 ABSOLUTE RULES:
-- NEVER use generated_code. If custom coding is needed, use code_helper.
+- NEVER use generated_code.
+- Use codex_builder for runnable multi-file projects, playable games, websites, apps, or when the user needs a real artifact they can open.
+- Use code_helper for single-file scripts, focused edits, explanations, and small code tasks.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
 - Use system_capabilities if the task depends on installed integrations or current environment status.
+- Use memory_archive when the task depends on saved preferences, archived instructions, or earlier durable knowledge.
 - Use skill_library when you need an external workflow, coding pattern, debugging checklist, or testing playbook.
 - Use agent_library when the task needs specialist roles, delegated review, or supervisor-style multi-agent execution.
 - Use lightpanda_control when the task depends on an optional Lightpanda browser backend.
@@ -128,8 +131,24 @@ dev_agent
   description: string (required)
   language: string (optional)
 
+codex_builder
+  action: "build" | "status" (required)
+  description: string (required for build)
+  project_name: string (optional)
+  project_path: string (optional)
+  model: string (optional)
+  timeout: integer (optional)
+  open_when_done: boolean (optional)
+
 system_capabilities
   action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  limit: integer (optional)
+
+memory_archive
+  action: "save" | "recall" | "list" | "recent" | "search" (required)
+  topic: string (for save/recall)
+  content: string (for save)
+  query: string (for search)
   limit: integer (optional)
 
 skill_library
@@ -160,7 +179,7 @@ pentagi_control
   repo_path: string (optional)
 
 tradingagents_control
-  action: "status" | "runs" | "configure" | "prepare" | "analyze" | "launch_instructions" (required)
+  action: "status" | "runs" | "configure" | "prepare" | "analyze" | "execute_mt5" | "launch_instructions" (required)
   repo_path: string (optional)
   ticker: string (for analyze)
   trade_date: string YYYY-MM-DD (for analyze)
@@ -172,6 +191,13 @@ tradingagents_control
   max_risk_discuss_rounds: integer (optional)
   timeout: integer (optional)
   limit: integer (optional)
+  symbol: string (optional, MT5 symbol override for execute_mt5)
+  volume: number (optional, default 0.01 for execute_mt5)
+  confirm: boolean (optional, required for live execute_mt5)
+  dry_run: boolean (optional)
+  min_confidence: integer (optional)
+  max_volume: number (optional)
+  allowed_symbols: list[string] (optional)
 
 lightpanda_control
   action: "status" | "endpoint" | "configure" | "launch_instructions" (required)

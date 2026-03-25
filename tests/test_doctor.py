@@ -13,7 +13,16 @@ class DoctorTests(unittest.TestCase):
         ), patch.object(
             doctor, "collect_mirofish_status", return_value={"repo_path": "", "backend_reachable": False, "server_url": ""}
         ), patch.object(
-            doctor, "collect_automaton_status", return_value={"repo_path": "", "built_entry": False}
+            doctor,
+            "collect_automaton_status",
+            return_value={
+                "repo_path": "automaton",
+                "built_entry": "dist/index.js",
+                "config_path": "",
+                "db_path": "",
+                "soul_path": "",
+                "api_key_present": False,
+            },
         ), patch.object(
             doctor, "collect_lightpanda_status", return_value={"repo_path": "", "reachable": False, "endpoint": "http://127.0.0.1:9222"}
         ), patch.object(
@@ -26,12 +35,16 @@ class DoctorTests(unittest.TestCase):
             doctor, "collect_dexter_status", return_value={"repo_path": "dexter", "bun_available": True}
         ), patch.object(
             doctor, "collect_pentagi_status", return_value={"repo_path": "pentagi", "audit_notice_present": True, "source_available": False}
+        ), patch.object(
+            doctor, "_has_command", return_value=True
         ):
             report = doctor.format_doctor_report(limit=4)
 
         self.assertIn("Agent Library: 200 indexed agents across 4 sources", report)
         self.assertIn("Dexter: Repo detected and Bun available", report)
         self.assertIn("PentAGI: Repo detected but upstream source is currently unavailable", report)
+        self.assertIn("Automaton: Repo found but runtime configuration is incomplete", report)
+        self.assertIn("Codex Builder: Codex CLI available", report)
 
 
 if __name__ == "__main__":

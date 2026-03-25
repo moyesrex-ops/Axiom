@@ -328,7 +328,7 @@ High-signal integrated tools:
 
 - `system_capabilities` for live environment, failures, events, integrations, and context
 - `system_capabilities` with `doctor` for boot-time health and readiness checks
-- `nexus_memory` for save / recall / recent / search flows
+- `memory_archive` for save / recall / recent / search flows
 - `skill_library` for searchable external workflow libraries
 - `agent_library` for searchable imported specialist agents and supervised delegation
 - `dexter_control` for Dexter financial research repo health and launch instructions

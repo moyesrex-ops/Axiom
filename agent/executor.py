@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 import threading
 from pathlib import Path
@@ -18,6 +19,27 @@ def get_base_dir() -> Path:
 
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
+_TRIVIAL_TOOL_RESULTS = {
+    "",
+    "done.",
+    "completed.",
+    "command executed with no output.",
+    "screen captured and analyzed.",
+}
+_RGB_COLOR_HINTS = (
+    "red",
+    "green",
+    "blue",
+    "white",
+    "yellow",
+    "orange",
+    "purple",
+    "pink",
+    "cyan",
+    "off",
+    "rainbow",
+    "glowing",
+)
 
 
 def _get_api_key() -> str:
@@ -41,7 +63,7 @@ def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "")
                 combined = "\n\n---\n\n".join(all_results)
                 translated = _translate_to_goal_language(combined, goal)
                 params["content"] = translated
-                print(f"[Executor] 💉 Injected + translated content")
+                print("[Executor] Injected translated content")
 
     return params
 
@@ -69,7 +91,7 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
         model = genai.GenerativeModel("gemini-2.5-flash")
 
         target_lang = _detect_language(goal)
-        print(f"[Executor] 🌐 Translating to: {target_lang}")
+        print(f"[Executor] Translating to: {target_lang}")
 
         prompt = (
             f"You are a professional translator. "
@@ -83,10 +105,10 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
         )
         response = model.generate_content(prompt)
         translated = response.text.strip()
-        print(f"[Executor] ✅ Translation done ({target_lang})")
+        print(f"[Executor] Translation done ({target_lang})")
         return translated
     except Exception as e:
-        print(f"[Executor] ⚠️ Translation failed: {e}")
+        print(f"[Executor] Translation failed: {e}")
         return content
 
 def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
@@ -118,6 +140,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
     elif tool == "dev_agent":
         from actions.dev_agent import dev_agent
         return dev_agent(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "codex_builder":
+        from actions.codex_builder import codex_builder
+        return codex_builder(parameters=parameters, player=None, speak=speak) or "Done."
 
     elif tool == "screen_process":
         from actions.screen_processor import screen_process
@@ -156,9 +182,9 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.flight_finder import flight_finder
         return flight_finder(parameters=parameters, player=None, speak=speak) or "Done."
 
-    elif tool == "nexus_memory":
-        from actions.nexus_memory import nexus_memory
-        return nexus_memory(parameters=parameters, player=None) or "Done."
+    elif tool in ("memory_archive", "nexus_memory"):
+        from actions.nexus_memory import memory_archive
+        return memory_archive(parameters=parameters, player=None) or "Done."
 
     elif tool == "autonomous_researcher":
         from actions.autonomous_researcher import autonomous_research
@@ -238,6 +264,81 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
             return dynamic_tool(parameters=parameters, player=None, speak=speak) or "Done."
         raise ValueError(f"Unknown tool: {tool}")
 
+
+def _extract_color_hint(text: str) -> str:
+    normalized = str(text or "").lower()
+    for color in _RGB_COLOR_HINTS:
+        if re.search(rf"\b{re.escape(color)}\b", normalized):
+            return color
+    return ""
+
+
+def _direct_tool_for_goal(goal: str) -> tuple[str, dict] | None:
+    normalized = str(goal or "").strip().lower()
+    if not normalized:
+        return None
+
+    rgb_words = ("keyboard", "rgb", "lighting", "lights", "backlight", "color")
+    color = _extract_color_hint(normalized)
+    if color and any(word in normalized for word in rgb_words):
+        return (
+            "computer_settings",
+            {
+                "action": "change_hardware_color",
+                "value": color,
+                "description": goal,
+            },
+        )
+
+    if any(phrase in normalized for phrase in ("show rgb", "rgb status", "keyboard lighting status")):
+        return (
+            "computer_settings",
+            {
+                "action": "hardware_rgb_status",
+                "description": goal,
+            },
+        )
+
+    if any(phrase in normalized for phrase in ("hardware status", "gpu status", "system hardware")):
+        return (
+            "computer_settings",
+            {
+                "action": "hardware_status",
+                "description": goal,
+            },
+        )
+
+    build_verbs = ("build", "create", "make", "design", "generate", "fix", "improve", "upgrade")
+    build_targets = (
+        "website",
+        "site",
+        "landing page",
+        "portfolio",
+        "dashboard",
+        "web app",
+        "app",
+        "game",
+        "playable",
+        "snake",
+        "arcade",
+        "frontend",
+    )
+    if any(verb in normalized for verb in build_verbs) and any(target in normalized for target in build_targets):
+        open_when_done = any(
+            phrase in normalized
+            for phrase in ("open it", "open when done", "launch it", "show it", "playable", "browser")
+        )
+        return (
+            "codex_builder",
+            {
+                "action": "build",
+                "description": goal,
+                "open_when_done": open_when_done,
+            },
+        )
+
+    return None
+
 class AgentExecutor:
 
     MAX_REPLAN_ATTEMPTS = 2
@@ -248,7 +349,22 @@ class AgentExecutor:
         speak:       Callable | None        = None,
         cancel_flag: threading.Event | None = None,
     ) -> str:
-        print(f"\n[Executor] 🎯 Goal: {goal}")
+        print(f"\n[Executor] Goal: {goal}")
+
+        direct = _direct_tool_for_goal(goal)
+        if direct:
+            tool, params = direct
+            print(f"[Executor] Direct route: [{tool}] {params}")
+            try:
+                result = _call_tool(tool, params, speak)
+                return self._summarize(
+                    goal,
+                    [{"step": 1, "tool": tool, "parameters": params, "description": goal}],
+                    {1: result},
+                    speak,
+                )
+            except Exception as error:
+                print(f"[Executor] Direct route failed, falling back to planner: {error}")
 
         replan_attempts = 0
         completed_steps = []
@@ -285,7 +401,7 @@ class AgentExecutor:
 
                 params = _inject_context(params, tool, step_results, goal=goal)
 
-                print(f"\n[Executor] ▶️ Step {step_num}: [{tool}] {desc}")
+                print(f"\n[Executor] Step {step_num}: [{tool}] {desc}")
 
                 attempt = 1
                 step_ok = False
@@ -297,13 +413,13 @@ class AgentExecutor:
                         result = _call_tool(tool, params, speak)
                         step_results[step_num] = result
                         completed_steps.append(step)
-                        print(f"[Executor] ✅ Step {step_num} done: {str(result)[:100]}")
+                        print(f"[Executor] Step {step_num} done: {str(result)[:100]}")
                         step_ok = True
                         break
 
                     except Exception as e:
                         error_msg = str(e)
-                        print(f"[Executor] ❌ Step {step_num} attempt {attempt} failed: {error_msg}")
+                        print(f"[Executor] Step {step_num} attempt {attempt} failed: {error_msg}")
 
                         recovery = analyze_error(step, error_msg, attempt=attempt)
                         decision = recovery["decision"]
@@ -318,7 +434,7 @@ class AgentExecutor:
                             continue
 
                         elif decision == ErrorDecision.SKIP:
-                            print(f"[Executor] ⏭️ Skipping step {step_num}")
+                            print(f"[Executor] Skipping step {step_num}")
                             completed_steps.append(step)
                             step_ok = True
                             break
@@ -344,7 +460,7 @@ class AgentExecutor:
                                     step_ok = True
                                     break
                                 except Exception as fix_err:
-                                    print(f"[Executor] ⚠️ Fix failed: {fix_err}")
+                                    print(f"[Executor] Fix failed: {fix_err}")
 
                             failed_step  = step
                             failed_error = error_msg
@@ -367,9 +483,9 @@ class AgentExecutor:
                         f"Step: {s['tool']}({s.get('parameters')})" for s in completed_steps
                     )
                     save_to_nexus(topic, learned_content)
-                    if speak: speak("I learned from my mistakes and saved this strategy to my Nexus Brain.")
-                    
-                return self._summarize(goal, completed_steps, speak)
+                    if speak: speak("I learned from my mistakes and saved this strategy to my memory archive.")
+
+                return self._summarize(goal, completed_steps, step_results, speak)
 
             if replan_attempts >= self.MAX_REPLAN_ATTEMPTS:
                 msg = f"Task failed after {replan_attempts} replan attempts."
@@ -381,23 +497,85 @@ class AgentExecutor:
             replan_attempts += 1
             plan = replan(goal, completed_steps, failed_step, failed_error)
 
-    def _summarize(self, goal: str, completed_steps: list, speak: Callable | None) -> str:
-        fallback = f"All done. Completed {len(completed_steps)} steps for: {goal[:60]}."
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=_get_api_key())
-            model     = genai.GenerativeModel(model_name="gemini-2.5-flash-lite")
-            steps_str = "\n".join(f"- {s.get('description', '')}" for s in completed_steps)
-            prompt    = (
-                f'User goal: "{goal}"\n'
-                f"Completed steps:\n{steps_str}\n\n"
-                "Write a single natural sentence summarizing what was accomplished. "
-                "Be direct and positive."
-            )
-            response = model.generate_content(prompt)
-            summary  = response.text.strip()
-            if speak: speak(summary)
+    def _summarize(
+        self,
+        goal: str,
+        completed_steps: list,
+        step_results: dict,
+        speak: Callable | None,
+    ) -> str:
+        useful_results = []
+        for step in completed_steps:
+            step_num = step.get("step", "")
+            tool = str(step.get("tool", "") or "").strip()
+            raw = str(step_results.get(step_num, "") or "").strip()
+            compact = self._compact_result(raw)
+            if compact:
+                useful_results.append((tool, compact))
+
+        if not useful_results:
+            summary = f"Task complete. Completed {len(completed_steps)} steps for: {goal[:120]}"
+            if speak:
+                speak(summary)
             return summary
-        except Exception:
-            if speak: speak(fallback)
-            return fallback
+
+        if len(useful_results) == 1:
+            summary = useful_results[0][1]
+            if speak:
+                speak(summary[:220])
+            return summary
+
+        lines = [f"Task complete: {goal}", "Useful results:"]
+        for tool, text in useful_results[:4]:
+            lines.append(f"- [{tool}] {text}")
+        if len(useful_results) > 4:
+            lines.append(f"- ... {len(useful_results) - 4} more step results recorded")
+        summary = "\n".join(lines)
+        if speak:
+            speak("Task complete. I have the concrete results ready.")
+        return summary
+
+    @staticmethod
+    def _compact_result(result: str) -> str:
+        text = str(result or "").strip()
+        if not text:
+            return ""
+
+        normalized = text.lower().strip()
+        if normalized in _TRIVIAL_TOOL_RESULTS:
+            return ""
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        keep = []
+        important_prefixes = (
+            "saved to:",
+            "last code saved to:",
+            "opened:",
+            "file created:",
+            "written to:",
+            "appended to:",
+            "run log:",
+            "project directory:",
+            "entry file:",
+            "open target:",
+            "url:",
+            "link:",
+            "output:",
+            "order placed!",
+            "mt5 connected.",
+        )
+        for line in lines:
+            lower = line.lower()
+            if lower.startswith(important_prefixes):
+                keep.append(line)
+            elif "http://" in line or "https://" in line:
+                keep.append(line)
+            elif "saved to " in lower or "opened in vscode at " in lower:
+                keep.append(line)
+
+        if keep:
+            return "\n".join(keep[:6])
+
+        if len(text) <= 700:
+            return text
+        return text[:697].rstrip() + "..."

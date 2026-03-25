@@ -1,5 +1,6 @@
 import importlib.util
 import sqlite3
+import shutil
 from pathlib import Path
 
 from core.agent_library import collect_agent_library_status
@@ -27,6 +28,10 @@ def _status_row(level: str, name: str, summary: str, detail: str = "") -> dict:
 
 def _has_module(module_name: str) -> bool:
     return importlib.util.find_spec(module_name) is not None
+
+
+def _has_command(command: str) -> bool:
+    return bool(shutil.which(command))
 
 
 def _memory_store_status() -> dict:
@@ -134,12 +139,29 @@ def collect_doctor_report(limit: int = 6) -> dict:
         checks.append(_status_row("info", "MiroFish", "Repo not detected"))
 
     if automaton.get("repo_path"):
+        automaton_runtime_ready = bool(
+            automaton.get("built_entry")
+            and automaton.get("config_path")
+            and automaton.get("api_key_present", False)
+        )
+        automaton_memory_ready = bool(automaton.get("db_path") or automaton.get("soul_path"))
+        detail_parts = []
+        if not automaton.get("config_path"):
+            detail_parts.append("config missing")
+        if not automaton.get("api_key_present", False):
+            detail_parts.append("API key missing")
+        if not automaton_memory_ready:
+            detail_parts.append("memory state missing")
         checks.append(
             _status_row(
-                "pass" if automaton.get("built_entry") else "warn",
+                "pass" if automaton_runtime_ready else "warn",
                 "Automaton",
-                "Built runtime detected" if automaton.get("built_entry") else "Repo found but build/runtime state is incomplete",
-                automaton.get("repo_path", ""),
+                (
+                    "Configured runtime ready"
+                    if automaton_runtime_ready
+                    else "Repo found but runtime configuration is incomplete"
+                ),
+                ", ".join(detail_parts) if detail_parts else automaton.get("repo_path", ""),
             )
         )
     else:
@@ -193,6 +215,14 @@ def collect_doctor_report(limit: int = 6) -> dict:
         )
     else:
         checks.append(_status_row("info", "Agent Library", "Disabled"))
+
+    checks.append(
+        _status_row(
+            "pass" if _has_command("codex") else "warn",
+            "Codex Builder",
+            "Codex CLI available" if _has_command("codex") else "Codex CLI not installed",
+        )
+    )
 
     if dexter.get("repo_path"):
         checks.append(

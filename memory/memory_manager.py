@@ -6,8 +6,10 @@ import sys
 
 from memory.runtime_store import (
     log_conversation_turn,
+    recent_graph_relations,
     recent_conversation_turns,
     recent_events,
+    search_graph_memory,
     search_knowledge_items,
     search_conversation_turns,
     upsert_knowledge_item,
@@ -175,6 +177,24 @@ def list_nexus_topics() -> list:
     return list(memory.get("nexus_knowledge", {}).keys())
 
 
+def save_to_memory_archive(
+    topic: str,
+    content: str,
+    kind: str = "knowledge",
+    source: str = "memory.long_term",
+    metadata: dict | None = None,
+) -> bool:
+    return save_to_nexus(topic, content, kind=kind, source=source, metadata=metadata)
+
+
+def get_from_memory_archive(topic: str) -> str:
+    return get_from_nexus(topic)
+
+
+def list_memory_topics() -> list:
+    return list_nexus_topics()
+
+
 def search_memory_archive(query: str, limit: int = 5) -> dict:
     memory = load_memory()
     knowledge = memory.get("nexus_knowledge", {})
@@ -231,7 +251,9 @@ def search_memory_archive(query: str, limit: int = 5) -> dict:
 
     return {
         "knowledge": indexed_results[: max(int(limit), 8)],
+        "archive": nexus_results,
         "nexus": nexus_results,
+        "graph": search_graph_memory(query, limit=limit),
         "conversations": search_conversation_turns(query, limit=limit),
     }
 
@@ -284,11 +306,11 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
     topics = list_nexus_topics()
     if topics:
-        nexus_lines = [f"Known topics: {', '.join(topics[:12])}"]
+        nexus_lines = [f"Archived topics: {', '.join(topics[:12])}"]
         latest_topic = topics[-1]
         latest_content = get_from_nexus(latest_topic)
         if latest_content:
-            nexus_lines.append(f"Latest recall ({latest_topic}): {latest_content[:420]}...")
+            nexus_lines.append(f"Latest archived note ({latest_topic}): {latest_content[:420]}...")
 
         recent_nexus = []
         seen_topics = set()
@@ -301,11 +323,32 @@ def format_memory_for_prompt(memory: dict | None) -> str:
             if len(recent_nexus) >= 4:
                 break
         if recent_nexus:
-            nexus_lines.append("Recent learned knowledge:")
+            nexus_lines.append("Recent archived knowledge:")
             nexus_lines.extend(recent_nexus)
 
-        nexus_lines.append("Use `nexus_memory` with action='search' or 'recall' for deeper retrieval.")
-        sections.append("[NEURAL LINK: NEXUS BRAIN]\n" + "\n".join(nexus_lines))
+        nexus_lines.append("Use `memory_archive` with action='search' or 'recall' for deeper retrieval.")
+        sections.append("[MEMORY ARCHIVE]\n" + "\n".join(nexus_lines))
+
+    graph_rows = recent_graph_relations(limit=5)
+    if graph_rows:
+        graph_lines = []
+        for row in graph_rows:
+            source = str(row.get("source_name", "")).strip()
+            relation = str(row.get("relation", "")).strip().replace("_", " ")
+            target = str(row.get("target_name", "")).strip()
+            evidence = str(row.get("evidence", "")).strip()
+            if not source or not relation or not target:
+                continue
+            line = f"- {source} -> {relation} -> {target}"
+            if evidence:
+                line += f" | evidence: {evidence[:120]}"
+            graph_lines.append(line)
+        if graph_lines:
+            sections.append(
+                "[GRAPH MEMORY]\n"
+                "Linked facts and components remembered across sessions.\n"
+                + "\n".join(graph_lines[:5])
+            )
 
     recent_turns = list(reversed(recent_conversation_turns(limit=4)))
     if recent_turns:

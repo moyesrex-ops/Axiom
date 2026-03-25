@@ -35,10 +35,11 @@ from actions.desktop          import desktop_control
 from actions.browser_control  import browser_control, shutdown_browser_control
 from actions.file_controller  import file_controller
 from actions.code_helper      import code_helper
+from actions.codex_builder    import codex_builder
 from actions.dev_agent        import dev_agent
 from actions.web_search       import web_search as web_search_action
 from actions.computer_control import computer_control
-from actions.nexus_memory     import nexus_memory
+from actions.nexus_memory     import memory_archive
 from actions.deep_analyzer    import deep_analyzer
 from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
@@ -123,6 +124,16 @@ def _summarize_exception(error: BaseException, depth: int = 0) -> str:
     if text:
         return f"{error.__class__.__name__}: {text}"
     return error.__class__.__name__
+
+
+def _is_clean_rotation_error(error: BaseException) -> bool:
+    text = _summarize_exception(error).lower()
+    return "connectionclosedok" in text or "sent 1000 (ok)" in text or "received 1000 (ok)" in text
+
+
+def _is_invalid_resumption_error(error: BaseException) -> bool:
+    text = _summarize_exception(error).lower()
+    return "1008" in text and ("not implemented" in text or "session resumption" in text or "operation is not implemented" in text)
 
 
 def _update_memory_async(user_text: str, axiom_text: str) -> None:
@@ -414,9 +425,9 @@ TOOL_DECLARATIONS = [
     {
     "name": "code_helper",
     "description": (
-        "Writes, edits, explains, runs, or self-builds code files. "
-        "Use for ANY coding request: writing a script, fixing a file, "
-        "editing existing code, running a file, or building and testing automatically."
+        "Writes, edits, explains, or runs focused code files. "
+        "Use for single-file scripts, targeted file fixes, code explanation, or quick code execution. "
+        "Use codex_builder for polished multi-file websites, apps, or playable games."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -434,12 +445,31 @@ TOOL_DECLARATIONS = [
     }
     },
     {
+    "name": "codex_builder",
+    "description": (
+        "Builds real runnable projects using Codex CLI. "
+        "Use this for polished websites, apps, playable games, and multi-file builds where the user needs a real artifact path, run command, or open target."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action":        {"type": "STRING", "description": "build | status"},
+            "description":   {"type": "STRING", "description": "What to build"},
+            "project_name":  {"type": "STRING", "description": "Optional project folder name"},
+            "project_path":  {"type": "STRING", "description": "Optional explicit project path"},
+            "model":         {"type": "STRING", "description": "Optional Codex model override"},
+            "timeout":       {"type": "INTEGER", "description": "Build timeout in seconds"},
+            "open_when_done":{"type": "BOOLEAN", "description": "Open the primary artifact when finished"},
+        },
+        "required": ["action"]
+    }
+    },
+    {
     "name": "dev_agent",
     "description": (
-        "Builds complete multi-file projects from scratch. "
-        "Plans structure, writes all files, installs dependencies, "
-        "opens VSCode, runs the project, and fixes errors automatically. "
-        "Use for any project larger than a single script."
+        "Legacy multi-file project builder. "
+        "Prefer codex_builder for new runnable websites, apps, and games. "
+        "Use this only if Codex is unavailable and a fallback project build is still needed."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -530,9 +560,9 @@ TOOL_DECLARATIONS = [
     }
 },
 {
-    "name": "nexus_memory",
+    "name": "memory_archive",
     "description": (
-        "Saves, recalls, lists, searches, or reviews archived long-term knowledge from the Nexus Brain. "
+        "Saves, recalls, lists, searches, or reviews archived long-term knowledge from AXIOM's durable memory archive. "
         "Use this to permanently memorize learned skills, preferences, strategies, "
         "or code snippets so you never forget them. Before attempting complex tasks, "
         "you can use this to recall how you were told to do them previously, including older conversation turns."
@@ -575,7 +605,7 @@ TOOL_DECLARATIONS = [
         "and uses Gemini's 2M token context window to synthesize the ultimate strategy. "
         "Use this exclusively when the user says 'watch every video on this channel', "
         "'learn his entire account', 'find the perfect strategy from his videos', etc. "
-        "It will automatically save the knowledge to the Nexus Brain without you needing to do it."
+        "It will automatically save the knowledge to the memory archive without you needing to do it."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -662,7 +692,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "status | runs | configure | prepare | analyze | launch_instructions"},
+            "action": {"type": "STRING", "description": "status | runs | configure | prepare | analyze | execute_mt5 | launch_instructions"},
             "repo_path": {"type": "STRING", "description": "Optional local TradingAgents repo path"},
             "ticker": {"type": "STRING", "description": "Ticker symbol for analyze"},
             "trade_date": {"type": "STRING", "description": "Analysis date in YYYY-MM-DD format for analyze"},
@@ -673,7 +703,14 @@ TOOL_DECLARATIONS = [
             "max_debate_rounds": {"type": "INTEGER", "description": "Optional investment debate rounds"},
             "max_risk_discuss_rounds": {"type": "INTEGER", "description": "Optional risk debate rounds"},
             "timeout": {"type": "INTEGER", "description": "Optional prepare or analysis timeout in seconds"},
-            "limit": {"type": "INTEGER", "description": "Optional result limit for runs"}
+            "limit": {"type": "INTEGER", "description": "Optional result limit for runs"},
+            "symbol": {"type": "STRING", "description": "Optional MT5 symbol override for execute_mt5"},
+            "volume": {"type": "NUMBER", "description": "Optional live order size for execute_mt5"},
+            "confirm": {"type": "BOOLEAN", "description": "Explicitly allow live MT5 execution for execute_mt5"},
+            "dry_run": {"type": "BOOLEAN", "description": "Force analysis plus handoff preview without live execution"},
+            "min_confidence": {"type": "INTEGER", "description": "Optional minimum confidence threshold for live execution"},
+            "max_volume": {"type": "NUMBER", "description": "Optional hard cap for live execution volume"},
+            "allowed_symbols": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional allow-list for execute_mt5 symbols"}
         },
         "required": ["action"]
     }
@@ -1256,6 +1293,16 @@ class AxiomLive:
                 )
                 result = r or "Done."
 
+            elif name == "codex_builder":
+                r = await loop.run_in_executor(
+                    None, lambda: codex_builder(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
             elif name == "dev_agent":
                 r = await loop.run_in_executor(
                     None, lambda: dev_agent(
@@ -1302,9 +1349,9 @@ class AxiomLive:
                 )
                 result = r or "Done."
                 
-            elif name == "nexus_memory":
+            elif name in ("memory_archive", "nexus_memory"):
                 r = await loop.run_in_executor(
-                    None, lambda: nexus_memory(parameters=args, player=self.ui)
+                    None, lambda: memory_archive(parameters=args, player=self.ui)
                 )
                 result = r or "Done."
 
@@ -1708,19 +1755,36 @@ class AxiomLive:
                     break
                 self._disconnect_count += 1
                 self._last_disconnect_reason = _summarize_exception(e)
+                planned_rotation = self._go_away_requested and _is_clean_rotation_error(e)
+                invalid_resumption = _is_invalid_resumption_error(e)
+                if invalid_resumption and self._session_resumption_handle:
+                    stale_handle = self._session_resumption_handle
+                    self._session_resumption_handle = ""
+                    self._session_resumable = False
+                    log_event(
+                        "session",
+                        "resumption_handle_cleared",
+                        stale_handle[:48],
+                        metadata={"reason": self._last_disconnect_reason[:220]},
+                    )
                 log_event(
                     "session",
-                    "connection_error",
+                    "rotation_reconnect" if planned_rotation else "connection_error",
                     self._last_disconnect_reason[:500],
                     metadata={
                         "disconnect_count": self._disconnect_count,
                         "has_resumption_handle": bool(self._session_resumption_handle),
                         "go_away_requested": self._go_away_requested,
+                        "invalid_resumption": invalid_resumption,
                     },
                 )
-                self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
-                print(f"[AXIOM] Error: {e}")
-                traceback.print_exc()
+                if planned_rotation:
+                    self.ui.write_log("SYS: Live session rotated. Reconnecting with recovered context.")
+                    print(f"[AXIOM] Planned live-session rotation: {e}")
+                else:
+                    self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
+                    print(f"[AXIOM] Error: {e}")
+                    traceback.print_exc()
             finally:
                 self.session = None
                 self._loop = None
