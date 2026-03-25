@@ -115,6 +115,13 @@ If `axiom` is not on your `PATH`, use:
 Axiom.bat
 ```
 
+Windows operator helpers:
+
+```powershell
+.\scripts\axiom-ops.ps1 -Doctor
+node .\scripts\axiom-sidecars.mjs
+```
+
 Public repo files:
 
 - `config/api_keys.example.json` is the tracked template.
@@ -654,6 +661,8 @@ python -c "from actions.agent_library import agent_library; print(agent_library(
 python -c "from actions.skill_library import skill_library; print(skill_library({'action':'status'}))"
 python -c "from actions.deerflow_control import deerflow_control; print(deerflow_control({'action':'status'}))"
 python -c "from actions.tradingagents_control import tradingagents_control; print(tradingagents_control({'action':'status'}))"
+.\scripts\axiom-ops.ps1 -Doctor -Integrations
+node .\scripts\axiom-sidecars.mjs
 ```
 
 Practical startup check:

@@ -1,0 +1,3 @@
+scripts/*.ps1 linguist-language=PowerShell
+scripts/*.mjs linguist-language=JavaScript
+assets/** linguist-documentation
