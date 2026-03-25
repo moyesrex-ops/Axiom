@@ -21,6 +21,7 @@ from memory.runtime_store import log_event, recent_task_runs
 
 _BRIDGE_LOCK = threading.Lock()
 _BRIDGE_THREAD: threading.Thread | None = None
+_STOP_EVENT = threading.Event()
 _PROMPT_PATH = BASE_DIR / "core" / "prompt.txt"
 _CHAT_PHRASES = {
     "hi",
@@ -91,6 +92,18 @@ def _telegram_token() -> str:
 def _allowed_chat_ids() -> set[str]:
     raw = _telegram_config().get("allowed_chat_ids", []) or []
     return {str(item).strip() for item in raw if str(item).strip()}
+
+
+def _chat_is_authorized(chat_id: str) -> bool:
+    allowed = _allowed_chat_ids()
+    if not allowed:
+        return True
+    return chat_id in allowed
+
+
+def _chat_can_execute(chat_id: str) -> bool:
+    allowed = _allowed_chat_ids()
+    return bool(allowed) and chat_id in allowed
 
 
 def _is_enabled() -> bool:
@@ -348,13 +361,17 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         },
     )
 
-    allowed = _allowed_chat_ids()
-    if allowed and chat_id not in allowed:
+    if not _chat_is_authorized(chat_id):
         _send_message(chat_id, "This Telegram chat is not authorized for AXIOM.")
         log_event("telegram", "unauthorized_chat", chat_id)
         return
 
     reply_to_message_id = message.get("message_id")
+    execution_enabled = _chat_can_execute(chat_id)
+    execution_lock_notice = (
+        "Telegram execution is locked until this chat ID is added to "
+        "channels.telegram.allowed_chat_ids."
+    )
 
     if text in ("/start", "/help"):
         _send_message(
@@ -365,7 +382,8 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
                 "/tasks - recent task checkpoints\n"
                 "/task <goal> - queue a task\n"
                 "Plain chat gets a normal reply.\n"
-                "Operational messages can auto-execute when plain-message execution is enabled."
+                "Operational messages can auto-execute when plain-message execution is enabled.\n"
+                f"Execution from this chat: {'enabled' if execution_enabled else 'locked'}"
             ),
             reply_to_message_id=reply_to_message_id,
         )
@@ -392,6 +410,10 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         if not goal:
             _send_message(chat_id, "Usage: /task <goal>", reply_to_message_id=reply_to_message_id)
             return
+        if not execution_enabled:
+            _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
+            log_event("telegram", "execution_blocked", goal[:200], metadata={"chat_id": chat_id})
+            return
         _queue_task(chat_id, goal, reply_to_message_id, log_func)
         return
 
@@ -400,6 +422,10 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         return
 
     if _telegram_config().get("queue_plain_messages", True) and _looks_like_task_request(text):
+        if not execution_enabled:
+            _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
+            log_event("telegram", "execution_blocked", text[:200], metadata={"chat_id": chat_id})
+            return
         _queue_task(chat_id, text, reply_to_message_id, log_func)
         return
 
@@ -421,10 +447,10 @@ def _poll_loop(log_func: Callable | None = None) -> None:
     if log_func:
         log_func("Telegram bridge started.")
 
-    while True:
+    while not _STOP_EVENT.is_set():
         if not _is_enabled():
             bridge_ready_logged = False
-            time.sleep(3)
+            _STOP_EVENT.wait(3)
             continue
 
         poll_seconds = float(_telegram_config().get("poll_seconds", 1.5) or 1.5)
@@ -474,10 +500,14 @@ def _poll_loop(log_func: Callable | None = None) -> None:
             else:
                 detail = str(error)[:500]
                 log_event("telegram", "bridge_error", detail)
-            time.sleep(5)
+            _STOP_EVENT.wait(5)
         except Exception as error:
             log_event("telegram", "bridge_error", str(error)[:500])
-            time.sleep(5)
+            _STOP_EVENT.wait(5)
+
+    log_event("telegram", "bridge_stopped", "Telegram bridge thread stopped.")
+    if log_func:
+        log_func("Telegram bridge stopped.")
 
 
 def start_telegram_bridge(log_func: Callable | None = None) -> bool:
@@ -485,6 +515,7 @@ def start_telegram_bridge(log_func: Callable | None = None) -> bool:
     with _BRIDGE_LOCK:
         if _BRIDGE_THREAD and _BRIDGE_THREAD.is_alive():
             return True
+        _STOP_EVENT.clear()
 
         _BRIDGE_THREAD = threading.Thread(
             target=_poll_loop,
@@ -493,4 +524,20 @@ def start_telegram_bridge(log_func: Callable | None = None) -> bool:
             name="AxiomTelegramBridge",
         )
         _BRIDGE_THREAD.start()
-        return True
+    return True
+
+
+def stop_telegram_bridge(timeout: float = 5.0) -> None:
+    global _BRIDGE_THREAD
+    with _BRIDGE_LOCK:
+        thread = _BRIDGE_THREAD
+        if thread is None:
+            return
+        _STOP_EVENT.set()
+
+    if thread.is_alive():
+        thread.join(timeout=max(float(timeout or 0), 0.5))
+
+    with _BRIDGE_LOCK:
+        if _BRIDGE_THREAD is thread and not thread.is_alive():
+            _BRIDGE_THREAD = None

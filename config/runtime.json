@@ -35,6 +35,27 @@
     "deep_search_max_queries": 4,
     "deep_search_results_per_query": 4
   },
+  "browser": {
+    "backend": "playwright",
+    "lightpanda_endpoint": "http://127.0.0.1:9222",
+    "lightpanda_auto_connect": false,
+    "lightpanda_auto_start": false,
+    "lightpanda_repo_path": "",
+    "lightpanda_wsl_binary_path": ""
+  },
+  "skill_library": {
+    "enabled": true,
+    "everything_claude_code_path": "",
+    "superpowers_path": "",
+    "antigravity_skills_path": "",
+    "search_limit": 8
+  },
+  "research_repos": {
+    "autoresearch_path": ""
+  },
+  "system_context": {
+    "enable_public_ip_lookup": false
+  },
   "channels": {
     "telegram": {
       "enabled": false,

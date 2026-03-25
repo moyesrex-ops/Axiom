@@ -13,10 +13,13 @@ try:
 except ImportError:  # pragma: no cover
     requests = None
 
+from core.runtime_config import load_runtime_config
+
 
 _CACHE_TTL_SECONDS = 1200
 _CACHE_AT = 0.0
 _CACHE_DATA: dict = {}
+_CACHE_SIGNATURE = ""
 _TIMEZONE_HINTS = {
     "America/Regina": {"city": "Regina", "region": "Saskatchewan", "country": "Canada"},
     "Canada Central Standard Time": {"region": "Saskatchewan", "country": "Canada"},
@@ -120,6 +123,14 @@ def _public_ip_context(timeout: float = 1.0) -> dict:
     return {}
 
 
+def _system_context_config() -> dict:
+    return load_runtime_config().get("system_context", {}) or {}
+
+
+def _public_ip_lookup_enabled() -> bool:
+    return bool(_system_context_config().get("enable_public_ip_lookup", False))
+
+
 def _apply_timezone_location_hint(data: dict) -> None:
     for key in (data.get("timezone_name", ""), data.get("timezone_id", "")):
         hint = _TIMEZONE_HINTS.get(str(key or "").strip())
@@ -132,10 +143,16 @@ def _apply_timezone_location_hint(data: dict) -> None:
 
 
 def collect_system_context(force_refresh: bool = False) -> dict:
-    global _CACHE_AT, _CACHE_DATA
+    global _CACHE_AT, _CACHE_DATA, _CACHE_SIGNATURE
 
     now = time.time()
-    if not force_refresh and _CACHE_DATA and (now - _CACHE_AT) < _CACHE_TTL_SECONDS:
+    config_signature = json.dumps(_system_context_config(), sort_keys=True, ensure_ascii=False)
+    if (
+        not force_refresh
+        and _CACHE_DATA
+        and _CACHE_SIGNATURE == config_signature
+        and (now - _CACHE_AT) < _CACHE_TTL_SECONDS
+    ):
         return dict(_CACHE_DATA)
 
     local_now = datetime.now().astimezone()
@@ -159,6 +176,7 @@ def collect_system_context(force_refresh: bool = False) -> dict:
         "latitude": None,
         "longitude": None,
         "public_location_source": "",
+        "public_ip_lookup_enabled": _public_ip_lookup_enabled(),
     }
 
     if sys.platform.startswith("win"):
@@ -175,15 +193,16 @@ def collect_system_context(force_refresh: bool = False) -> dict:
         if culture_info and not data["locale"]:
             data["locale"] = str(culture_info.get("Name", "") or "").strip()
 
-    geo = _public_ip_context()
+    geo = _public_ip_context() if data["public_ip_lookup_enabled"] else {}
     if geo:
         data.update({k: v for k, v in geo.items() if v not in ("", None)})
         if geo.get("timezone_name"):
             data["timezone_name"] = str(geo["timezone_name"])
-    else:
+    if not geo:
         _apply_timezone_location_hint(data)
 
     _CACHE_AT = now
+    _CACHE_SIGNATURE = config_signature
     _CACHE_DATA = dict(data)
     return dict(data)
 
@@ -200,6 +219,7 @@ def format_system_context(context: dict | None = None) -> str:
         f"Timezone: {ctx.get('timezone_name', '') or ctx.get('timezone_id', '') or 'unknown'}",
         f"UTC offset: {ctx.get('utc_offset', 'unknown')}",
         f"Locale: {ctx.get('locale', 'unknown') or 'unknown'}",
+        f"Public IP lookup: {'enabled' if ctx.get('public_ip_lookup_enabled') else 'disabled'}",
         f"Best-effort location: {location_text}",
     ]
 
@@ -224,6 +244,8 @@ def format_prompt_system_context(context: dict | None = None) -> str:
     location_text = ", ".join(bit for bit in location_bits if bit)
     if location_text:
         lines.append(f"Best-effort location hint: {location_text}")
+    elif not ctx.get("public_ip_lookup_enabled"):
+        lines.append("Public IP lookup is disabled; rely on timezone and locale unless the user provides a location.")
 
     if ctx.get("locale"):
         lines.append(f"Locale hint: {ctx['locale']}")

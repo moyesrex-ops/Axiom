@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import threading
 import json
 import re
@@ -31,7 +32,7 @@ from actions.screen_processor import screen_process
 from actions.youtube_video    import youtube_video
 from actions.cmd_control      import cmd_control
 from actions.desktop          import desktop_control
-from actions.browser_control  import browser_control
+from actions.browser_control  import browser_control, shutdown_browser_control
 from actions.file_controller  import file_controller
 from actions.code_helper      import code_helper
 from actions.dev_agent        import dev_agent
@@ -44,7 +45,10 @@ from actions.mt5_trading_agent     import mt5_trading
 from actions.market_predictor      import predict_market
 from actions.mirofish_control      import mirofish_control
 from actions.automaton_control     import automaton_control
-from actions.self_modifier         import self_modifier
+from actions.autoresearch_control  import autoresearch_control
+from actions.lightpanda_control    import lightpanda_control
+from actions.self_modifier         import self_modifier, get_dynamic_tool
+from actions.skill_library         import skill_library
 from actions.system_capabilities   import system_capabilities
 from actions.persona_control       import persona_control
 from actions.prompt_studio         import prompt_studio
@@ -56,7 +60,7 @@ from core.integration_manager      import boot_integrations
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_secret
 from core.system_context           import format_prompt_system_context
-from core.telegram_bridge          import start_telegram_bridge
+from core.telegram_bridge          import start_telegram_bridge, stop_telegram_bridge
 from memory.runtime_store          import init_runtime_store, log_event
 
 def get_base_dir():
@@ -640,6 +644,7 @@ TOOL_DECLARATIONS = [
         "Axiom's self-modification engine. Allows Axiom to read its own source code, "
         "write new Python action scripts into the actions/ directory, edit existing ones, "
         "or use AI to generate entirely new capabilities on the fly. "
+        "Newly registered tools become available to AXIOM's executor immediately; direct live-tool exposure may require a session refresh. "
         "ALSO allows Axiom to change its own voice using action='change_voice' with voice_name=<name>. "
         "Use action='list_voices' to see all available voice names. "
         "Use when the user asks Axiom to add a new skill, grant itself a new tool, "
@@ -663,6 +668,27 @@ TOOL_DECLARATIONS = [
     }
 },
 {
+    "name": "skill_library",
+    "description": (
+        "Searches and reads integrated external skill libraries from Everything Claude Code, "
+        "Superpowers, and Antigravity. Use this for coding workflows, debugging patterns, "
+        "testing playbooks, review checklists, or implementation strategy references."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | sources | search | recommend | read"},
+            "query": {"type": "STRING", "description": "Search query or task description"},
+            "task": {"type": "STRING", "description": "Task description for recommend"},
+            "skill": {"type": "STRING", "description": "Skill id or name for read"},
+            "source": {"type": "STRING", "description": "Optional source id filter"},
+            "limit": {"type": "INTEGER", "description": "Optional result limit"},
+            "save": {"type": "BOOLEAN", "description": "Whether to save results to memory"}
+        },
+        "required": []
+    }
+},
+{
     "name": "system_capabilities",
     "description": (
         "Inspects Axiom's current environment, installed integrations, recent runtime events, "
@@ -672,7 +698,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | context | hardware | integrations | mirofish | automaton | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | context | hardware | integrations | mirofish | automaton | lightpanda | autoresearch | skills | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -693,6 +719,46 @@ TOOL_DECLARATIONS = [
             "state_dir": {"type": "STRING", "description": "Optional Automaton state directory"},
             "auto_start": {"type": "BOOLEAN", "description": "Whether Automaton should auto-start during AXIOM boot when launchable"},
             "limit": {"type": "INTEGER", "description": "Optional text limit for soul action"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "lightpanda_control",
+    "description": (
+        "Inspects and configures the optional Lightpanda browser backend. Use this to check "
+        "CDP endpoint readiness, backend selection, repo path, launch it when provisioned, "
+        "or get launch instructions for faster browser automation."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | endpoint | configure | start | launch_instructions"},
+            "backend": {"type": "STRING", "description": "playwright | lightpanda"},
+            "endpoint": {"type": "STRING", "description": "CDP endpoint such as http://127.0.0.1:9222"},
+            "repo_path": {"type": "STRING", "description": "Optional Lightpanda repo path"},
+            "auto_connect": {"type": "BOOLEAN", "description": "Whether browser_control should try Lightpanda automatically"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether AXIOM should try to boot Lightpanda during startup when possible"},
+            "timeout": {"type": "NUMBER", "description": "Optional startup timeout in seconds"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "autoresearch_control",
+    "description": (
+        "Inspects and configures the local autoresearch repo. Use this to check research-loop readiness, "
+        "read program.md, inspect results.tsv, prepare the repo, train it, or get launch instructions for real autonomous ML experiments."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | program | results | configure | prepare | train | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional autoresearch repo path"},
+            "limit": {"type": "INTEGER", "description": "Optional row/result limit"},
+            "content_limit": {"type": "INTEGER", "description": "Optional text limit for program"},
+            "save": {"type": "BOOLEAN", "description": "Whether to save results to memory"},
+            "timeout": {"type": "INTEGER", "description": "Optional prepare/train timeout in seconds"}
         },
         "required": ["action"]
     }
@@ -796,6 +862,7 @@ class AxiomLive:
         self._session_resumption_handle = ""
         self._session_resumable = False
         self._go_away_requested = False
+        self._shutdown_requested = threading.Event()
 
     def speak(self, text: str):
         """Thread-safe speak - any thread can call this."""
@@ -888,6 +955,25 @@ class AxiomLive:
             self._session_resumption_handle = ""
 
         self._session_resumable = resumable
+
+    def request_shutdown(self) -> None:
+        if self._shutdown_requested.is_set():
+            return
+
+        self._shutdown_requested.set()
+        if not self._loop or not self.session:
+            return
+
+        async def _close_session():
+            try:
+                await self.session.close()
+            except Exception as error:
+                log_event("session", "shutdown_close_error", _summarize_exception(error)[:500])
+
+        try:
+            asyncio.run_coroutine_threadsafe(_close_session(), self._loop)
+        except Exception as error:
+            log_event("session", "shutdown_schedule_error", _summarize_exception(error)[:500])
 
     async def _handle_go_away(self, go_away: types.LiveServerGoAway) -> None:
         if self._go_away_requested:
@@ -1178,6 +1264,16 @@ class AxiomLive:
                 )
                 result = r or "Done."
 
+            elif name == "skill_library":
+                r = await loop.run_in_executor(
+                    None, lambda: skill_library(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
             elif name == "system_capabilities":
                 r = await loop.run_in_executor(
                     None, lambda: system_capabilities(
@@ -1191,6 +1287,26 @@ class AxiomLive:
             elif name == "automaton_control":
                 r = await loop.run_in_executor(
                     None, lambda: automaton_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "lightpanda_control":
+                r = await loop.run_in_executor(
+                    None, lambda: lightpanda_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "autoresearch_control":
+                r = await loop.run_in_executor(
+                    None, lambda: autoresearch_control(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak
@@ -1239,7 +1355,18 @@ class AxiomLive:
                 result = r or "Done."
 
             else:
-                result = f"Unknown tool: {name}"
+                dynamic_tool = get_dynamic_tool(name)
+                if dynamic_tool is not None:
+                    r = await loop.run_in_executor(
+                        None, lambda: dynamic_tool(
+                            parameters=args,
+                            player=self.ui,
+                            speak=self.speak
+                        )
+                    )
+                    result = r or "Done."
+                else:
+                    result = f"Unknown tool: {name}"
 
         except Exception as e:
             result = f"Tool '{name}' failed: {e}"
@@ -1394,7 +1521,7 @@ class AxiomLive:
             http_options={"api_version": "v1beta"}
         )
 
-        while True:
+        while not self._shutdown_requested.is_set():
             try:
                 reconnecting = self._disconnect_count > 0
                 print("[AXIOM] Connecting...")
@@ -1433,6 +1560,8 @@ class AxiomLive:
                     tg.create_task(self._play_audio())
 
             except Exception as e:
+                if self._shutdown_requested.is_set():
+                    break
                 self._disconnect_count += 1
                 self._last_disconnect_reason = _summarize_exception(e)
                 log_event(
@@ -1454,6 +1583,8 @@ class AxiomLive:
                 self.audio_in_queue = None
                 self.out_queue = None
 
+            if self._shutdown_requested.is_set():
+                break
             delay_seconds = 0.5 if self._go_away_requested else 3
             print(f"[AXIOM] Reconnecting in {delay_seconds}s...")
             await asyncio.sleep(delay_seconds)
@@ -1462,6 +1593,41 @@ def main():
     init_runtime_store()
     face_path = BASE_DIR / "assets" / "face.png"
     ui = AxiomUI(str(face_path) if face_path.exists() else "")
+    runner_state = {"thread": None, "axiom": None, "cleanup_started": False}
+
+    def shutdown_runtime():
+        if runner_state["cleanup_started"]:
+            return
+        runner_state["cleanup_started"] = True
+
+        axiom = runner_state.get("axiom")
+        if axiom is not None:
+            try:
+                axiom.request_shutdown()
+            except Exception:
+                pass
+
+        try:
+            stop_telegram_bridge(timeout=2.5)
+        except Exception:
+            pass
+
+        try:
+            shutdown_browser_control(timeout=10)
+        except Exception:
+            pass
+
+        thread = runner_state.get("thread")
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=3)
+
+        try:
+            pya.terminate()
+        except Exception:
+            pass
+
+    ui.set_close_handler(shutdown_runtime)
+    atexit.register(shutdown_runtime)
 
     def runner():
         ui.wait_for_api_key()
@@ -1469,12 +1635,16 @@ def main():
         boot_integrations(log_func=ui.write_log)
 
         axiom = AxiomLive(ui)
+        runner_state["axiom"] = axiom
         try:
             asyncio.run(axiom.run())
         except KeyboardInterrupt:
             print("\n[AXIOM] Shutting down...")
+        finally:
+            runner_state["axiom"] = None
 
-    threading.Thread(target=runner, daemon=True).start()
+    runner_state["thread"] = threading.Thread(target=runner, daemon=True, name="AxiomRuntime")
+    runner_state["thread"].start()
     ui.root.mainloop()
 
 if __name__ == "__main__":

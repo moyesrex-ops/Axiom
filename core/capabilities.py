@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from core.autoresearch_bridge import collect_autoresearch_status
 from core.automaton_bridge import collect_automaton_status
+from core.lightpanda_bridge import collect_lightpanda_status
 from core.mirofish_bridge import collect_mirofish_status
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_secret
+from core.skill_library import collect_skill_library_status
 
 
 def get_base_dir() -> Path:
@@ -119,6 +122,9 @@ def collect_capabilities() -> dict:
     candidates = _integration_candidates()
     mirofish = collect_mirofish_status(limit=3)
     automaton = collect_automaton_status()
+    lightpanda = collect_lightpanda_status()
+    skill_library = collect_skill_library_status(limit=4)
+    autoresearch = collect_autoresearch_status(limit=3)
     personaplex_cfg = runtime.get("personaplex", {})
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
@@ -159,6 +165,20 @@ def collect_capabilities() -> dict:
         "telegram_bridge_enabled": bool(telegram_cfg.get("enabled", False)),
         "telegram_bot_configured": _telegram_token_configured(),
         "telegram_allowed_chat_count": len(telegram_cfg.get("allowed_chat_ids", []) or []),
+        "skill_library_enabled": bool(skill_library.get("enabled", False)),
+        "skill_library_sources_count": int(skill_library.get("sources_count", 0) or 0),
+        "skill_library_total_skills": int(skill_library.get("total_skills", 0) or 0),
+        "lightpanda_repo_path": str(lightpanda.get("repo_path", "") or ""),
+        "lightpanda_endpoint": str(lightpanda.get("endpoint", "") or ""),
+        "lightpanda_reachable": bool(lightpanda.get("reachable", False)),
+        "lightpanda_backend": str(lightpanda.get("backend", "playwright") or "playwright"),
+        "lightpanda_auto_start": bool(lightpanda.get("auto_start", False)),
+        "autoresearch_repo_path": str(autoresearch.get("repo_path", "") or ""),
+        "autoresearch_uv_ready": bool(autoresearch.get("uv_available", False)),
+        "autoresearch_gpu_ready": bool(autoresearch.get("gpu_available", False)),
+        "autoresearch_data_shards": int(autoresearch.get("data_shards", 0) or 0),
+        "autoresearch_tokenizer_ready": bool(autoresearch.get("tokenizer_ready", False)),
+        "autoresearch_results_count": int(autoresearch.get("results_count", 0) or 0),
         "research_backend": str(research_cfg.get("backend", "axiom") or "axiom"),
         "vane_url": vane_url,
         "vane_reachable": bool(vane_url) and _is_tcp_reachable(vane_url),
@@ -204,6 +224,23 @@ def format_capability_status() -> str:
             "Telegram bridge: ready"
             if caps["telegram_bridge_enabled"] and caps["telegram_bot_configured"]
             else "Telegram bridge: disabled or missing bot token"
+        ),
+        (
+            f"Skill library: {caps['skill_library_total_skills']} indexed skills across {caps['skill_library_sources_count']} sources"
+            if caps["skill_library_enabled"] and caps["skill_library_sources_count"]
+            else "Skill library: no external skill sources detected"
+        ),
+        (
+            f"Lightpanda: endpoint {'up' if caps['lightpanda_reachable'] else 'down'} at {caps['lightpanda_endpoint']} | "
+            f"backend={caps['lightpanda_backend']} | auto_start={'yes' if caps['lightpanda_auto_start'] else 'no'}"
+            if caps["lightpanda_repo_path"]
+            else "Lightpanda: repo not found"
+        ),
+        (
+            f"Autoresearch: repo at {caps['autoresearch_repo_path']} | shards={caps['autoresearch_data_shards']} | "
+            f"tokenizer={'ready' if caps['autoresearch_tokenizer_ready'] else 'missing'} | results={caps['autoresearch_results_count']}"
+            if caps["autoresearch_repo_path"]
+            else "Autoresearch: repo not found"
         ),
         (
             f"Deep research backend: Vane at {caps['vane_url']}"
@@ -259,6 +296,22 @@ def format_capability_report() -> str:
             if caps["telegram_bot_configured"]
             else "Telegram bot token: missing"
         ),
+        (
+            f"Skill library: {caps['skill_library_total_skills']} indexed skills across {caps['skill_library_sources_count']} sources"
+            if caps["skill_library_enabled"] and caps["skill_library_sources_count"]
+            else "Skill library: disabled or no sources detected"
+        ),
+        f"Lightpanda repo path: {caps['lightpanda_repo_path'] or 'not found'}",
+        f"Lightpanda endpoint: {caps['lightpanda_endpoint'] or 'not configured'}",
+        f"Lightpanda endpoint reachable: {'yes' if caps['lightpanda_reachable'] else 'no'}",
+        f"Lightpanda backend setting: {caps['lightpanda_backend']}",
+        f"Lightpanda auto-start: {'enabled' if caps['lightpanda_auto_start'] else 'disabled'}",
+        f"Autoresearch repo path: {caps['autoresearch_repo_path'] or 'not found'}",
+        f"Autoresearch uv ready: {'yes' if caps['autoresearch_uv_ready'] else 'no'}",
+        f"Autoresearch GPU ready: {'yes' if caps['autoresearch_gpu_ready'] else 'no'}",
+        f"Autoresearch data shards: {caps['autoresearch_data_shards']}",
+        f"Autoresearch tokenizer ready: {'yes' if caps['autoresearch_tokenizer_ready'] else 'no'}",
+        f"Autoresearch logged results: {caps['autoresearch_results_count']}",
         f"Research backend: {caps['research_backend']}",
         (
             f"Vane endpoint: reachable at {caps['vane_url']}"

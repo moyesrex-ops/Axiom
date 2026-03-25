@@ -18,10 +18,13 @@ PLANNER_PROMPT = """You are the planning module of AXIOM, a personal AI assistan
 Your job: break any user goal into a sequence of steps using ONLY the tools listed below.
 
 ABSOLUTE RULES:
-- NEVER use generated_code or write Python scripts. It does not exist.
+- NEVER use generated_code. If custom coding is needed, use code_helper.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
 - Use system_capabilities if the task depends on installed integrations or current environment status.
+- Use skill_library when you need an external workflow, coding pattern, debugging checklist, or testing playbook.
+- Use lightpanda_control when the task depends on an optional Lightpanda browser backend.
+- Use autoresearch_control when the task depends on the local autoresearch repo, program.md, or experiment log.
 - Use file_controller to save content to disk.
 - Use cmd_control to open files or run system commands.
 - Max 5 steps. Use the minimum steps needed.
@@ -122,8 +125,30 @@ dev_agent
   language: string (optional)
 
 system_capabilities
-  action: "summary" | "status" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "lightpanda" | "autoresearch" | "skills" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
+
+skill_library
+  action: "status" | "sources" | "search" | "recommend" | "read" (optional)
+  query: string (for search)
+  task: string (for recommend)
+  skill: string (for read)
+  source: string (optional)
+  limit: integer (optional)
+
+lightpanda_control
+  action: "status" | "endpoint" | "configure" | "launch_instructions" (required)
+  backend: "playwright" | "lightpanda" (optional)
+  endpoint: string (optional)
+  repo_path: string (optional)
+  auto_connect: boolean (optional)
+
+autoresearch_control
+  action: "status" | "program" | "results" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
+  limit: integer (optional)
+  content_limit: integer (optional)
+  save: boolean (optional)
 
 predict_market
   asset: string (required)
@@ -227,10 +252,10 @@ def create_plan(goal: str, context: str = "") -> dict:
 
         for step in plan["steps"]:
             if step.get("tool") in ("generated_code",):
-                print(f"[Planner] ⚠️ generated_code detected in step {step.get('step')} — replacing with web_search")
+                print(f"[Planner] ⚠️ generated_code detected in step {step.get('step')} — replacing with code_helper")
                 desc = step.get("description", goal)
-                step["tool"] = "web_search"
-                step["parameters"] = {"query": desc[:200]}
+                step["tool"] = "code_helper"
+                step["parameters"] = {"action": "build", "description": desc[:400], "language": "python"}
 
         print(f"[Planner] ✅ Draft Plan: {len(plan['steps'])} steps")
         for s in plan["steps"]:
@@ -278,8 +303,12 @@ Return the final improved plan in JSON format ONLY, adhering strictly to the res
         
         for step in improved_plan.get("steps", []):
             if step.get("tool") in ("generated_code",):
-                step["tool"] = "web_search"
-                step["parameters"] = {"query": step.get("description", goal)[:200]}
+                step["tool"] = "code_helper"
+                step["parameters"] = {
+                    "action": "build",
+                    "description": step.get("description", goal)[:400],
+                    "language": "python",
+                }
                 
         print(f"[Planner] ✨ Improved Plan: {len(improved_plan['steps'])} steps")
         return improved_plan
@@ -336,8 +365,12 @@ Create a REVISED plan for the remaining work only. Do not repeat completed steps
 
         for step in plan.get("steps", []):
             if step.get("tool") == "generated_code":
-                step["tool"] = "web_search"
-                step["parameters"] = {"query": step.get("description", goal)[:200]}
+                step["tool"] = "code_helper"
+                step["parameters"] = {
+                    "action": "build",
+                    "description": step.get("description", goal)[:400],
+                    "language": "python",
+                }
 
         print(f"[Planner] 🔄 Revised plan: {len(plan['steps'])} steps")
         return plan

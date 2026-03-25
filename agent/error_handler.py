@@ -154,7 +154,7 @@ def generate_fix(step: dict, error: str, fix_suggestion: str) -> dict:
     genai.configure(api_key=_get_api_key())
     model = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
-    prompt = f"""A task step failed. Generate a replacement step.
+    prompt = f"""A task step failed. Generate replacement Python code that can be run through AXIOM's code_helper tool.
 
 Original step:
 Tool: {step.get('tool')}
@@ -178,7 +178,7 @@ Return ONLY the Python code, no explanation."""
             "description": f"Auto-fix for: {step.get('description')}",
             "parameters": {
                 "action":      "run",
-                "description": fix_suggestion,
+                "description": fix_suggestion or step.get("description", ""),
                 "code":        code,
                 "language":    "python"
             },
@@ -190,9 +190,13 @@ Return ONLY the Python code, no explanation."""
         print(f"[ErrorHandler] Fix generation failed: {e}")
         return {
             "step":        step.get("step"),
-            "tool":        "generated_code",
+            "tool":        "code_helper",
             "description": f"Fallback for: {step.get('description')}",
-            "parameters":  {"description": step.get("description", "")},
+            "parameters":  {
+                "action": "build",
+                "description": fix_suggestion or step.get("description", ""),
+                "language": "python",
+            },
             "depends_on":  step.get("depends_on", []),
             "critical":    step.get("critical", False)
         }

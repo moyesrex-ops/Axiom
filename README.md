@@ -188,6 +188,7 @@ Copy it to `config/api_keys.json` and fill only the secrets you actually want lo
 `config/api_keys.json` is intentionally ignored by git and should never contain real secrets in a public push.
 
 For machine-specific integration paths or auto-start preferences, create `config/runtime.local.json`. AXIOM merges that file on top of the tracked `config/runtime.json`.
+When `config/runtime.local.json` exists, AXIOM now writes future runtime updates there by default so tracked `config/runtime.json` can stay clean.
 
 ---
 
@@ -223,6 +224,26 @@ The repo now uses `config/runtime.json` for non-secret runtime behavior. Importa
     "automaton_state_dir": "",
     "automaton_auto_start": false,
     "personaplex_path": ""
+  },
+  "browser": {
+    "backend": "playwright",
+    "lightpanda_endpoint": "http://127.0.0.1:9222",
+    "lightpanda_auto_connect": false,
+    "lightpanda_repo_path": "",
+    "lightpanda_wsl_binary_path": ""
+  },
+  "skill_library": {
+    "enabled": true,
+    "everything_claude_code_path": "",
+    "superpowers_path": "",
+    "antigravity_skills_path": "",
+    "search_limit": 8
+  },
+  "research_repos": {
+    "autoresearch_path": ""
+  },
+  "system_context": {
+    "enable_public_ip_lookup": false
   }
 }
 ```
@@ -239,6 +260,14 @@ This keeps voice/model/integration settings out of the source code.
     "automaton_path": "C:\\Users\\you\\automaton_upstream",
     "automaton_state_dir": "C:\\Users\\you\\.automaton",
     "automaton_auto_start": true
+  },
+  "browser": {
+    "lightpanda_endpoint": "http://127.0.0.1:9222",
+    "lightpanda_repo_path": "C:\\Users\\you\\Axiom_research\\external\\lightpanda-browser",
+    "lightpanda_wsl_binary_path": "/home/you/.local/bin/lightpanda"
+  },
+  "research_repos": {
+    "autoresearch_path": "C:\\Users\\you\\Axiom_research\\external\\autoresearch"
   }
 }
 ```
@@ -249,6 +278,7 @@ Startup behavior:
 - If Gemini is configured but Telegram is not, Axiom can show a separate optional Telegram link prompt at startup.
 - Telegram remains optional. Skip it and Axiom continues to run locally.
 - System context is inferred at runtime and injected into the live prompt, so reminders and time-sensitive responses use the local machine context by default.
+- Public IP geolocation is opt-in through `system_context.enable_public_ip_lookup`. The default path stays local-first and relies on timezone/locale hints only.
 
 ---
 
@@ -256,6 +286,15 @@ Startup behavior:
 
 ### `system_capabilities`
 Inspect the live environment, installed integrations, recent runtime events, recent failures, recent task checkpoints, and live system context.
+
+### `skill_library`
+Search and read integrated external skill libraries from:
+
+- Everything Claude Code
+- Superpowers
+- Antigravity Awesome Skills
+
+This gives AXIOM a searchable library of workflows, testing patterns, debugging playbooks, and implementation guidance.
 
 ### `nexus_memory`
 The memory tool now supports:
@@ -270,6 +309,12 @@ That means Axiom can search both saved nexus topics and archived conversation tu
 
 ### `persona_control`
 Configure optional PersonaPlex integration, inspect its status, or get launch instructions.
+
+### `lightpanda_control`
+Inspect, configure, or start the optional Lightpanda CDP backend. AXIOM can now detect a WSL-installed Lightpanda binary, resolve the usable websocket endpoint, and report whether the backend is actually reachable from Windows.
+
+### `autoresearch_control`
+Inspect the local `autoresearch` repo, read `program.md`, prepare the dataset/tokenizer, run a real training baseline, inspect `results.tsv`, and check whether the experiment loop is ready to run.
 
 ### `prompt_studio`
 Generate strong image/video prompts, variations, and negative prompts.
@@ -345,7 +390,7 @@ Supported commands:
 - `/task <goal>`
 
 Plain chat messages get a conversational reply.
-If `queue_plain_messages` is enabled, operational plain messages can still auto-execute as tasks.
+If `queue_plain_messages` is enabled, operational plain messages can auto-execute as tasks only for explicitly allowed chat IDs. If the allowed list is empty, chat replies still work but execution is locked.
 
 At startup, Telegram linking is optional. If you do not provide a bot token, Axiom stays local-only and the rest of the runtime still works.
 
@@ -379,6 +424,45 @@ Important Windows note:
 
 - The local MiroFish integration was validated with a writable external log directory override (`MIROFISH_LOG_DIR`) so AXIOM can launch it without colliding with repo-local log files.
 - The local Automaton integration was validated through Node 20 + `pnpm build`, but it still needs `automaton --setup` / `--provision` before AXIOM can bring it fully online.
+
+### Lightpanda
+
+AXIOM now understands an optional Lightpanda browser backend:
+
+- `lightpanda_control` inspects repo state, CDP endpoint readiness, start status, and launch instructions.
+- `lightpanda_control start` can launch a WSL-installed Lightpanda binary and verify the Windows-visible CDP endpoint.
+- `browser.lightpanda_wsl_binary_path` can be set in `runtime.local.json` when WSL discovery is unreliable or you want AXIOM to use a fixed known binary path.
+- `browser_control` can connect to Lightpanda over CDP when `browser.backend` is set to `lightpanda` or `lightpanda_auto_connect` is enabled and the endpoint is reachable.
+- The safe default remains `browser.backend = "playwright"` so existing browser behavior does not change unless you opt in.
+- On current Windows setups, Lightpanda is best treated as an optional beta backend. AXIOM now prefers the stable local browser path by default and can fall back to it if a Lightpanda navigation target collapses.
+
+### External Skill Libraries
+
+AXIOM can now index and search external skill repos if they are cloned locally:
+
+- `everything-claude-code`
+- `superpowers`
+- `antigravity-awesome-skills`
+
+Point the runtime config at those repos through `skill_library.*_path` fields, or let AXIOM auto-detect them under `C:\Users\<you>\Axiom_research\external\`.
+
+### Autoresearch
+
+AXIOM now has a bridge for Karpathy's `autoresearch` repo:
+
+- It checks whether `uv` is installed.
+- It checks whether an NVIDIA GPU is visible.
+- It inspects `~/.cache/autoresearch/` for data shards and tokenizer artifacts.
+- It can run `prepare.py`, train a real baseline, and parse `results.tsv` afterward.
+- The local Windows/RTX validation path now uses a low-VRAM fallback profile and writes `results.tsv` rows so AXIOM can inspect real experiment outcomes.
+
+That means AXIOM can report real readiness for autonomous ML experiments instead of just knowing the repo exists.
+
+Verification:
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+```
 
 ---
 

@@ -9,6 +9,8 @@ from urllib.parse import quote_plus
 from pathlib import Path
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 
+from core.lightpanda_bridge import collect_lightpanda_status
+
 
 def _normalize_youtube_kind(query: str = "", requested_kind: str = "auto") -> str:
     requested = str(requested_kind or "auto").strip().lower()
@@ -183,33 +185,62 @@ class _BrowserThread:
         self._loop       = None
         self._thread     = None
         self._ready      = threading.Event()
+        self._start_error = None
         self._playwright = None
         self._browser    = None
         self._context    = None
         self._page       = None
+        self._active_backend = "playwright"
+        self._force_local_browser = False
 
     def start(self):
         if self._thread and self._thread.is_alive():
             return
+        self._start_error = None
+        self._ready.clear()
         self._thread = threading.Thread(
             target=self._run_loop, daemon=True, name="BrowserThread"
         )
         self._thread.start()
         self._ready.wait(timeout=15)
+        if not self._ready.is_set():
+            self._start_error = RuntimeError("Browser runtime did not become ready in time.")
+            raise RuntimeError("Browser runtime did not become ready in time.")
+        if self._start_error is not None:
+            raise RuntimeError(f"Browser runtime failed to initialize: {self._start_error}")
 
     def _run_loop(self):
-        self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._init())
-        self._ready.set()
-        self._loop.run_forever()
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self._init())
+        except Exception as error:
+            self._start_error = error
+        finally:
+            self._ready.set()
+
+        if self._start_error is not None:
+            try:
+                loop.close()
+            except Exception:
+                pass
+            self._loop = None
+            return
+
+        loop.run_forever()
 
     async def _init(self):
-        self._playwright = await async_playwright().start()
+        if self._playwright is None:
+            self._playwright = await async_playwright().start()
 
     def run(self, coro, timeout: int = 30):
+        if self._start_error is not None:
+            raise RuntimeError(f"Browser runtime is unavailable: {self._start_error}")
         if not self._loop:
             raise RuntimeError("BrowserThread not started.")
+        if not self._loop.is_running():
+            raise RuntimeError("Browser runtime loop is not running.")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=timeout)
     
@@ -234,6 +265,38 @@ class _BrowserThread:
         return self._page
 
     async def _launch(self):
+        if self._playwright is None:
+            await self._init()
+
+        lightpanda = collect_lightpanda_status()
+        wants_lightpanda = not self._force_local_browser and (
+            lightpanda["backend"] == "lightpanda" or lightpanda["auto_connect"]
+        )
+
+        if wants_lightpanda:
+            try:
+                if self._browser is None or not self._browser.is_connected():
+                    self._browser = await self._playwright.chromium.connect_over_cdp(
+                        lightpanda["ws_endpoint"]
+                    )
+                    print(f"[Browser] Connected to Lightpanda CDP at {lightpanda['ws_endpoint']}")
+
+                contexts = list(self._browser.contexts)
+                self._context = contexts[-1] if contexts else await self._browser.new_context(
+                    viewport=None,
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/120.0.0.0 Safari/537.36"
+                    )
+                )
+                live_pages = [page for page in self._context.pages if not page.is_closed()]
+                self._page = live_pages[-1] if live_pages else await self._context.new_page()
+                self._active_backend = "lightpanda"
+                return
+            except Exception as e:
+                print(f"[Browser] Warning: Lightpanda connect failed ({e}), falling back to local browser")
+
         prog_id                        = _get_default_browser_id()
         engine_name, exe_path, channel = _find_browser_executable(prog_id)
         engine                         = getattr(self._playwright, engine_name)
@@ -263,6 +326,7 @@ class _BrowserThread:
                 args=["--start-maximized"]
             )
 
+        self._active_backend = "playwright"
         self._context = await self._browser.new_context(
             viewport=None,
             user_agent=(
@@ -273,14 +337,43 @@ class _BrowserThread:
         )
         self._page = await self._context.new_page()
 
-    async def _close(self):
+    async def _close_browser_only(self):
+        if self._page and not self._page.is_closed():
+            try:
+                await self._page.close()
+            except Exception:
+                pass
+        self._page = None
+
+        if self._context:
+            try:
+                await self._context.close()
+            except Exception:
+                pass
+        self._context = None
+
         if self._browser:
-            await self._browser.close()
+            try:
+                await self._browser.close()
+            except Exception:
+                pass
             self._browser = None
-            self._page    = None
+
+    async def _close(self):
+        await self._close_browser_only()
         if self._playwright:
             await self._playwright.stop()
             self._playwright = None
+        self._force_local_browser = False
+        self._active_backend = "playwright"
+
+    async def _fallback_to_local_browser(self, url: str) -> str:
+        print("[Browser] Lightpanda navigation failed. Falling back to the local browser.")
+        self._force_local_browser = True
+        await self._close_browser_only()
+        page = await self._get_page()
+        await page.goto(url, wait_until="domcontentloaded", timeout=15000)
+        return f"Opened: {page.url} [local fallback]"
 
     async def _go_to(self, url: str) -> str:
         if not url.startswith("http"):
@@ -292,6 +385,11 @@ class _BrowserThread:
         except PlaywrightTimeout:
             return f"Timeout loading: {url}"
         except Exception as e:
+            if self._active_backend == "lightpanda" and "Target page, context or browser has been closed" in str(e):
+                try:
+                    return await self._fallback_to_local_browser(url)
+                except Exception as fallback_error:
+                    return f"Navigation error after local fallback: {fallback_error}"
             return f"Navigation error: {e}"
 
     async def _search(self, query: str, engine: str = "google") -> str:
@@ -418,7 +516,7 @@ class _BrowserThread:
         return f"Could not find input: '{description}'"
 
     async def _close_browser(self) -> str:
-        await self._close()
+        await self._close_browser_only()
         return "Browser closed."
 
     async def _current_state(self) -> str:
@@ -628,6 +726,27 @@ def _ensure_started():
             _bt.start()
             _bt_started = True
 
+
+def shutdown_browser_control(timeout: int = 20) -> None:
+    global _bt, _bt_started
+    with _bt_lock:
+        if not _bt_started or not _bt._loop:
+            return
+        loop = _bt._loop
+        thread = _bt._thread
+        try:
+            _bt.run(_bt._close(), timeout=timeout)
+        except Exception:
+            pass
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception:
+            pass
+        if thread and thread.is_alive():
+            thread.join(timeout=2)
+        _bt = _BrowserThread()
+        _bt_started = False
+
 def browser_control(
     parameters:     dict,
     response=None,
@@ -654,12 +773,12 @@ def browser_control(
         clear_first : bool, clear input before typing (default: True)
         kind        : youtube_play only: video | shorts | auto
     """
-    _ensure_started()
-
     action = (parameters or {}).get("action", "").lower().strip()
     result = "Unknown action."
 
     try:
+        _ensure_started()
+
         if action == "go_to":
             result = _bt.run(_bt._go_to(parameters.get("url", "")))
 

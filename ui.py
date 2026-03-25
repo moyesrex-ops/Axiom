@@ -74,6 +74,7 @@ class AxiomUI:
         self.is_typing    = False
         self.setup_frame  = None
         self.telegram_setup_frame = None
+        self._on_close = None
 
         self._face_pil         = None
         self._has_face         = False
@@ -106,7 +107,7 @@ class AxiomUI:
             self.root.after(400, self._maybe_show_telegram_setup_ui)
 
         self._animate()
-        self.root.protocol("WM_DELETE_WINDOW", lambda: os._exit(0))
+        self.root.protocol("WM_DELETE_WINDOW", self._handle_close_request)
 
     def _load_face(self, path):
         FW = self.FACE_SZ
@@ -307,6 +308,24 @@ class AxiomUI:
                             else self.status_text)
         if not self.is_typing:
             self._start_typing()
+
+    def set_close_handler(self, callback):
+        self._on_close = callback
+
+    def _handle_close_request(self):
+        if callable(self._on_close):
+            try:
+                self._on_close()
+            except Exception:
+                pass
+        try:
+            self.root.quit()
+        except Exception:
+            pass
+        try:
+            self.root.destroy()
+        except Exception:
+            pass
 
     def _start_typing(self):
         if not self.typing_queue:

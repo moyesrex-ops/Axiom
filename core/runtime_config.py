@@ -55,6 +55,27 @@ DEFAULT_RUNTIME_CONFIG = {
         "deep_search_max_queries": 4,
         "deep_search_results_per_query": 4,
     },
+    "browser": {
+        "backend": "playwright",
+        "lightpanda_endpoint": "http://127.0.0.1:9222",
+        "lightpanda_auto_connect": False,
+        "lightpanda_auto_start": False,
+        "lightpanda_repo_path": "",
+        "lightpanda_wsl_binary_path": "",
+    },
+    "skill_library": {
+        "enabled": True,
+        "everything_claude_code_path": "",
+        "superpowers_path": "",
+        "antigravity_skills_path": "",
+        "search_limit": 8,
+    },
+    "research_repos": {
+        "autoresearch_path": "",
+    },
+    "system_context": {
+        "enable_public_ip_lookup": False,
+    },
     "channels": {
         "telegram": {
             "enabled": False,
@@ -77,18 +98,40 @@ def _merge_dicts(base: dict, updates: dict) -> dict:
     return merged
 
 
+def _read_config_file(path: Path) -> dict:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_config_file(path: Path, payload: dict) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _select_write_path(prefer_local: bool = True) -> Path:
+    if prefer_local or RUNTIME_LOCAL_CONFIG_PATH.exists():
+        return RUNTIME_LOCAL_CONFIG_PATH
+    return RUNTIME_CONFIG_PATH
+
+
 def load_runtime_config() -> dict:
     merged = deepcopy(DEFAULT_RUNTIME_CONFIG)
     try:
         if RUNTIME_CONFIG_PATH.exists():
-            raw = json.loads(RUNTIME_CONFIG_PATH.read_text(encoding="utf-8"))
+            raw = _read_config_file(RUNTIME_CONFIG_PATH)
             if isinstance(raw, dict):
                 merged = _merge_dicts(merged, raw)
     except Exception:
         return deepcopy(DEFAULT_RUNTIME_CONFIG)
     try:
         if RUNTIME_LOCAL_CONFIG_PATH.exists():
-            raw_local = json.loads(RUNTIME_LOCAL_CONFIG_PATH.read_text(encoding="utf-8"))
+            raw_local = _read_config_file(RUNTIME_LOCAL_CONFIG_PATH)
             if isinstance(raw_local, dict):
                 merged = _merge_dicts(merged, raw_local)
     except Exception:
@@ -96,20 +139,22 @@ def load_runtime_config() -> dict:
     return merged
 
 
-def save_runtime_config(config: dict) -> dict:
-    merged = _merge_dicts(DEFAULT_RUNTIME_CONFIG, config or {})
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    RUNTIME_CONFIG_PATH.write_text(
-        json.dumps(merged, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    return merged
+def save_runtime_config(config: dict, prefer_local: bool = True) -> dict:
+    target_path = _select_write_path(prefer_local=prefer_local)
+    if target_path == RUNTIME_LOCAL_CONFIG_PATH:
+        payload = config or {}
+    else:
+        payload = _merge_dicts(DEFAULT_RUNTIME_CONFIG, config or {})
+    _write_config_file(target_path, payload)
+    return load_runtime_config()
 
 
-def update_runtime_config(updates: dict) -> dict:
-    current = load_runtime_config()
-    merged = _merge_dicts(current, updates or {})
-    return save_runtime_config(merged)
+def update_runtime_config(updates: dict, prefer_local: bool = True) -> dict:
+    target_path = _select_write_path(prefer_local=prefer_local)
+    current_target = _read_config_file(target_path)
+    merged_target = _merge_dicts(current_target, updates or {})
+    _write_config_file(target_path, merged_target)
+    return load_runtime_config()
 
 
 def get_voice_name(default: str = "Charon") -> str:

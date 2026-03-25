@@ -48,10 +48,17 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
 
     if action == "integrations":
         try:
+            from core.autoresearch_bridge import format_autoresearch_status
             from core.automaton_bridge import format_automaton_status
+            from core.lightpanda_bridge import format_lightpanda_status
             from core.mirofish_bridge import format_mirofish_status
 
-            report = f"{format_mirofish_status()}\n\n{format_automaton_status()}"
+            report = (
+                f"{format_mirofish_status()}\n\n"
+                f"{format_automaton_status()}\n\n"
+                f"{format_lightpanda_status()}\n\n"
+                f"{format_autoresearch_status(limit=limit)}"
+            )
             log_event("capabilities", "integrations_status", report[:2000])
             return report
         except Exception as error:
@@ -76,6 +83,36 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             return report
         except Exception as error:
             return f"Automaton status failed: {error}"
+
+    if action == "lightpanda":
+        try:
+            from core.lightpanda_bridge import format_lightpanda_status
+
+            report = format_lightpanda_status()
+            log_event("capabilities", "lightpanda_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Lightpanda status failed: {error}"
+
+    if action == "autoresearch":
+        try:
+            from core.autoresearch_bridge import format_autoresearch_status
+
+            report = format_autoresearch_status(limit=limit)
+            log_event("capabilities", "autoresearch_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Autoresearch status failed: {error}"
+
+    if action == "skills":
+        try:
+            from core.skill_library import format_skill_library_status
+
+            report = format_skill_library_status(limit=limit)
+            log_event("capabilities", "skill_library_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Skill library status failed: {error}"
 
     if action == "failures":
         rows = recent_failures(limit=limit)
@@ -125,5 +162,5 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
 
     return (
         "Unknown action. Use summary, status, context, hardware, integrations, "
-        "mirofish, automaton, failures, events, or tasks."
+        "mirofish, automaton, lightpanda, autoresearch, skills, failures, events, or tasks."
     )

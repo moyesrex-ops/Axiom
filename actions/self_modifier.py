@@ -111,7 +111,11 @@ def write_new_action(tool_name: str, description: str, code: str) -> str:
     except Exception:
         pass
 
-    return f"[SelfModifier] Tool '{safe_name}' created and {reg_result}."
+    return (
+        f"[SelfModifier] Tool '{safe_name}' created and {reg_result}. "
+        "It is available to AXIOM's task/executor path immediately. "
+        "Direct live-model tool calling may require a session restart so the tool schema refreshes."
+    )
 
 
 def edit_action(tool_name: str, new_code: str) -> str:
@@ -133,7 +137,10 @@ def edit_action(tool_name: str, new_code: str) -> str:
             )
         except Exception:
             pass
-        return f"[SelfModifier] Tool '{safe_name}' updated and {reg_result}."
+        return (
+            f"[SelfModifier] Tool '{safe_name}' updated and {reg_result}. "
+            "Executor access updates immediately; direct live-model tool exposure may require a session restart."
+        )
     except Exception as e:
         return f"[SelfModifier] Edit failed: {e}"
 

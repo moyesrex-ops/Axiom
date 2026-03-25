@@ -13,3 +13,4 @@ memory/axiom_state.db
 *.log
 .vscode/
 .idea/
+tests/_tmp/
