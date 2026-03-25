@@ -39,6 +39,14 @@ _SOURCE_SPECS = {
         ],
         "special": "pentagi",
     },
+    "tradingagents": {
+        "name": "TradingAgents",
+        "config_key": "tradingagents_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "TradingAgents",
+        ],
+        "special": "tradingagents",
+    },
 }
 
 _INDEX_CACHE: dict = {"signature": None, "entries": []}
@@ -61,13 +69,32 @@ _CURATED_RECOMMENDATIONS = [
     },
     {
         "triggers": ("research", "analysis", "report", "deep dive", "market", "finance"),
-        "hints": ("research", "analysis", "market", "finance", "report", "strategy", "dexter"),
+        "hints": ("research", "analysis", "market", "finance", "report", "strategy", "dexter", "tradingagents"),
     },
     {
         "triggers": ("devops", "infra", "deploy", "docker", "kubernetes", "cloud"),
         "hints": ("devops", "infra", "cloud", "kubernetes", "docker", "platform", "sre"),
     },
+    {
+        "triggers": ("trading", "ticker", "portfolio", "equity", "stock", "risk", "bullish", "bearish"),
+        "hints": ("trading", "market", "portfolio", "risk", "analyst", "bull", "bear", "tradingagents"),
+    },
 ]
+
+_TRADINGAGENTS_ROLE_SUMMARIES = {
+    "fundamentals_analyst": "Evaluates company financials, intrinsic value, and balance-sheet strength.",
+    "market_analyst": "Studies price action, indicators, and market structure.",
+    "news_analyst": "Tracks company and macro news flow for market-moving events.",
+    "social_media_analyst": "Extracts market sentiment from public discussions and social channels.",
+    "bull_researcher": "Argues the bullish case in the investment debate loop.",
+    "bear_researcher": "Argues the bearish case in the investment debate loop.",
+    "aggressive_debator": "Advocates the aggressive risk posture in the risk debate loop.",
+    "conservative_debator": "Advocates the conservative risk posture in the risk debate loop.",
+    "neutral_debator": "Acts as a balancing voice in the risk debate loop.",
+    "trader": "Synthesizes analyst and debate outputs into a concrete trade decision.",
+    "portfolio_manager": "Approves or rejects the proposed trade at the portfolio layer.",
+    "research_manager": "Coordinates research flows across the analyst and debate teams.",
+}
 
 
 def _runtime_agent_config() -> dict:
@@ -169,7 +196,9 @@ def _agent_source_row(source_id: str, spec: dict, repo_path: Path) -> dict:
         "special": spec.get("special", ""),
         "glob": spec.get("glob", ""),
     }
-    if spec.get("special"):
+    if spec.get("special") == "tradingagents":
+        row["agent_files"] = len(_tradingagents_role_cards(repo_path))
+    elif spec.get("special"):
         row["agent_files"] = 1
     elif spec.get("glob"):
         row["agent_files"] = _count_entries(repo_path, spec["glob"])
@@ -178,6 +207,7 @@ def _agent_source_row(source_id: str, spec: dict, repo_path: Path) -> dict:
 
 def resolve_agent_library_sources() -> list[dict]:
     runtime = _runtime_agent_config()
+    full_runtime = load_runtime_config()
     rows: list[dict] = []
 
     for source_id, spec in _SOURCE_SPECS.items():
@@ -185,6 +215,10 @@ def resolve_agent_library_sources() -> list[dict]:
         configured = _path_or_none(runtime.get(spec["config_key"], ""))
         if configured is not None:
             candidates.append(configured)
+        if source_id == "tradingagents":
+            configured_sidecar = _path_or_none((full_runtime.get("tradingagents", {}) or {}).get("repo_path", ""))
+            if configured_sidecar is not None:
+                candidates.append(configured_sidecar)
         candidates.extend(spec["default_candidates"])
         repo_path = _first_existing_path(candidates)
         if repo_path is None:
@@ -195,6 +229,9 @@ def resolve_agent_library_sources() -> list[dict]:
                 continue
         elif spec.get("special") == "pentagi":
             if not (repo_path / "README.md").exists():
+                continue
+        elif spec.get("special") == "tradingagents":
+            if not (repo_path / "README.md").exists() or not (repo_path / "tradingagents").exists():
                 continue
         elif not any(repo_path.glob(spec["glob"])):
             continue
@@ -211,6 +248,10 @@ def _signature_files_for_source(source: dict) -> list[Path]:
         return [path for path in [repo_path / "AGENTS.md", repo_path / "README.md"] if path.exists()]
     if special == "pentagi":
         return [path for path in [repo_path / "README.md", repo_path / "LICENSE"] if path.exists()]
+    if special == "tradingagents":
+        rows = [path for path in [repo_path / "README.md", repo_path / "pyproject.toml"] if path.exists()]
+        rows.extend(path for path, _, _, _ in _tradingagents_role_cards(repo_path))
+        return rows
     glob_pattern = str(source.get("glob", "") or "").strip()
     return sorted(path for path in repo_path.glob(glob_pattern) if path.is_file())
 
@@ -242,6 +283,8 @@ def _source_category(source_id: str, path: Path, repo_path: Path) -> str:
         return "financial research"
     if source_id == "pentagi":
         return "security"
+    if source_id == "tradingagents":
+        return "market analysis"
     return "general"
 
 
@@ -293,6 +336,59 @@ def _special_pentagi_entry(source: dict) -> dict:
     }
 
 
+def _tradingagents_role_cards(repo_path: Path) -> list[tuple[Path, str, str, str]]:
+    agents_root = repo_path / "tradingagents" / "agents"
+    if not agents_root.exists():
+        return []
+
+    category_map = {
+        "analysts": "market analysis",
+        "researchers": "investment research",
+        "risk_mgmt": "risk management",
+        "trader": "trading execution",
+        "managers": "portfolio management",
+    }
+
+    rows = []
+    for path in sorted(agents_root.rglob("*.py")):
+        if not path.is_file() or path.name == "__init__.py" or "utils" in path.parts:
+            continue
+        stem = path.stem
+        category = category_map.get(path.parent.name, "market analysis")
+        summary = _TRADINGAGENTS_ROLE_SUMMARIES.get(
+            stem,
+            f"TradingAgents role card derived from {stem.replace('_', ' ')}.",
+        )
+        slug = f"{path.parent.name}/{stem}"
+        name = stem.replace("_", " ").strip().title()
+        rows.append((path, slug, name, category + "||" + summary))
+    return rows
+
+
+def _special_tradingagents_entries(source: dict) -> list[dict]:
+    repo_path = Path(source["repo_path"])
+    entries = []
+    for path, slug, name, packed in _tradingagents_role_cards(repo_path):
+        category, summary = packed.split("||", 1)
+        content = _safe_read_text(path, limit=2600)
+        entries.append(
+            {
+                "id": f"tradingagents:{slug}",
+                "source_id": "tradingagents",
+                "source_name": source["name"],
+                "repo_path": source["repo_path"],
+                "slug": slug,
+                "name": name,
+                "description": summary,
+                "category": category,
+                "model_hint": "provider-configurable",
+                "path": str(path),
+                "content_preview": content.strip(),
+            }
+        )
+    return entries
+
+
 def index_agent_library() -> list[dict]:
     if not _agent_library_enabled():
         return []
@@ -314,6 +410,9 @@ def index_agent_library() -> list[dict]:
             continue
         if special == "pentagi":
             entries.append(_special_pentagi_entry(source))
+            continue
+        if special == "tradingagents":
+            entries.extend(_special_tradingagents_entries(source))
             continue
 
         for path in repo_path.glob(source["glob"]):

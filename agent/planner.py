@@ -28,6 +28,7 @@ ABSOLUTE RULES:
 - Use autoresearch_control when the task depends on the local autoresearch repo, program.md, or experiment log.
 - Use dexter_control for the imported Dexter financial research runtime and status.
 - Use pentagi_control for the imported PentAGI security runtime status and limitations.
+- Use tradingagents_control when the task depends on the imported TradingAgents runtime, trading runs, or multi-agent market analysis.
 - Use file_controller to save content to disk.
 - Use cmd_control to open files or run system commands.
 - Max 5 steps. Use the minimum steps needed.
@@ -128,7 +129,7 @@ dev_agent
   language: string (optional)
 
 system_capabilities
-  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "lightpanda" | "autoresearch" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 skill_library
@@ -158,6 +159,20 @@ pentagi_control
   action: "status" | "configure" | "launch_instructions" (required)
   repo_path: string (optional)
 
+tradingagents_control
+  action: "status" | "runs" | "configure" | "prepare" | "analyze" | "launch_instructions" (required)
+  repo_path: string (optional)
+  ticker: string (for analyze)
+  trade_date: string YYYY-MM-DD (for analyze)
+  provider: string (optional)
+  deep_model: string (optional)
+  quick_model: string (optional)
+  analysts: list[string] (optional)
+  max_debate_rounds: integer (optional)
+  max_risk_discuss_rounds: integer (optional)
+  timeout: integer (optional)
+  limit: integer (optional)
+
 lightpanda_control
   action: "status" | "endpoint" | "configure" | "launch_instructions" (required)
   backend: "playwright" | "lightpanda" (optional)
@@ -175,7 +190,12 @@ autoresearch_control
 predict_market
   asset: string (required)
   context: string (optional)
-  source: "auto" | "axiom" | "mirofish" (optional)
+  source: "auto" | "axiom" | "mirofish" | "tradingagents" (optional)
+  trade_date: string YYYY-MM-DD (optional)
+  provider: string (optional)
+  deep_model: string (optional)
+  quick_model: string (optional)
+  analysts: list[string] (optional)
 
 mirofish_control
   action: "status" | "projects" | "simulations" | "reports" | "market_seed" | "configure" | "start_backend" | "launch_instructions" (required)

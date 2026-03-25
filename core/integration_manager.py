@@ -5,6 +5,7 @@ from core.lightpanda_bridge import collect_lightpanda_status, start_lightpanda_b
 from core.mirofish_bridge import collect_mirofish_status, start_mirofish_backend
 from core.pentagi_bridge import collect_pentagi_status
 from core.runtime_config import load_runtime_config
+from core.tradingagents_bridge import collect_tradingagents_status
 from memory.runtime_store import log_event
 
 
@@ -100,6 +101,17 @@ def boot_integrations(log_func=None) -> list[str]:
         messages.append(line)
         _emit(log_func, line)
         log_event("integration", "pentagi_detected", line[:2000], metadata=pentagi_status)
+
+    tradingagents_status = collect_tradingagents_status(limit=2)
+    if tradingagents_status.get("repo_path"):
+        line = (
+            "[INTEGRATION] TradingAgents detected. Sidecar runtime ready."
+            if tradingagents_status.get("venv_ready") and tradingagents_status.get("import_ready")
+            else "[INTEGRATION] TradingAgents detected. Sidecar runtime still needs prepare/setup."
+        )
+        messages.append(line)
+        _emit(log_func, line)
+        log_event("integration", "tradingagents_detected", line[:2000], metadata=tradingagents_status)
 
     agent_library = collect_agent_library_status(limit=4)
     if agent_library.get("enabled") and agent_library.get("sources_count", 0):

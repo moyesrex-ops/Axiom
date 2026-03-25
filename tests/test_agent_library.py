@@ -52,11 +52,25 @@ class AgentLibraryTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+        tradingagents = root / "TradingAgents"
+        role_path = tradingagents / "tradingagents" / "agents" / "analysts"
+        role_path.mkdir(parents=True, exist_ok=True)
+        (role_path / "market_analyst.py").write_text(
+            "def run():\n    return 'market'\n",
+            encoding="utf-8",
+        )
+        (tradingagents / "README.md").write_text("TradingAgents README", encoding="utf-8")
+        (tradingagents / "pyproject.toml").write_text(
+            "[project]\nname='tradingagents'\nversion='0.2.2'\n",
+            encoding="utf-8",
+        )
+
         return {
             "wshobson": wshobson,
             "awesome": awesome,
             "dexter": dexter,
             "pentagi": pentagi,
+            "tradingagents": tradingagents,
         }
 
     def test_indexes_catalog_and_special_sources(self):
@@ -68,6 +82,7 @@ class AgentLibraryTests(unittest.TestCase):
                 "awesome_subagents_path": str(repos["awesome"]),
                 "dexter_path": str(repos["dexter"]),
                 "pentagi_path": str(repos["pentagi"]),
+                "tradingagents_path": str(repos["tradingagents"]),
             }
         }
 
@@ -78,9 +93,9 @@ class AgentLibraryTests(unittest.TestCase):
             recommend = al.recommend_agent_library("design a frontend dashboard", limit=3)
 
         self.assertTrue(status["enabled"])
-        self.assertEqual(status["sources_count"], 4)
-        self.assertEqual(status["total_agents"], 4)
-        self.assertEqual(len(entries), 4)
+        self.assertEqual(status["sources_count"], 5)
+        self.assertEqual(status["total_agents"], 5)
+        self.assertEqual(len(entries), 5)
         self.assertEqual(search[0]["name"], "Frontend Developer")
         self.assertEqual(recommend[0]["name"], "Frontend Developer")
 
@@ -93,6 +108,7 @@ class AgentLibraryTests(unittest.TestCase):
                 "awesome_subagents_path": str(repos["awesome"]),
                 "dexter_path": str(repos["dexter"]),
                 "pentagi_path": str(repos["pentagi"]),
+                "tradingagents_path": str(repos["tradingagents"]),
             }
         }
 
@@ -103,6 +119,35 @@ class AgentLibraryTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertIn("Gemini API key is missing", result["message"])
+
+    def test_indexes_tradingagents_special_roles(self):
+        repos = self._make_catalogs()
+        runtime = {
+            "agent_library": {
+                "enabled": True,
+                "tradingagents_path": str(repos["tradingagents"]),
+            },
+            "tradingagents": {
+                "repo_path": str(repos["tradingagents"]),
+            },
+        }
+        source_specs = {
+            "tradingagents": {
+                "name": "TradingAgents",
+                "config_key": "tradingagents_path",
+                "default_candidates": [],
+                "special": "tradingagents",
+            }
+        }
+
+        with patch.object(al, "load_runtime_config", return_value=runtime), patch.object(
+            al, "_SOURCE_SPECS", source_specs
+        ):
+            entries = al.index_agent_library()
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["source_id"], "tradingagents")
+        self.assertEqual(entries[0]["name"], "Market Analyst")
 
 
 if __name__ == "__main__":

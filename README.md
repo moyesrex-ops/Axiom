@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>One local runtime, one command, real tool execution.</b><br>
-  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Boot Doctor · Imported Agent Catalogs · Optional Telegram, MiroFish, Automaton, Lightpanda, Dexter, PentAGI, and Autoresearch
+  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Boot Doctor · Imported Agent Catalogs · Optional Telegram, MiroFish, Automaton, Lightpanda, Dexter, PentAGI, TradingAgents, and Autoresearch
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@ The repo is organized around a stable core path and controlled optional expansio
 | Tier | Included | What to Expect |
 |------|----------|----------------|
 | Core runtime | Gemini Live, planner, executor, action routing, Playwright browser control, file/desktop/terminal tools, memory archive, runtime SQLite store, system context | This is the normal local boot path and the part AXIOM is built around |
-| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, imported agent catalogs, Dexter, `autoresearch` | Enabled through local config or auto-detected local clones; useful when present, but not required for `axiom` to start |
+| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, imported agent catalogs, Dexter, TradingAgents, `autoresearch` | Enabled through local config or auto-detected local clones; useful when present, but not required for `axiom` to start |
 | Experimental / limited path | Lightpanda browser backend, PentAGI runtime bridge | Lightpanda is wired but Playwright remains the safe browser default; PentAGI is tracked honestly as docs-only until upstream source is available again |
 
 Short version:
@@ -202,6 +202,7 @@ Important bridge modules:
 - `core/automaton_bridge.py`
 - `core/dexter_bridge.py`
 - `core/pentagi_bridge.py`
+- `core/tradingagents_bridge.py`
 - `core/lightpanda_bridge.py`
 - `core/autoresearch_bridge.py`
 - `core/skill_library.py`
@@ -253,7 +254,17 @@ Important high-level keys:
     "awesome_subagents_path": "",
     "dexter_path": "",
     "pentagi_path": "",
+    "tradingagents_path": "",
     "delegate_limit": 3
+  },
+  "tradingagents": {
+    "repo_path": "",
+    "provider": "google",
+    "deep_think_llm": "",
+    "quick_think_llm": "",
+    "default_analysts": ["market", "social", "news", "fundamentals"],
+    "max_debate_rounds": 1,
+    "max_risk_discuss_rounds": 1
   },
   "research_repos": {
     "autoresearch_path": ""
@@ -284,7 +295,15 @@ Example local override:
     "wshobson_agents_path": "C:\\Users\\you\\Axiom_research\\external\\wshobson-agents",
     "awesome_subagents_path": "C:\\Users\\you\\Axiom_research\\external\\awesome-claude-code-subagents",
     "dexter_path": "C:\\Users\\you\\Axiom_research\\external\\dexter",
-    "pentagi_path": "C:\\Users\\you\\Axiom_research\\external\\pentagi"
+    "pentagi_path": "C:\\Users\\you\\Axiom_research\\external\\pentagi",
+    "tradingagents_path": "C:\\Users\\you\\Axiom_research\\external\\TradingAgents"
+  },
+  "tradingagents": {
+    "repo_path": "C:\\Users\\you\\Axiom_research\\external\\TradingAgents",
+    "provider": "google",
+    "deep_think_llm": "gemini-2.5-pro",
+    "quick_think_llm": "gemini-2.5-flash-lite",
+    "default_analysts": ["market", "social", "news", "fundamentals"]
   },
   "research_repos": {
     "autoresearch_path": "C:\\Users\\you\\Axiom_research\\external\\autoresearch"
@@ -314,6 +333,7 @@ High-signal integrated tools:
 - `agent_library` for searchable imported specialist agents and supervised delegation
 - `dexter_control` for Dexter financial research repo health and launch instructions
 - `pentagi_control` for PentAGI repo status and honest availability reporting
+- `tradingagents_control` for TradingAgents sidecar readiness, logged runs, and live market analysis
 - `lightpanda_control` for inspecting and starting the optional Lightpanda backend
 - `autoresearch_control` for repo readiness, dataset prep, baseline training, and results inspection
 - `persona_control` for PersonaPlex inspection and setup
@@ -384,6 +404,7 @@ Current integrated sources:
 - `VoltAgent/awesome-claude-code-subagents`
 - `virattt/dexter` as a finance-research specialist entry
 - `vxcontrol/pentagi` as a security specialist entry with runtime limitations reported honestly
+- `TauricResearch/TradingAgents` as a market-analysis specialist source derived from its analyst/research/trader/risk roles
 
 That gives AXIOM a large specialist surface instead of only a few hard-coded internal debate roles.
 
@@ -407,6 +428,18 @@ PentAGI is integrated more cautiously because the cloned upstream repo currently
 - AXIOM reports the repo status and the upstream license-audit limitation.
 - AXIOM does not pretend the missing runtime is executable.
 - When upstream source or packaged runtime is restored, the bridge can be expanded from a docs/status path into a real runtime path.
+
+### TradingAgents
+
+TradingAgents is integrated as a real Python sidecar, not just a cloned repo.
+
+- AXIOM can detect whether the repo exists.
+- AXIOM can prepare and verify an isolated `uv` environment for it.
+- AXIOM can inspect recent logged TradingAgents runs on disk.
+- AXIOM can run a live TradingAgents market analysis through `tradingagents_control`.
+- `predict_market` also accepts `source="tradingagents"` so AXIOM can route market-analysis tasks through the imported sidecar directly.
+
+The intended provider default is Google/Gemini, using your existing AXIOM Gemini key mapped into the sidecar at runtime.
 
 ### Autoresearch
 
@@ -440,6 +473,7 @@ python -m compileall .
 python -c "from actions.system_capabilities import system_capabilities; print(system_capabilities({'action':'summary'}))"
 python -c "from actions.system_capabilities import system_capabilities; print(system_capabilities({'action':'doctor'}))"
 python -c "from actions.agent_library import agent_library; print(agent_library({'action':'status'}))"
+python -c "from actions.tradingagents_control import tradingagents_control; print(tradingagents_control({'action':'status'}))"
 ```
 
 Practical startup check:

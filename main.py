@@ -44,6 +44,7 @@ from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
 from actions.market_predictor      import predict_market
 from actions.mirofish_control      import mirofish_control
+from actions.tradingagents_control import tradingagents_control
 from actions.automaton_control     import automaton_control
 from actions.autoresearch_control  import autoresearch_control
 from actions.lightpanda_control    import lightpanda_control
@@ -611,14 +612,24 @@ TOOL_DECLARATIONS = [
     "description": (
         "Runs AXIOM's market swarm and, when available, layers in real MiroFish seed/report context "
         "to predict the trajectory of a market asset. Use source='axiom' to skip MiroFish or "
-        "source='mirofish' to strongly prefer that external context."
+        "source='mirofish' to strongly prefer that external context. Use source='tradingagents' "
+        "to run the imported TradingAgents sidecar for a real multi-agent market analysis."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "asset": {"type": "STRING", "description": "The asset to predict (e.g., 'Bitcoin', 'EURUSD')."},
             "context": {"type": "STRING", "description": "Any specific news, timeframes, or biases the user provided."},
-            "source": {"type": "STRING", "description": "auto | axiom | mirofish"}
+            "source": {"type": "STRING", "description": "auto | axiom | mirofish | tradingagents"},
+            "trade_date": {"type": "STRING", "description": "Optional analysis date for TradingAgents in YYYY-MM-DD format"},
+            "provider": {"type": "STRING", "description": "Optional TradingAgents provider override"},
+            "deep_model": {"type": "STRING", "description": "Optional TradingAgents deep model override"},
+            "quick_model": {"type": "STRING", "description": "Optional TradingAgents quick model override"},
+            "analysts": {
+                "type": "ARRAY",
+                "items": {"type": "STRING"},
+                "description": "Optional TradingAgents analyst subset: market, social, news, fundamentals"
+            }
         },
         "required": ["asset"]
     }
@@ -638,6 +649,31 @@ TOOL_DECLARATIONS = [
             "server_url": {"type": "STRING", "description": "Optional MiroFish backend URL"},
             "auto_start": {"type": "BOOLEAN", "description": "Whether MiroFish should auto-start when supported"},
             "limit": {"type": "INTEGER", "description": "Optional row/result limit"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "tradingagents_control",
+    "description": (
+        "Inspects, prepares, and runs the imported TradingAgents sidecar. Use this to check runtime readiness, "
+        "prepare its isolated uv environment, inspect logged runs, configure defaults, or run a real market analysis."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | runs | configure | prepare | analyze | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local TradingAgents repo path"},
+            "ticker": {"type": "STRING", "description": "Ticker symbol for analyze"},
+            "trade_date": {"type": "STRING", "description": "Analysis date in YYYY-MM-DD format for analyze"},
+            "provider": {"type": "STRING", "description": "Optional provider override, default google"},
+            "deep_model": {"type": "STRING", "description": "Optional deep model override"},
+            "quick_model": {"type": "STRING", "description": "Optional quick model override"},
+            "analysts": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional analyst subset"},
+            "max_debate_rounds": {"type": "INTEGER", "description": "Optional investment debate rounds"},
+            "max_risk_discuss_rounds": {"type": "INTEGER", "description": "Optional risk debate rounds"},
+            "timeout": {"type": "INTEGER", "description": "Optional prepare or analysis timeout in seconds"},
+            "limit": {"type": "INTEGER", "description": "Optional result limit for runs"}
         },
         "required": ["action"]
     }
@@ -731,7 +767,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | lightpanda | autoresearch | skills | agents | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -1315,6 +1351,16 @@ class AxiomLive:
             elif name == "mirofish_control":
                 r = await loop.run_in_executor(
                     None, lambda: mirofish_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "tradingagents_control":
+                r = await loop.run_in_executor(
+                    None, lambda: tradingagents_control(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak

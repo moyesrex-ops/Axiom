@@ -16,6 +16,7 @@ from core.pentagi_bridge import collect_pentagi_status
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_secret
 from core.skill_library import collect_skill_library_status
+from core.tradingagents_bridge import collect_tradingagents_status
 
 
 def get_base_dir() -> Path:
@@ -131,6 +132,7 @@ def collect_capabilities() -> dict:
     autoresearch = collect_autoresearch_status(limit=3)
     dexter = collect_dexter_status()
     pentagi = collect_pentagi_status()
+    tradingagents = collect_tradingagents_status(limit=3)
     personaplex_cfg = runtime.get("personaplex", {})
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
@@ -183,6 +185,12 @@ def collect_capabilities() -> dict:
         "pentagi_repo_path": str(pentagi.get("repo_path", "") or ""),
         "pentagi_source_available": bool(pentagi.get("source_available", False)),
         "pentagi_audit_notice": bool(pentagi.get("audit_notice_present", False)),
+        "tradingagents_repo_path": str(tradingagents.get("repo_path", "") or ""),
+        "tradingagents_venv_ready": bool(tradingagents.get("venv_ready", False)),
+        "tradingagents_import_ready": bool(tradingagents.get("import_ready", False)),
+        "tradingagents_role_count": int(tradingagents.get("role_count", 0) or 0),
+        "tradingagents_runs_count": int(tradingagents.get("runs_count", 0) or 0),
+        "tradingagents_provider": str(tradingagents.get("provider", "") or ""),
         "lightpanda_repo_path": str(lightpanda.get("repo_path", "") or ""),
         "lightpanda_endpoint": str(lightpanda.get("endpoint", "") or ""),
         "lightpanda_reachable": bool(lightpanda.get("reachable", False)),
@@ -261,6 +269,14 @@ def format_capability_status() -> str:
             else f"PentAGI: repo at {caps['pentagi_repo_path']}"
             if caps["pentagi_repo_path"]
             else "PentAGI: repo not found"
+        ),
+        (
+            f"TradingAgents: repo at {caps['tradingagents_repo_path']} | "
+            f"venv={'yes' if caps['tradingagents_venv_ready'] else 'no'} | "
+            f"import={'yes' if caps['tradingagents_import_ready'] else 'no'} | "
+            f"roles={caps['tradingagents_role_count']} runs={caps['tradingagents_runs_count']}"
+            if caps["tradingagents_repo_path"]
+            else "TradingAgents: repo not found"
         ),
         (
             f"Lightpanda: endpoint {'up' if caps['lightpanda_reachable'] else 'down'} at {caps['lightpanda_endpoint']} | "
@@ -344,6 +360,12 @@ def format_capability_report() -> str:
         f"PentAGI repo path: {caps['pentagi_repo_path'] or 'not found'}",
         f"PentAGI source available: {'yes' if caps['pentagi_source_available'] else 'no'}",
         f"PentAGI license audit notice: {'yes' if caps['pentagi_audit_notice'] else 'no'}",
+        f"TradingAgents repo path: {caps['tradingagents_repo_path'] or 'not found'}",
+        f"TradingAgents sidecar venv: {'ready' if caps['tradingagents_venv_ready'] else 'missing'}",
+        f"TradingAgents import check: {'ready' if caps['tradingagents_import_ready'] else 'not ready'}",
+        f"TradingAgents role modules: {caps['tradingagents_role_count']}",
+        f"TradingAgents logged runs: {caps['tradingagents_runs_count']}",
+        f"TradingAgents provider: {caps['tradingagents_provider'] or 'unknown'}",
         f"Lightpanda repo path: {caps['lightpanda_repo_path'] or 'not found'}",
         f"Lightpanda endpoint: {caps['lightpanda_endpoint'] or 'not configured'}",
         f"Lightpanda endpoint reachable: {'yes' if caps['lightpanda_reachable'] else 'no'}",

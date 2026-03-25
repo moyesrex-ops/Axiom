@@ -27,6 +27,14 @@ _lock       = Lock()
 MAX_VALUE_LENGTH = 300
 
 
+def _safe_print(text: str) -> None:
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        fallback = str(text or "").encode("ascii", "replace").decode("ascii", errors="replace")
+        print(fallback)
+
+
 def _empty_memory() -> dict:
     return {
         "identity":      {},
@@ -47,7 +55,7 @@ def load_memory() -> dict:
                 return data
             return _empty_memory()
         except Exception as e:
-            print(f"[Memory] ⚠️ Load error: {e}")
+            _safe_print(f"[Memory] ⚠️ Load error: {e}")
             return _empty_memory()
 
 
@@ -106,7 +114,7 @@ def update_memory(memory_update: dict) -> dict:
 
     if _recursive_update(memory, memory_update):
         save_memory(memory)
-        print(f"[Memory] 💾 Saved: {list(memory_update.keys())}")
+        _safe_print(f"[Memory] 💾 Saved: {list(memory_update.keys())}")
 
     return memory
 
@@ -126,7 +134,7 @@ def save_to_nexus(
     
     memory["nexus_knowledge"][topic] = content
     save_memory(memory)
-    print(f"[Nexus] 🧠 Saved new knowledge: {topic}")
+    _safe_print(f"[Nexus] 🧠 Saved new knowledge: {topic}")
     try:
         from memory.runtime_store import log_event
 
@@ -155,7 +163,7 @@ def remember_conversation_turn(user_text: str, axiom_text: str = "") -> None:
     try:
         log_conversation_turn(user_text, axiom_text)
     except Exception as e:
-        print(f"[Memory] ⚠️ Conversation archive error: {e}")
+        _safe_print(f"[Memory] ⚠️ Conversation archive error: {e}")
 
 def get_from_nexus(topic: str) -> str:
     memory = load_memory()

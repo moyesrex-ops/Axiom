@@ -176,6 +176,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.mirofish_control import mirofish_control
         return mirofish_control(parameters=parameters, player=None, speak=speak) or "Done."
 
+    elif tool == "tradingagents_control":
+        from actions.tradingagents_control import tradingagents_control
+        return tradingagents_control(parameters=parameters, player=None, speak=speak) or "Done."
+
     elif tool == "self_modifier":
         from actions.self_modifier import self_modifier
         return self_modifier(parameters=parameters, player=None, speak=speak) or "Done."

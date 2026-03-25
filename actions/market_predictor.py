@@ -1,6 +1,7 @@
 import json
 import asyncio
 from typing import Optional, Dict, Any
+from datetime import date
 
 
 def get_api_key() -> str:
@@ -184,6 +185,47 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
     asset = params.get("asset", "EURUSD")
     context = params.get("context", "")
     source_mode = str(params.get("source", "auto") or "auto").strip().lower()
+    trade_date = str(params.get("trade_date", "") or date.today().isoformat()).strip()
+
+    if source_mode == "tradingagents":
+        try:
+            from core.tradingagents_bridge import (
+                format_tradingagents_analysis,
+                run_tradingagents_analysis,
+            )
+
+            if speak:
+                speak(f"Running TradingAgents market analysis for {asset}.")
+
+            result = run_tradingagents_analysis(
+                {
+                    "ticker": str(asset or "").strip().upper(),
+                    "trade_date": trade_date,
+                    "provider": params.get("provider", ""),
+                    "deep_model": params.get("deep_model", ""),
+                    "quick_model": params.get("quick_model", ""),
+                    "analysts": params.get("analysts", ""),
+                    "max_debate_rounds": params.get("max_debate_rounds", 1),
+                    "max_risk_discuss_rounds": params.get("max_risk_discuss_rounds", 1),
+                    "timeout": params.get("timeout", 1800),
+                }
+            )
+            report = format_tradingagents_analysis(result)
+            try:
+                from memory.memory_manager import save_to_nexus
+
+                save_to_nexus(
+                    f"TradingAgents Prediction: {asset}",
+                    report[:4000],
+                    kind="research",
+                    source="tradingagents.predict_market",
+                    metadata={"asset": asset, "trade_date": trade_date, "ok": bool(result.get("ok"))},
+                )
+            except Exception:
+                pass
+            return report
+        except Exception as error:
+            return f"TradingAgents market analysis failed: {error}"
 
     mirofish_context, mirofish_meta = _mirofish_context_block(asset, source_mode=source_mode)
     combined_context = str(context or "").strip()

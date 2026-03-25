@@ -12,6 +12,7 @@ from core.pentagi_bridge import collect_pentagi_status
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_secret
 from core.skill_library import collect_skill_library_status
+from core.tradingagents_bridge import collect_tradingagents_status
 from memory import runtime_store
 
 
@@ -60,6 +61,7 @@ def collect_doctor_report(limit: int = 6) -> dict:
     agents = collect_agent_library_status(limit=limit)
     dexter = collect_dexter_status()
     pentagi = collect_pentagi_status()
+    tradingagents = collect_tradingagents_status(limit=2)
     memory = _memory_store_status()
 
     checks = []
@@ -219,6 +221,22 @@ def collect_doctor_report(limit: int = 6) -> dict:
         )
     else:
         checks.append(_status_row("info", "PentAGI", "Repo not detected"))
+
+    if tradingagents.get("repo_path"):
+        checks.append(
+            _status_row(
+                "pass" if tradingagents.get("venv_ready") and tradingagents.get("import_ready") else "warn",
+                "TradingAgents",
+                (
+                    "Repo detected and sidecar runtime is ready"
+                    if tradingagents.get("venv_ready") and tradingagents.get("import_ready")
+                    else "Repo detected but sidecar runtime is not fully prepared"
+                ),
+                tradingagents.get("repo_path", ""),
+            )
+        )
+    else:
+        checks.append(_status_row("info", "TradingAgents", "Repo not detected"))
 
     counts = {"pass": 0, "warn": 0, "fail": 0, "info": 0}
     for row in checks:
