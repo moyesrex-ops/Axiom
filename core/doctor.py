@@ -6,6 +6,7 @@ from pathlib import Path
 from core.agent_library import collect_agent_library_status
 from core.autoresearch_bridge import collect_autoresearch_status
 from core.automaton_bridge import collect_automaton_status
+from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status
 from core.mirofish_bridge import collect_mirofish_status
@@ -62,6 +63,7 @@ def collect_doctor_report(limit: int = 6) -> dict:
     automaton = collect_automaton_status()
     lightpanda = collect_lightpanda_status()
     autoresearch = collect_autoresearch_status(limit=2)
+    deerflow = collect_deerflow_status(limit=2)
     skills = collect_skill_library_status(limit=limit)
     agents = collect_agent_library_status(limit=limit)
     dexter = collect_dexter_status()
@@ -193,6 +195,22 @@ def collect_doctor_report(limit: int = 6) -> dict:
         )
     else:
         checks.append(_status_row("info", "Autoresearch", "Repo not detected"))
+
+    if deerflow.get("repo_path"):
+        checks.append(
+            _status_row(
+                "pass" if deerflow.get("proxy_reachable") else "warn",
+                "DeerFlow",
+                (
+                    "Gateway reachable and super-agent harness is live"
+                    if deerflow.get("proxy_reachable")
+                    else "Repo detected but DeerFlow gateway is offline"
+                ),
+                deerflow.get("gateway_url", ""),
+            )
+        )
+    else:
+        checks.append(_status_row("info", "DeerFlow", "Repo not detected"))
 
     if skills.get("enabled"):
         checks.append(

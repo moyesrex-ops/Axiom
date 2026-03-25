@@ -7,14 +7,14 @@
 
 <p align="center">
   <b>One local runtime, one command, real tool execution.</b><br>
-  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Boot Doctor · Imported Agent Catalogs · Optional Telegram, MiroFish, Automaton, Lightpanda, Dexter, PentAGI, TradingAgents, and Autoresearch
+  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Boot Doctor · Imported Agent Catalogs · Optional Telegram, MiroFish, Automaton, Lightpanda, Dexter, PentAGI, TradingAgents, DeerFlow, and Autoresearch
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Gemini-Live%20API-purple?style=flat-square&logo=google&logoColor=white" alt="Gemini">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%2F11-black?style=flat-square" alt="Platform">
-  <img src="https://img.shields.io/badge/Memory-SQLite%20%2B%20Nexus-1f7a8c?style=flat-square" alt="Memory">
+  <img src="https://img.shields.io/badge/Memory-SQLite%20%2B%20Graph-1f7a8c?style=flat-square" alt="Memory">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
 </p>
 
@@ -31,7 +31,7 @@ Core ideas:
 - `axiom` or `Axiom.bat` should be the normal local entrypoint.
 - The live runtime, planner, executor, tools, and memory all belong to one connected system.
 - Local state lives in SQLite and long-term memory files instead of vanishing with the last prompt.
-- External systems like Telegram, MiroFish, Automaton, PersonaPlex, Lightpanda, and `autoresearch` are sidecars, not hard requirements for local boot.
+- External systems like Telegram, MiroFish, Automaton, PersonaPlex, Lightpanda, DeerFlow, and `autoresearch` are sidecars, not hard requirements for local boot.
 - Public repo files stay portable; machine-specific paths and secrets belong in ignored local config files.
 
 ---
@@ -51,7 +51,7 @@ The repo is organized around a stable core path and controlled optional expansio
 | Tier | Included | What to Expect |
 |------|----------|----------------|
 | Core runtime | Gemini Live, planner, executor, action routing, Playwright browser control, file/desktop/terminal tools, memory archive, runtime SQLite store, system context | This is the normal local boot path and the part AXIOM is built around |
-| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, imported agent catalogs, Dexter, TradingAgents, `autoresearch` | Enabled through local config or auto-detected local clones; useful when present, but not required for `axiom` to start |
+| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, imported agent catalogs, Dexter, TradingAgents, DeerFlow, `autoresearch` | Enabled through local config or auto-detected local clones; useful when present, but not required for `axiom` to start |
 | Experimental / limited path | Lightpanda browser backend, PentAGI runtime bridge | Lightpanda is wired but Playwright remains the safe browser default; PentAGI is tracked honestly as docs-only until upstream source is available again |
 
 Short version:
@@ -141,7 +141,7 @@ It now persists:
 - runtime events and failures
 - task lifecycle checkpoints
 - structured long-term memory
-- searchable Nexus knowledge
+- searchable archived knowledge
 
 That gives the runtime an actual recall loop across sessions instead of pretending memory exists because the prompt says so.
 
@@ -169,7 +169,7 @@ The live layer is built around three practical concerns:
 
 Two new operating paths matter:
 
-- `system_capabilities` now has a real `doctor` action that checks secrets, browser backend health, memory DB, Telegram, MiroFish, Automaton, Lightpanda, `autoresearch`, skill libraries, and imported agent catalogs.
+- `system_capabilities` now has a real `doctor` action that checks secrets, browser backend health, memory DB, Telegram, MiroFish, Automaton, Lightpanda, DeerFlow, `autoresearch`, skill libraries, and imported agent catalogs.
 - `agent_library` now indexes local specialist agent repos and can search, recommend, read, and delegate work under AXIOM supervision.
 - `swarm_orchestrator` can still run its classic preset roles, but it can now also route through imported specialist catalogs when you use specialist mode.
 

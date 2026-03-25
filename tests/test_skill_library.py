@@ -41,6 +41,37 @@ class SkillLibraryTests(unittest.TestCase):
             }
         }
 
+    def test_indexes_local_skills_root_without_nested_skills_folder(self):
+        repo_path = self._workspace_dir("local_skills_repo")
+        skill_dir = repo_path / "my-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: Local Skill\ndescription: Local root skill\n---\nBody\n",
+            encoding="utf-8",
+        )
+        runtime = {
+            "skill_library": {
+                "enabled": True,
+                "local_skills_path": str(repo_path),
+            }
+        }
+        source_specs = {
+            "local_skills": {
+                "name": "Local Skills",
+                "config_key": "local_skills_path",
+                "default_candidates": [],
+                "skills_subdir": ".",
+            }
+        }
+
+        with patch.object(sk, "load_runtime_config", return_value=runtime), patch.object(
+            sk, "_SOURCE_SPECS", source_specs
+        ):
+            entries = sk.index_skill_library()
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["name"], "Local Skill")
+
     def test_disabled_library_reports_sources_but_indexes_nothing(self):
         repo_path = self._make_repo()
         runtime = {

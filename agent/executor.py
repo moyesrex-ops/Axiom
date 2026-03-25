@@ -9,6 +9,8 @@ from agent.planner       import create_plan, replan, reflect_and_improve
 from agent.error_handler import analyze_error, generate_fix, ErrorDecision
 from actions.self_modifier import get_dynamic_tool
 from memory.memory_manager import save_to_nexus
+from memory.runtime_store import log_event, upsert_knowledge_item
+from core.runtime_config import load_runtime_config
 
 
 def get_base_dir() -> Path:
@@ -39,6 +41,30 @@ _RGB_COLOR_HINTS = (
     "off",
     "rainbow",
     "glowing",
+)
+_SPECIALIST_COMPLEXITY_HINTS = (
+    "build",
+    "create",
+    "make",
+    "design",
+    "generate",
+    "fix",
+    "debug",
+    "investigate",
+    "research",
+    "analyze",
+    "review",
+    "refactor",
+    "deploy",
+    "website",
+    "site",
+    "app",
+    "game",
+    "frontend",
+    "backend",
+    "dashboard",
+    "security",
+    "trading",
 )
 
 
@@ -234,6 +260,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.autoresearch_control import autoresearch_control
         return autoresearch_control(parameters=parameters, player=None, speak=speak) or "Done."
 
+    elif tool == "deerflow_control":
+        from actions.deerflow_control import deerflow_control
+        return deerflow_control(parameters=parameters, player=None, speak=speak) or "Done."
+
     elif tool == "dexter_control":
         from actions.dexter_control import dexter_control
         return dexter_control(parameters=parameters, player=None, speak=speak) or "Done."
@@ -273,7 +303,76 @@ def _extract_color_hint(text: str) -> str:
     return ""
 
 
-def _direct_tool_for_goal(goal: str) -> tuple[str, dict] | None:
+def _autonomy_config() -> dict:
+    return load_runtime_config().get("autonomy", {}) or {}
+
+
+def _goal_word_count(goal: str) -> int:
+    return len(re.findall(r"[a-z0-9]+", str(goal or "").lower()))
+
+
+def _should_prepare_specialists(goal: str) -> bool:
+    cfg = _autonomy_config()
+    if not bool(cfg.get("auto_specialists", True)):
+        return False
+
+    normalized = str(goal or "").strip().lower()
+    if not normalized:
+        return False
+
+    min_words = int(cfg.get("specialist_task_min_words", 6) or 6)
+    if any(hint in normalized for hint in _SPECIALIST_COMPLEXITY_HINTS):
+        return True
+    return _goal_word_count(normalized) >= max(min_words, 10)
+
+
+def _specialist_context(goal: str) -> str:
+    if not _should_prepare_specialists(goal):
+        return ""
+
+    cfg = _autonomy_config()
+    limit = max(1, min(int(cfg.get("specialist_limit", 2) or 2), 3))
+    sections = []
+
+    try:
+        from core.skill_library import recommend_skill_library
+
+        skills = recommend_skill_library(goal, limit=limit)
+        if skills:
+            lines = ["[RECOMMENDED SKILLS]"]
+            for row in skills[:limit]:
+                lines.append(
+                    f"- {row['id']} | {row['name']} | {(row.get('description', '') or 'no summary')[:180]}"
+                )
+            sections.append("\n".join(lines))
+    except Exception as error:
+        log_event("executor", "specialist_skill_context_failed", str(error)[:300])
+
+    try:
+        from core.agent_library import recommend_agent_library
+
+        agents = recommend_agent_library(goal, limit=limit)
+        if agents:
+            lines = ["[RECOMMENDED AGENTS]"]
+            for row in agents[:limit]:
+                lines.append(
+                    f"- {row['id']} | {row['name']} | {row['source_name']} | {row['category']} | "
+                    f"{(row.get('description', '') or 'no summary')[:180]}"
+                )
+                preview = str(row.get("content_preview", "") or "").strip()
+                if preview:
+                    lines.append(f"  Excerpt: {preview[:320]}")
+            sections.append("\n".join(lines))
+    except Exception as error:
+        log_event("executor", "specialist_agent_context_failed", str(error)[:300])
+
+    context = "\n\n".join(section for section in sections if section).strip()
+    if context:
+        log_event("executor", "specialist_context_built", goal[:240], metadata={"chars": len(context)})
+    return context
+
+
+def _direct_tool_for_goal(goal: str, specialist_context: str = "") -> tuple[str, dict] | None:
     normalized = str(goal or "").strip().lower()
     if not normalized:
         return None
@@ -328,11 +427,14 @@ def _direct_tool_for_goal(goal: str) -> tuple[str, dict] | None:
             phrase in normalized
             for phrase in ("open it", "open when done", "launch it", "show it", "playable", "browser")
         )
+        description = goal
+        if specialist_context:
+            description = f"{goal}\n\nExecution guidance:\n{specialist_context[:3000]}"
         return (
             "codex_builder",
             {
                 "action": "build",
-                "description": goal,
+                "description": description,
                 "open_when_done": open_when_done,
             },
         )
@@ -351,12 +453,19 @@ class AgentExecutor:
     ) -> str:
         print(f"\n[Executor] Goal: {goal}")
 
-        direct = _direct_tool_for_goal(goal)
+        specialist_context = _specialist_context(goal)
+        direct = _direct_tool_for_goal(goal, specialist_context=specialist_context)
         if direct:
             tool, params = direct
             print(f"[Executor] Direct route: [{tool}] {params}")
             try:
                 result = _call_tool(tool, params, speak)
+                self._remember_task_strategy(
+                    goal,
+                    [{"step": 1, "tool": tool, "parameters": params, "description": goal}],
+                    {1: result},
+                    replanned=False,
+                )
                 return self._summarize(
                     goal,
                     [{"step": 1, "tool": tool, "parameters": params, "description": goal}],
@@ -371,11 +480,11 @@ class AgentExecutor:
         step_results    = {}
         
         # 1. Draft
-        plan = create_plan(goal)
+        plan = create_plan(goal, context=specialist_context)
         
         # 2. Reflection & Critique
         if "steps" in plan and len(plan["steps"]) > 0:
-            plan = reflect_and_improve(goal, plan)
+            plan = reflect_and_improve(goal, plan, context=specialist_context)
 
         while True:
             steps = plan.get("steps", [])
@@ -476,7 +585,8 @@ class AgentExecutor:
                     break
 
             if success:
-                # 3. Continuous Learning (Nexus Brain Hook)
+                self._remember_task_strategy(goal, completed_steps, step_results, replanned=bool(replan_attempts))
+
                 if replan_attempts > 0:
                     topic = f"learned_strategy_{goal.replace(' ', '_')[:30]}"
                     learned_content = f"Goal: {goal}\nSuccessful sequence:\n" + "\n".join(
@@ -495,7 +605,54 @@ class AgentExecutor:
             if speak: speak("Adjusting my approach.")
 
             replan_attempts += 1
-            plan = replan(goal, completed_steps, failed_step, failed_error)
+            plan = replan(goal, completed_steps, failed_step, failed_error, context=specialist_context)
+
+    def _remember_task_strategy(
+        self,
+        goal: str,
+        completed_steps: list,
+        step_results: dict,
+        replanned: bool = False,
+    ) -> None:
+        cfg = _autonomy_config()
+        if not bool(cfg.get("save_task_strategies", True)):
+            return
+
+        goal_text = str(goal or "").strip()
+        if not goal_text:
+            return
+
+        lines = [f"Goal: {goal_text}", f"Replanned: {'yes' if replanned else 'no'}", "Steps:"]
+        tools = []
+        for step in completed_steps[:8]:
+            tool = str(step.get("tool", "") or "").strip()
+            desc = str(step.get("description", "") or "").strip()
+            tools.append(tool)
+            lines.append(f"- {tool}: {desc[:220]}")
+
+        useful = []
+        for step in completed_steps[:8]:
+            step_num = step.get("step", "")
+            raw = str(step_results.get(step_num, "") or "").strip()
+            compact = self._compact_result(raw)
+            if compact:
+                useful.append(f"- {step.get('tool', '')}: {compact[:600]}")
+        if useful:
+            lines.append("Key outputs:")
+            lines.extend(useful[:5])
+
+        upsert_knowledge_item(
+            kind="task_strategy",
+            title=f"Task Strategy: {goal_text[:80]}",
+            content="\n".join(lines)[:12000],
+            source="agent.executor",
+            metadata={
+                "goal": goal_text[:300],
+                "tools": [tool for tool in tools if tool][:8],
+                "replanned": bool(replanned),
+            },
+        )
+        log_event("learning", "task_strategy_saved", goal_text[:300], metadata={"replanned": bool(replanned)})
 
     def _summarize(
         self,

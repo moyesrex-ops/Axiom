@@ -43,11 +43,19 @@
     "lightpanda_repo_path": "",
     "lightpanda_wsl_binary_path": ""
   },
+  "deerflow": {
+    "repo_path": "",
+    "url": "http://127.0.0.1:2026",
+    "gateway_url": "",
+    "langgraph_url": ""
+  },
   "skill_library": {
     "enabled": true,
     "everything_claude_code_path": "",
     "superpowers_path": "",
     "antigravity_skills_path": "",
+    "deerflow_path": "",
+    "local_skills_path": "",
     "search_limit": 8
   },
   "agent_library": {
@@ -77,6 +85,13 @@
   },
   "research_repos": {
     "autoresearch_path": ""
+  },
+  "autonomy": {
+    "auto_specialists": true,
+    "delegate_specialists": true,
+    "specialist_task_min_words": 6,
+    "specialist_limit": 2,
+    "save_task_strategies": true
   },
   "system_context": {
     "enable_public_ip_lookup": false

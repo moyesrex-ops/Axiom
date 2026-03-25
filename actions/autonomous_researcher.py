@@ -114,7 +114,7 @@ Raw Transcripts Dump:
     except Exception as e:
         return f"Synthesis Failed: {e}"
 
-def _save_to_nexus_brain(thesis_content: str, title: str):
+def _save_to_memory_archive(thesis_content: str, title: str):
     from memory.memory_manager import load_memory, update_memory
     
     new_knowledge = {
@@ -138,7 +138,7 @@ def _save_to_nexus_brain(thesis_content: str, title: str):
         with open(mem_file, "w", encoding="utf-8") as f:
             json.dump(current_mem, f, indent=4)
             
-        print("[Research] 🧠 Master strategy physically written to Nexus brain (long_term.json).")
+        print("[Research] Master strategy written to memory archive (long_term.json).")
     except Exception as e:
         print(f"[Research] ⚠️ Failed to save to memory archive: {e}")
 
@@ -194,7 +194,7 @@ def autonomous_research(
     thesis = _synthesize_strategy(master_text, query, player)
     
     # 4. Save to memory archive
-    _save_to_nexus_brain(thesis, f"Autonomous Channel Extraction: {url}")
+    _save_to_memory_archive(thesis, f"Autonomous Channel Extraction: {url}")
     
     if speak:
         speak("Evolution complete. I have ripped the entire channel, developed the master strategy, and saved it to my memory archive. You can ask me about it anytime.")

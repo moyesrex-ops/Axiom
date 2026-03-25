@@ -121,12 +121,12 @@ def update_memory(memory_update: dict) -> dict:
     return memory
 
 
-# --- NEXUS BRAIN FUNCTIONS ---
+# --- MEMORY ARCHIVE FUNCTIONS ---
 
 def save_to_nexus(
     topic: str,
     content: str,
-    kind: str = "nexus",
+    kind: str = "archive",
     source: str = "memory.long_term",
     metadata: dict | None = None,
 ) -> bool:
@@ -136,23 +136,23 @@ def save_to_nexus(
     
     memory["nexus_knowledge"][topic] = content
     save_memory(memory)
-    _safe_print(f"[Nexus] 🧠 Saved new knowledge: {topic}")
+    _safe_print(f"[Archive] Saved knowledge: {topic}")
     try:
         from memory.runtime_store import log_event
 
         upsert_knowledge_item(
-            kind=str(kind or "nexus"),
+            kind=str(kind or "archive"),
             title=str(topic or "untitled"),
             content=str(content or "")[:12000],
             source=str(source or "memory.long_term"),
             metadata=metadata or {},
         )
         log_event(
-            "nexus",
+            "archive",
             topic,
             str(content)[:2000],
             metadata={
-                "kind": str(kind or "nexus"),
+                "kind": str(kind or "archive"),
                 "source": str(source or "memory.long_term"),
             },
         )
@@ -224,7 +224,7 @@ def search_memory_archive(query: str, limit: int = 5) -> dict:
                 "content": content[:1200],
             }
         )
-        if kind == "nexus" and len(nexus_results) < int(limit):
+        if kind in {"nexus", "archive"} and len(nexus_results) < int(limit):
             nexus_results.append(
                 {
                     "topic": title,
@@ -314,9 +314,12 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
         recent_nexus = []
         seen_topics = set()
-        for row in recent_events(limit=10, kind="nexus"):
+        for row in recent_events(limit=20):
             topic = str(row.get("topic", "")).strip()
+            kind = str(row.get("kind", "")).strip().lower()
             if not topic or topic in seen_topics:
+                continue
+            if kind not in {"archive", "nexus"}:
                 continue
             seen_topics.add(topic)
             recent_nexus.append(f"- {topic}: {str(row.get('content', ''))[:180]}")

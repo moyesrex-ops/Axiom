@@ -1,5 +1,6 @@
 from core.agent_library import collect_agent_library_status
 from core.automaton_bridge import collect_automaton_status, start_automaton_runtime
+from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status, start_lightpanda_backend
 from core.mirofish_bridge import collect_mirofish_status, start_mirofish_backend
@@ -44,15 +45,27 @@ def boot_integrations(log_func=None) -> list[str]:
 
     automaton_status = collect_automaton_status()
     if integrations.get("automaton_auto_start", False):
-        try:
-            result = start_automaton_runtime(timeout=8.0)
-        except Exception as exc:
-            result = {"started": False, "message": f"Automaton boot raised an exception: {exc}"}
-        msg = str(result.get("message", "Automaton auto-start attempted.")).strip()
-        if result.get("started"):
-            line = f"[INTEGRATION] Automaton: {msg}"
+        runtime_ready = bool(
+            automaton_status.get("built_entry")
+            and automaton_status.get("config_path")
+            and automaton_status.get("api_key_present", False)
+        )
+        if runtime_ready:
+            try:
+                result = start_automaton_runtime(timeout=8.0)
+            except Exception as exc:
+                result = {"started": False, "message": f"Automaton boot raised an exception: {exc}"}
+            msg = str(result.get("message", "Automaton auto-start attempted.")).strip()
+            if result.get("started"):
+                line = f"[INTEGRATION] Automaton: {msg}"
+            else:
+                line = f"[INTEGRATION] Automaton blocked: {msg}"
         else:
-            line = f"[INTEGRATION] Automaton blocked: {msg}"
+            result = {
+                "started": False,
+                "message": "Optional runtime skipped because Automaton is not fully configured.",
+            }
+            line = "[INTEGRATION] Automaton detected but startup is skipped until config, memory, and API access are ready."
         messages.append(line)
         _emit(log_func, line)
         log_event("integration", "automaton_boot", line[:2000], metadata=result)
@@ -112,6 +125,17 @@ def boot_integrations(log_func=None) -> list[str]:
         messages.append(line)
         _emit(log_func, line)
         log_event("integration", "tradingagents_detected", line[:2000], metadata=tradingagents_status)
+
+    deerflow_status = collect_deerflow_status(limit=2)
+    if deerflow_status.get("repo_path"):
+        line = (
+            "[INTEGRATION] DeerFlow detected. Gateway is live and queryable."
+            if deerflow_status.get("proxy_reachable")
+            else "[INTEGRATION] DeerFlow detected. Optional harness is installed but not running."
+        )
+        messages.append(line)
+        _emit(log_func, line)
+        log_event("integration", "deerflow_detected", line[:2000], metadata=deerflow_status)
 
     agent_library = collect_agent_library_status(limit=4)
     if agent_library.get("enabled") and agent_library.get("sources_count", 0):

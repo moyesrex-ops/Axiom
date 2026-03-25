@@ -8,7 +8,9 @@ class ExecutorDirectRouteTests(unittest.TestCase):
     def test_direct_route_handles_rgb_goal_without_planner(self):
         executor = AgentExecutor()
 
-        with patch("agent.executor.create_plan") as create_plan_mock, patch(
+        with patch("agent.executor._specialist_context", return_value=""), patch(
+            "agent.executor.create_plan"
+        ) as create_plan_mock, patch(
             "agent.executor._call_tool",
             return_value="Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green.",
         ) as call_tool_mock:
@@ -22,7 +24,9 @@ class ExecutorDirectRouteTests(unittest.TestCase):
     def test_direct_route_uses_codex_builder_for_playable_game_requests(self):
         executor = AgentExecutor()
 
-        with patch("agent.executor.create_plan") as create_plan_mock, patch(
+        with patch("agent.executor._specialist_context", return_value=""), patch(
+            "agent.executor.create_plan"
+        ) as create_plan_mock, patch(
             "agent.executor._call_tool",
             return_value="Project directory: C:\\Users\\moyes\\Desktop\\AXIOMProjects\\snake\nOpen target: C:\\Users\\moyes\\Desktop\\AXIOMProjects\\snake\\index.html",
         ) as call_tool_mock:
@@ -31,6 +35,33 @@ class ExecutorDirectRouteTests(unittest.TestCase):
         create_plan_mock.assert_not_called()
         self.assertEqual(call_tool_mock.call_args.args[0], "codex_builder")
         self.assertIn("Open target:", result)
+
+    def test_planner_receives_specialist_context_for_complex_tasks(self):
+        executor = AgentExecutor()
+        fake_plan = {
+            "goal": "build a frontend dashboard",
+            "steps": [
+                {
+                    "step": 1,
+                    "tool": "web_search",
+                    "description": "research",
+                    "parameters": {"query": "frontend dashboard"},
+                    "critical": True,
+                }
+            ],
+        }
+
+        with patch("agent.executor._direct_tool_for_goal", return_value=None), patch(
+            "agent.executor._specialist_context", return_value="[SPECIALIST PREFLIGHT]\nUse frontend reviewer."
+        ), patch("agent.executor.create_plan", return_value=fake_plan) as create_plan_mock, patch(
+            "agent.executor.reflect_and_improve", return_value=fake_plan
+        ), patch("agent.executor._call_tool", return_value="done"):
+            executor.execute("build a frontend dashboard")
+
+        self.assertEqual(
+            create_plan_mock.call_args.kwargs["context"],
+            "[SPECIALIST PREFLIGHT]\nUse frontend reviewer.",
+        )
 
 
 if __name__ == "__main__":

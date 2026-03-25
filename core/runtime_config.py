@@ -63,11 +63,19 @@ DEFAULT_RUNTIME_CONFIG = {
         "lightpanda_repo_path": "",
         "lightpanda_wsl_binary_path": "",
     },
+    "deerflow": {
+        "repo_path": "",
+        "url": "http://127.0.0.1:2026",
+        "gateway_url": "",
+        "langgraph_url": "",
+    },
     "skill_library": {
         "enabled": True,
         "everything_claude_code_path": "",
         "superpowers_path": "",
         "antigravity_skills_path": "",
+        "deerflow_path": "",
+        "local_skills_path": "",
         "search_limit": 8,
     },
     "agent_library": {
@@ -92,6 +100,13 @@ DEFAULT_RUNTIME_CONFIG = {
     },
     "research_repos": {
         "autoresearch_path": "",
+    },
+    "autonomy": {
+        "auto_specialists": True,
+        "delegate_specialists": True,
+        "specialist_task_min_words": 6,
+        "specialist_limit": 2,
+        "save_task_strategies": True,
     },
     "system_context": {
         "enable_public_ip_lookup": False,

@@ -26,6 +26,22 @@ _SOURCE_SPECS = {
             Path.home() / "Axiom_research" / "external" / "antigravity-awesome-skills",
         ],
     },
+    "deerflow": {
+        "name": "DeerFlow Skills",
+        "config_key": "deerflow_path",
+        "default_candidates": [
+            Path.home() / "deer-flow_upstream",
+            Path.home() / "Axiom_research" / "external" / "deer-flow",
+        ],
+    },
+    "local_skills": {
+        "name": "Local Skills",
+        "config_key": "local_skills_path",
+        "default_candidates": [
+            Path.home() / "skills",
+        ],
+        "skills_subdir": ".",
+    },
 }
 
 _SKIP_PARTS = {"assets", "docs", "examples", "templates"}
@@ -176,7 +192,8 @@ def resolve_skill_library_sources() -> list[dict]:
         if repo_path is None:
             continue
 
-        skills_dir = repo_path / "skills"
+        skills_subdir = str(spec.get("skills_subdir", "skills") or "skills").strip()
+        skills_dir = repo_path if skills_subdir in ("", ".") else repo_path / skills_subdir
         if not skills_dir.exists():
             continue
 

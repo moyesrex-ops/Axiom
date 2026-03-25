@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from core.agent_library import collect_agent_library_status
 from core.autoresearch_bridge import collect_autoresearch_status
 from core.automaton_bridge import collect_automaton_status
+from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status
 from core.mirofish_bridge import collect_mirofish_status
@@ -138,11 +139,13 @@ def collect_capabilities() -> dict:
     dexter = collect_dexter_status()
     pentagi = collect_pentagi_status()
     tradingagents = collect_tradingagents_status(limit=3)
+    deerflow = collect_deerflow_status(limit=3)
     personaplex_cfg = runtime.get("personaplex", {})
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
     research_cfg = runtime.get("research", {}) or {}
     vane_url = str(research_cfg.get("vane_url", "") or "").strip()
+    autonomy_cfg = runtime.get("autonomy", {}) or {}
 
     return {
         "voice_backend": runtime.get("voice_backend", "gemini_live"),
@@ -193,6 +196,8 @@ def collect_capabilities() -> dict:
         "agent_library_enabled": bool(agent_library.get("enabled", False)),
         "agent_library_sources_count": int(agent_library.get("sources_count", 0) or 0),
         "agent_library_total_agents": int(agent_library.get("total_agents", 0) or 0),
+        "auto_specialists_enabled": bool(autonomy_cfg.get("auto_specialists", True)),
+        "delegate_specialists_enabled": bool(autonomy_cfg.get("delegate_specialists", True)),
         "codex_cli_path": _command_available("codex"),
         "codex_cli_available": bool(_command_available("codex")),
         "dexter_repo_path": str(dexter.get("repo_path", "") or ""),
@@ -218,6 +223,13 @@ def collect_capabilities() -> dict:
         "autoresearch_data_shards": int(autoresearch.get("data_shards", 0) or 0),
         "autoresearch_tokenizer_ready": bool(autoresearch.get("tokenizer_ready", False)),
         "autoresearch_results_count": int(autoresearch.get("results_count", 0) or 0),
+        "deerflow_repo_path": str(deerflow.get("repo_path", "") or ""),
+        "deerflow_gateway_url": str(deerflow.get("gateway_url", "") or ""),
+        "deerflow_langgraph_url": str(deerflow.get("langgraph_url", "") or ""),
+        "deerflow_proxy_reachable": bool(deerflow.get("proxy_reachable", False)),
+        "deerflow_local_skill_count": int(deerflow.get("local_skill_count", 0) or 0),
+        "deerflow_models_count": int(deerflow.get("models_count", 0) or 0),
+        "deerflow_agents_count": int(deerflow.get("agents_count", 0) or 0),
         "research_backend": str(research_cfg.get("backend", "axiom") or "axiom"),
         "vane_url": vane_url,
         "vane_reachable": bool(vane_url) and _is_tcp_reachable(vane_url),
@@ -276,6 +288,11 @@ def format_capability_status() -> str:
             else "Agent library: no external agent sources detected"
         ),
         (
+            f"Autonomous specialists: enabled | preflight={'yes' if caps['delegate_specialists_enabled'] else 'no'}"
+            if caps["auto_specialists_enabled"]
+            else "Autonomous specialists: disabled"
+        ),
+        (
             f"Codex CLI builder: ready at {caps['codex_cli_path']}"
             if caps["codex_cli_available"]
             else "Codex CLI builder: not installed"
@@ -311,6 +328,12 @@ def format_capability_status() -> str:
             f"tokenizer={'ready' if caps['autoresearch_tokenizer_ready'] else 'missing'} | results={caps['autoresearch_results_count']}"
             if caps["autoresearch_repo_path"]
             else "Autoresearch: repo not found"
+        ),
+        (
+            f"DeerFlow: gateway {'up' if caps['deerflow_proxy_reachable'] else 'down'} at {caps['deerflow_gateway_url']} | "
+            f"local_skills={caps['deerflow_local_skill_count']} remote_models={caps['deerflow_models_count']} remote_agents={caps['deerflow_agents_count']}"
+            if caps["deerflow_repo_path"]
+            else "DeerFlow: repo not found"
         ),
         (
             f"Deep research backend: Vane at {caps['vane_url']}"
@@ -381,6 +404,11 @@ def format_capability_report() -> str:
             if caps["agent_library_enabled"] and caps["agent_library_sources_count"]
             else "Agent library: disabled or no sources detected"
         ),
+        (
+            f"Autonomous specialists: enabled | specialist preflight={'yes' if caps['delegate_specialists_enabled'] else 'no'}"
+            if caps["auto_specialists_enabled"]
+            else "Autonomous specialists: disabled"
+        ),
         f"Codex CLI: {caps['codex_cli_path'] or 'not installed'}",
         f"Dexter repo path: {caps['dexter_repo_path'] or 'not found'}",
         f"Dexter Bun ready: {'yes' if caps['dexter_bun_available'] else 'no'}",
@@ -405,6 +433,12 @@ def format_capability_report() -> str:
         f"Autoresearch data shards: {caps['autoresearch_data_shards']}",
         f"Autoresearch tokenizer ready: {'yes' if caps['autoresearch_tokenizer_ready'] else 'no'}",
         f"Autoresearch logged results: {caps['autoresearch_results_count']}",
+        f"DeerFlow repo path: {caps['deerflow_repo_path'] or 'not found'}",
+        f"DeerFlow gateway URL: {caps['deerflow_gateway_url'] or 'not configured'}",
+        f"DeerFlow proxy reachable: {'yes' if caps['deerflow_proxy_reachable'] else 'no'}",
+        f"DeerFlow local skills: {caps['deerflow_local_skill_count']}",
+        f"DeerFlow remote models: {caps['deerflow_models_count']}",
+        f"DeerFlow remote agents: {caps['deerflow_agents_count']}",
         f"Research backend: {caps['research_backend']}",
         (
             f"Vane endpoint: reachable at {caps['vane_url']}"

@@ -28,6 +28,8 @@ class DoctorTests(unittest.TestCase):
         ), patch.object(
             doctor, "collect_autoresearch_status", return_value={"repo_path": "", "uv_available": False, "tokenizer_ready": False, "data_shards": 0}
         ), patch.object(
+            doctor, "collect_deerflow_status", return_value={"repo_path": "deerflow", "proxy_reachable": False, "gateway_url": "http://127.0.0.1:2026"}
+        ), patch.object(
             doctor, "collect_skill_library_status", return_value={"enabled": True, "total_skills": 10, "sources_count": 2}
         ), patch.object(
             doctor, "collect_agent_library_status", return_value={"enabled": True, "total_agents": 200, "sources_count": 4}
@@ -44,6 +46,7 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Dexter: Repo detected and Bun available", report)
         self.assertIn("PentAGI: Repo detected but upstream source is currently unavailable", report)
         self.assertIn("Automaton: Repo found but runtime configuration is incomplete", report)
+        self.assertIn("DeerFlow: Repo detected but DeerFlow gateway is offline", report)
         self.assertIn("Codex Builder: Codex CLI available", report)
 
 

@@ -21,6 +21,8 @@ ABSOLUTE RULES:
 - NEVER use generated_code.
 - Use codex_builder for runnable multi-file projects, playable games, websites, apps, or when the user needs a real artifact they can open.
 - Use code_helper for single-file scripts, focused edits, explanations, and small code tasks.
+- For complex build, research, debugging, or review tasks, strongly consider skill_library and agent_library early so AXIOM can use specialist workflows and delegated analysis automatically.
+- Use deerflow_control when DeerFlow is live and the task benefits from a deeper super-agent harness with planning/subagents.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
 - Use system_capabilities if the task depends on installed integrations or current environment status.
@@ -141,7 +143,7 @@ codex_builder
   open_when_done: boolean (optional)
 
 system_capabilities
-  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 memory_archive
@@ -212,6 +214,15 @@ autoresearch_control
   limit: integer (optional)
   content_limit: integer (optional)
   save: boolean (optional)
+
+deerflow_control
+  action: "status" | "configure" | "query" | "launch_instructions" (required)
+  prompt: string (for query)
+  query: string (for query)
+  goal: string (for query)
+  mode: "flash" | "standard" | "pro" | "ultra" (optional)
+  thread_id: string (optional)
+  timeout: integer (optional)
 
 predict_market
   asset: string (required)
@@ -344,7 +355,7 @@ def create_plan(goal: str, context: str = "") -> dict:
         return _fallback_plan(goal)
 
 
-def reflect_and_improve(goal: str, plan: dict) -> dict:
+def reflect_and_improve(goal: str, plan: dict, context: str = "") -> dict:
     import google.generativeai as genai
 
     genai.configure(api_key=_get_api_key())
@@ -356,6 +367,9 @@ def reflect_and_improve(goal: str, plan: dict) -> dict:
     print(f"[Planner] 🧠 Reflecting on draft plan for: {goal[:50]}...")
     
     prompt = f"""Goal: {goal}
+    
+Extra Context:
+{context or "(none)"}
     
 Draft Plan:
 {json.dumps(plan, indent=2)}
@@ -407,7 +421,7 @@ def _fallback_plan(goal: str) -> dict:
     }
 
 
-def replan(goal: str, completed_steps: list, failed_step: dict, error: str) -> dict:
+def replan(goal: str, completed_steps: list, failed_step: dict, error: str, context: str = "") -> dict:
     import google.generativeai as genai
 
     genai.configure(api_key=_get_api_key())
@@ -421,6 +435,9 @@ def replan(goal: str, completed_steps: list, failed_step: dict, error: str) -> d
     )
 
     prompt = f"""Goal: {goal}
+
+Extra Context:
+{context or "(none)"}
 
 Already completed:
 {completed_summary if completed_summary else '  (none)'}

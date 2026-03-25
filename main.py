@@ -48,6 +48,7 @@ from actions.mirofish_control      import mirofish_control
 from actions.tradingagents_control import tradingagents_control
 from actions.automaton_control     import automaton_control
 from actions.autoresearch_control  import autoresearch_control
+from actions.deerflow_control      import deerflow_control
 from actions.lightpanda_control    import lightpanda_control
 from actions.self_modifier         import self_modifier, get_dynamic_tool
 from actions.skill_library         import skill_library
@@ -748,7 +749,7 @@ TOOL_DECLARATIONS = [
     "name": "skill_library",
     "description": (
         "Searches and reads integrated external skill libraries from Everything Claude Code, "
-        "Superpowers, and Antigravity. Use this for coding workflows, debugging patterns, "
+        "Superpowers, Antigravity, DeerFlow, and local skills. Use this for coding workflows, debugging patterns, "
         "testing playbooks, review checklists, or implementation strategy references."
     ),
     "parameters": {
@@ -804,7 +805,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | skills | agents | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -895,6 +896,32 @@ TOOL_DECLARATIONS = [
             "content_limit": {"type": "INTEGER", "description": "Optional text limit for program"},
             "save": {"type": "BOOLEAN", "description": "Whether to save results to memory"},
             "timeout": {"type": "INTEGER", "description": "Optional prepare/train timeout in seconds"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "deerflow_control",
+    "description": (
+        "Inspects and optionally queries the local DeerFlow super-agent harness. Use this to check "
+        "whether DeerFlow is live, configure repo or URLs, run a deep delegated query through its API, "
+        "or get launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | query | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional DeerFlow repo path"},
+            "url": {"type": "STRING", "description": "Optional DeerFlow base URL, usually http://127.0.0.1:2026"},
+            "gateway_url": {"type": "STRING", "description": "Optional DeerFlow gateway URL"},
+            "langgraph_url": {"type": "STRING", "description": "Optional DeerFlow LangGraph URL"},
+            "prompt": {"type": "STRING", "description": "Prompt for DeerFlow query"},
+            "query": {"type": "STRING", "description": "Alternate prompt field for DeerFlow query"},
+            "goal": {"type": "STRING", "description": "Alternate prompt field for DeerFlow query"},
+            "mode": {"type": "STRING", "description": "flash | standard | pro | ultra"},
+            "thread_id": {"type": "STRING", "description": "Optional DeerFlow thread id to continue"},
+            "timeout": {"type": "INTEGER", "description": "Optional query timeout in seconds"},
+            "limit": {"type": "INTEGER", "description": "Optional status row limit"}
         },
         "required": ["action"]
     }
@@ -1448,6 +1475,16 @@ class AxiomLive:
             elif name == "system_capabilities":
                 r = await loop.run_in_executor(
                     None, lambda: system_capabilities(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "deerflow_control":
+                r = await loop.run_in_executor(
+                    None, lambda: deerflow_control(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak

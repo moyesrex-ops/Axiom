@@ -65,6 +65,7 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             from core.agent_library import format_agent_library_status
             from core.autoresearch_bridge import format_autoresearch_status
             from core.automaton_bridge import format_automaton_status
+            from core.deerflow_bridge import format_deerflow_status
             from core.dexter_bridge import format_dexter_status
             from core.lightpanda_bridge import format_lightpanda_status
             from core.mirofish_bridge import format_mirofish_status
@@ -79,6 +80,7 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
                 f"{format_tradingagents_status(limit=limit)}\n\n"
                 f"{format_lightpanda_status()}\n\n"
                 f"{format_autoresearch_status(limit=limit)}\n\n"
+                f"{format_deerflow_status(limit=limit)}\n\n"
                 f"{format_agent_library_status(limit=limit)}"
             )
             log_event("capabilities", "integrations_status", report[:2000])
@@ -125,6 +127,16 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             return report
         except Exception as error:
             return f"Autoresearch status failed: {error}"
+
+    if action == "deerflow":
+        try:
+            from core.deerflow_bridge import format_deerflow_status
+
+            report = format_deerflow_status(limit=limit)
+            log_event("capabilities", "deerflow_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"DeerFlow status failed: {error}"
 
     if action == "skills":
         try:
@@ -224,5 +236,5 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
 
     return (
         "Unknown action. Use summary, status, doctor, context, hardware, integrations, "
-        "mirofish, automaton, dexter, pentagi, tradingagents, lightpanda, autoresearch, skills, agents, failures, events, or tasks."
+        "mirofish, automaton, dexter, pentagi, tradingagents, lightpanda, autoresearch, deerflow, skills, agents, failures, events, or tasks."
     )
