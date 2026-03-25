@@ -192,6 +192,10 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.skill_library import skill_library
         return skill_library(parameters=parameters, player=None, speak=speak) or "Done."
 
+    elif tool == "agent_library":
+        from actions.agent_library import agent_library
+        return agent_library(parameters=parameters, player=None, speak=speak) or "Done."
+
     elif tool == "lightpanda_control":
         from actions.lightpanda_control import lightpanda_control
         return lightpanda_control(parameters=parameters, player=None, speak=speak) or "Done."
@@ -199,6 +203,14 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
     elif tool == "autoresearch_control":
         from actions.autoresearch_control import autoresearch_control
         return autoresearch_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "dexter_control":
+        from actions.dexter_control import dexter_control
+        return dexter_control(parameters=parameters, player=None, speak=speak) or "Done."
+
+    elif tool == "pentagi_control":
+        from actions.pentagi_control import pentagi_control
+        return pentagi_control(parameters=parameters, player=None, speak=speak) or "Done."
 
     elif tool == "persona_control":
         from actions.persona_control import persona_control

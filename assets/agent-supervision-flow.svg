@@ -1,0 +1,96 @@
+<svg width="1200" height="560" viewBox="0 0 1200 560" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="560" rx="24" fill="#08111E"/>
+  <rect x="40" y="40" width="1120" height="480" rx="24" fill="#0E1B2E" stroke="#2E4D74" stroke-width="2"/>
+
+  <text x="72" y="92" fill="#E6F2FF" font-family="Segoe UI, Arial, sans-serif" font-size="32" font-weight="700">
+    AXIOM Boot Doctor + Agent Supervision
+  </text>
+  <text x="72" y="124" fill="#94B7D9" font-family="Segoe UI, Arial, sans-serif" font-size="18">
+    One startup path, one memory spine, one supervisor routing work into specialist catalogs and sidecars.
+  </text>
+
+  <rect x="72" y="170" width="260" height="132" rx="18" fill="#132640" stroke="#4C7AAF" stroke-width="2"/>
+  <text x="98" y="212" fill="#F2FAFF" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">
+    Boot Doctor
+  </text>
+  <text x="98" y="244" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    Secrets, browser, memory DB,
+  </text>
+  <text x="98" y="270" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    Telegram, MiroFish, Automaton,
+  </text>
+  <text x="98" y="296" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    Lightpanda, autoresearch,
+  </text>
+  <text x="98" y="322" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    skill + agent catalogs
+  </text>
+
+  <rect x="380" y="140" width="438" height="190" rx="22" fill="#162E4E" stroke="#72A5E6" stroke-width="2.5"/>
+  <text x="410" y="190" fill="#FFFFFF" font-family="Segoe UI, Arial, sans-serif" font-size="30" font-weight="700">
+    AXIOM Supervisor Core
+  </text>
+  <text x="410" y="226" fill="#C5DCF4" font-family="Segoe UI, Arial, sans-serif" font-size="18">
+    Gemini Live runtime + planner/executor + function routing
+  </text>
+  <text x="410" y="258" fill="#C5DCF4" font-family="Segoe UI, Arial, sans-serif" font-size="18">
+    Memory / SQLite state + action dispatch + recovery logs
+  </text>
+  <text x="410" y="290" fill="#C5DCF4" font-family="Segoe UI, Arial, sans-serif" font-size="18">
+    Delegates to imported role cards, then synthesizes the answer
+  </text>
+
+  <rect x="860" y="110" width="250" height="162" rx="18" fill="#132640" stroke="#4C7AAF" stroke-width="2"/>
+  <text x="886" y="152" fill="#F2FAFF" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">
+    Agent Library
+  </text>
+  <text x="886" y="186" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    326 indexed specialists
+  </text>
+  <text x="886" y="214" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    Frontend, backend, research,
+  </text>
+  <text x="886" y="240" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    infrastructure, data, studio,
+  </text>
+  <text x="886" y="266" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    security, strategy, DX
+  </text>
+
+  <rect x="860" y="302" width="250" height="166" rx="18" fill="#132640" stroke="#4C7AAF" stroke-width="2"/>
+  <text x="886" y="344" fill="#F2FAFF" font-family="Segoe UI, Arial, sans-serif" font-size="26" font-weight="700">
+    Sidecar Repos
+  </text>
+  <text x="886" y="378" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    Dexter: finance researcher
+  </text>
+  <text x="886" y="406" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    PentAGI: tracked honestly as
+  </text>
+  <text x="886" y="432" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    docs-only until upstream source
+  </text>
+  <text x="886" y="458" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="17">
+    returns from license audit
+  </text>
+
+  <rect x="180" y="378" width="522" height="104" rx="18" fill="#102236" stroke="#37628F" stroke-width="2"/>
+  <text x="212" y="420" fill="#F2FAFF" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700">
+    Outcome
+  </text>
+  <text x="212" y="452" fill="#A8C6E5" font-family="Segoe UI, Arial, sans-serif" font-size="18">
+    `axiom` boots, runs health checks, indexes specialist agents, and can supervise live delegated work.
+  </text>
+
+  <path d="M332 236H380" stroke="#79AEEB" stroke-width="4" stroke-linecap="round"/>
+  <path d="M364 220L388 236L364 252" stroke="#79AEEB" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M818 196H860" stroke="#79AEEB" stroke-width="4" stroke-linecap="round"/>
+  <path d="M844 180L868 196L844 212" stroke="#79AEEB" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M818 384H860" stroke="#79AEEB" stroke-width="4" stroke-linecap="round"/>
+  <path d="M844 368L868 384L844 400" stroke="#79AEEB" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <path d="M598 330V378" stroke="#79AEEB" stroke-width="4" stroke-linecap="round"/>
+  <path d="M582 362L598 386L614 362" stroke="#79AEEB" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

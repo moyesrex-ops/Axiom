@@ -2,6 +2,10 @@ import json
 import sys
 from pathlib import Path
 
+from core.agent_library import delegate_agent_library, format_agent_delegate_report
+from core.runtime_config import load_runtime_config
+from core.secret_config import get_secret
+
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -10,7 +14,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 ROLE_PRESETS = {
     "research": [
@@ -41,8 +44,7 @@ ROLE_PRESETS = {
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return get_secret("gemini_api_key", ["GEMINI_API_KEY"])
 
 
 def _run_role(model, role_name: str, instruction: str, goal: str, context: str) -> str:
@@ -65,9 +67,33 @@ def swarm_orchestrator(parameters: dict = None, player=None, speak=None) -> str:
     goal = str(params.get("goal", "")).strip()
     mode = str(params.get("mode", "research")).strip().lower()
     context = str(params.get("context", "")).strip()
+    query = str(params.get("query", "")).strip()
+    agents = params.get("agents")
+    limit = int(params.get("limit", 4) or 4)
 
     if not goal:
         return "Please provide a goal for the swarm."
+
+    if mode in {"specialist", "catalog", "supervised"} or query or agents:
+        result = delegate_agent_library(
+            task=goal,
+            query=query or goal,
+            agents=agents,
+            limit=limit,
+            source_id=str(params.get("source", "") or "").strip().lower(),
+            model_name=str(params.get("model", "") or "").strip(),
+            context=context,
+        )
+        report = format_agent_delegate_report(result)
+        try:
+            from memory.memory_manager import save_to_nexus
+            from memory.runtime_store import log_event
+
+            save_to_nexus(f"Swarm Specialists: {goal[:60]}", report[:2000])
+            log_event("swarm", "specialist", report[:2000], {"goal": goal[:200]})
+        except Exception:
+            pass
+        return report
 
     roles = ROLE_PRESETS.get(mode, ROLE_PRESETS["research"])
 
@@ -77,7 +103,10 @@ def swarm_orchestrator(parameters: dict = None, player=None, speak=None) -> str:
     import google.generativeai as genai
 
     genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-2.5-pro")
+    runtime = load_runtime_config()
+    model = genai.GenerativeModel(
+        str((runtime.get("text_models", {}) or {}).get("reasoning", "gemini-2.5-pro") or "gemini-2.5-pro")
+    )
 
     reports = []
     for role_name, instruction in roles:

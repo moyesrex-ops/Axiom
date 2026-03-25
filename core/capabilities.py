@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
+from core.agent_library import collect_agent_library_status
 from core.autoresearch_bridge import collect_autoresearch_status
 from core.automaton_bridge import collect_automaton_status
+from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status
 from core.mirofish_bridge import collect_mirofish_status
+from core.pentagi_bridge import collect_pentagi_status
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_secret
 from core.skill_library import collect_skill_library_status
@@ -124,7 +127,10 @@ def collect_capabilities() -> dict:
     automaton = collect_automaton_status()
     lightpanda = collect_lightpanda_status()
     skill_library = collect_skill_library_status(limit=4)
+    agent_library = collect_agent_library_status(limit=4)
     autoresearch = collect_autoresearch_status(limit=3)
+    dexter = collect_dexter_status()
+    pentagi = collect_pentagi_status()
     personaplex_cfg = runtime.get("personaplex", {})
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
@@ -168,6 +174,15 @@ def collect_capabilities() -> dict:
         "skill_library_enabled": bool(skill_library.get("enabled", False)),
         "skill_library_sources_count": int(skill_library.get("sources_count", 0) or 0),
         "skill_library_total_skills": int(skill_library.get("total_skills", 0) or 0),
+        "agent_library_enabled": bool(agent_library.get("enabled", False)),
+        "agent_library_sources_count": int(agent_library.get("sources_count", 0) or 0),
+        "agent_library_total_agents": int(agent_library.get("total_agents", 0) or 0),
+        "dexter_repo_path": str(dexter.get("repo_path", "") or ""),
+        "dexter_bun_available": bool(dexter.get("bun_available", False)),
+        "dexter_tool_count": int(dexter.get("tool_count", 0) or 0),
+        "pentagi_repo_path": str(pentagi.get("repo_path", "") or ""),
+        "pentagi_source_available": bool(pentagi.get("source_available", False)),
+        "pentagi_audit_notice": bool(pentagi.get("audit_notice_present", False)),
         "lightpanda_repo_path": str(lightpanda.get("repo_path", "") or ""),
         "lightpanda_endpoint": str(lightpanda.get("endpoint", "") or ""),
         "lightpanda_reachable": bool(lightpanda.get("reachable", False)),
@@ -229,6 +244,23 @@ def format_capability_status() -> str:
             f"Skill library: {caps['skill_library_total_skills']} indexed skills across {caps['skill_library_sources_count']} sources"
             if caps["skill_library_enabled"] and caps["skill_library_sources_count"]
             else "Skill library: no external skill sources detected"
+        ),
+        (
+            f"Agent library: {caps['agent_library_total_agents']} indexed agents across {caps['agent_library_sources_count']} sources"
+            if caps["agent_library_enabled"] and caps["agent_library_sources_count"]
+            else "Agent library: no external agent sources detected"
+        ),
+        (
+            f"Dexter: repo at {caps['dexter_repo_path']} | bun={'yes' if caps['dexter_bun_available'] else 'no'} | tools={caps['dexter_tool_count']}"
+            if caps["dexter_repo_path"]
+            else "Dexter: repo not found"
+        ),
+        (
+            "PentAGI: repo detected but upstream source is unavailable during a license audit"
+            if caps["pentagi_repo_path"] and caps["pentagi_audit_notice"] and not caps["pentagi_source_available"]
+            else f"PentAGI: repo at {caps['pentagi_repo_path']}"
+            if caps["pentagi_repo_path"]
+            else "PentAGI: repo not found"
         ),
         (
             f"Lightpanda: endpoint {'up' if caps['lightpanda_reachable'] else 'down'} at {caps['lightpanda_endpoint']} | "
@@ -301,6 +333,17 @@ def format_capability_report() -> str:
             if caps["skill_library_enabled"] and caps["skill_library_sources_count"]
             else "Skill library: disabled or no sources detected"
         ),
+        (
+            f"Agent library: {caps['agent_library_total_agents']} indexed agents across {caps['agent_library_sources_count']} sources"
+            if caps["agent_library_enabled"] and caps["agent_library_sources_count"]
+            else "Agent library: disabled or no sources detected"
+        ),
+        f"Dexter repo path: {caps['dexter_repo_path'] or 'not found'}",
+        f"Dexter Bun ready: {'yes' if caps['dexter_bun_available'] else 'no'}",
+        f"Dexter tool modules: {caps['dexter_tool_count']}",
+        f"PentAGI repo path: {caps['pentagi_repo_path'] or 'not found'}",
+        f"PentAGI source available: {'yes' if caps['pentagi_source_available'] else 'no'}",
+        f"PentAGI license audit notice: {'yes' if caps['pentagi_audit_notice'] else 'no'}",
         f"Lightpanda repo path: {caps['lightpanda_repo_path'] or 'not found'}",
         f"Lightpanda endpoint: {caps['lightpanda_endpoint'] or 'not configured'}",
         f"Lightpanda endpoint reachable: {'yes' if caps['lightpanda_reachable'] else 'no'}",

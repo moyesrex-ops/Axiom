@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>One local runtime, one command, real tool execution.</b><br>
-  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Optional Telegram, MiroFish, Automaton, Lightpanda, and Autoresearch
+  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Boot Doctor · Imported Agent Catalogs · Optional Telegram, MiroFish, Automaton, Lightpanda, Dexter, PentAGI, and Autoresearch
 </p>
 
 <p align="center">
@@ -51,8 +51,8 @@ The repo is organized around a stable core path and controlled optional expansio
 | Tier | Included | What to Expect |
 |------|----------|----------------|
 | Core runtime | Gemini Live, planner, executor, action routing, Playwright browser control, file/desktop/terminal tools, memory archive, runtime SQLite store, system context | This is the normal local boot path and the part AXIOM is built around |
-| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, `autoresearch` | Enabled through local config; useful when present, but not required for `axiom` to start |
-| Experimental path | Lightpanda browser backend | Wired into AXIOM and launchable, but Playwright remains the safe default backend |
+| Optional integrations | Telegram bridge, MiroFish, Automaton, PersonaPlex, OpenRGB, MT5, external skill libraries, imported agent catalogs, Dexter, `autoresearch` | Enabled through local config or auto-detected local clones; useful when present, but not required for `axiom` to start |
+| Experimental / limited path | Lightpanda browser backend, PentAGI runtime bridge | Lightpanda is wired but Playwright remains the safe browser default; PentAGI is tracked honestly as docs-only until upstream source is available again |
 
 Short version:
 
@@ -103,7 +103,8 @@ The startup path is intentionally single-root:
 4. AXIOM checks secrets from `config/api_keys.json` or environment variables.
 5. The UI can prompt for missing Gemini or optional Telegram setup on first run.
 6. `boot_integrations()` attempts only the sidecars you explicitly enabled.
-7. The Gemini Live runtime, planner/executor, action layer, and memory/state services come online as one connected system.
+7. The boot doctor logs what is actually healthy before work starts.
+8. The Gemini Live runtime, planner/executor, action layer, and memory/state services come online as one connected system.
 
 When local runtime updates are written later, AXIOM now prefers `config/runtime.local.json` so the tracked config can stay clean.
 
@@ -160,6 +161,22 @@ The live layer is built around three practical concerns:
 
 ---
 
+## Boot Doctor and Agent Supervision
+
+<p align="center">
+  <img src="assets/agent-supervision-flow.svg" alt="AXIOM boot doctor and agent supervision" width="100%">
+</p>
+
+Two new operating paths matter:
+
+- `system_capabilities` now has a real `doctor` action that checks secrets, browser backend health, memory DB, Telegram, MiroFish, Automaton, Lightpanda, `autoresearch`, skill libraries, and imported agent catalogs.
+- `agent_library` now indexes local specialist agent repos and can search, recommend, read, and delegate work under AXIOM supervision.
+- `swarm_orchestrator` can still run its classic preset roles, but it can now also route through imported specialist catalogs when you use specialist mode.
+
+On the current reference machine, AXIOM is indexing hundreds of specialist roles across frontend, backend, infrastructure, data, research, creative/studio, security, and product/strategy domains.
+
+---
+
 ## Repo Layout
 
 ```text
@@ -179,8 +196,12 @@ memory/axiom_state.db            Runtime state database, created locally
 Important bridge modules:
 
 - `core/integration_manager.py`
+- `core/doctor.py`
+- `core/agent_library.py`
 - `core/mirofish_bridge.py`
 - `core/automaton_bridge.py`
+- `core/dexter_bridge.py`
+- `core/pentagi_bridge.py`
 - `core/lightpanda_bridge.py`
 - `core/autoresearch_bridge.py`
 - `core/skill_library.py`
@@ -226,6 +247,14 @@ Important high-level keys:
     "superpowers_path": "",
     "antigravity_skills_path": ""
   },
+  "agent_library": {
+    "enabled": true,
+    "wshobson_agents_path": "",
+    "awesome_subagents_path": "",
+    "dexter_path": "",
+    "pentagi_path": "",
+    "delegate_limit": 3
+  },
   "research_repos": {
     "autoresearch_path": ""
   },
@@ -251,6 +280,12 @@ Example local override:
     "lightpanda_repo_path": "C:\\Users\\you\\Axiom_research\\external\\lightpanda-browser",
     "lightpanda_wsl_binary_path": "/home/you/.local/bin/lightpanda"
   },
+  "agent_library": {
+    "wshobson_agents_path": "C:\\Users\\you\\Axiom_research\\external\\wshobson-agents",
+    "awesome_subagents_path": "C:\\Users\\you\\Axiom_research\\external\\awesome-claude-code-subagents",
+    "dexter_path": "C:\\Users\\you\\Axiom_research\\external\\dexter",
+    "pentagi_path": "C:\\Users\\you\\Axiom_research\\external\\pentagi"
+  },
   "research_repos": {
     "autoresearch_path": "C:\\Users\\you\\Axiom_research\\external\\autoresearch"
   }
@@ -262,6 +297,8 @@ Behavioral notes:
 - Telegram is optional.
 - Public IP lookup is opt-in.
 - Browser default stays on Playwright unless you explicitly opt into Lightpanda.
+- Boot doctor summaries are written into the startup log before the live loop starts.
+- Imported agent paths belong in `runtime.local.json`, not the tracked shared config.
 - Later runtime writes prefer `runtime.local.json` when it exists.
 
 ---
@@ -271,8 +308,12 @@ Behavioral notes:
 High-signal integrated tools:
 
 - `system_capabilities` for live environment, failures, events, integrations, and context
+- `system_capabilities` with `doctor` for boot-time health and readiness checks
 - `nexus_memory` for save / recall / recent / search flows
 - `skill_library` for searchable external workflow libraries
+- `agent_library` for searchable imported specialist agents and supervised delegation
+- `dexter_control` for Dexter financial research repo health and launch instructions
+- `pentagi_control` for PentAGI repo status and honest availability reporting
 - `lightpanda_control` for inspecting and starting the optional Lightpanda backend
 - `autoresearch_control` for repo readiness, dataset prep, baseline training, and results inspection
 - `persona_control` for PersonaPlex inspection and setup
@@ -333,6 +374,40 @@ AXIOM can index local copies of:
 
 Point the `skill_library.*_path` fields at those repos, or let AXIOM auto-detect them under a local external workspace.
 
+### Imported Agent Catalogs
+
+AXIOM can now index and supervise imported local agent catalogs.
+
+Current integrated sources:
+
+- `wshobson/agents`
+- `VoltAgent/awesome-claude-code-subagents`
+- `virattt/dexter` as a finance-research specialist entry
+- `vxcontrol/pentagi` as a security specialist entry with runtime limitations reported honestly
+
+That gives AXIOM a large specialist surface instead of only a few hard-coded internal debate roles.
+
+Use `agent_library` to:
+
+- inspect status and source detection
+- search or recommend role cards
+- read a role card directly
+- delegate a task to selected specialists and synthesize their outputs under AXIOM supervision
+
+### Dexter and PentAGI
+
+Dexter is integrated as an optional sidecar repo and specialist source.
+
+- AXIOM reports whether the repo is present.
+- AXIOM reports whether Bun is installed.
+- AXIOM can give direct launch instructions for the local Dexter runtime.
+
+PentAGI is integrated more cautiously because the cloned upstream repo currently exposes documentation rather than source.
+
+- AXIOM reports the repo status and the upstream license-audit limitation.
+- AXIOM does not pretend the missing runtime is executable.
+- When upstream source or packaged runtime is restored, the bridge can be expanded from a docs/status path into a real runtime path.
+
 ### Autoresearch
 
 AXIOM has a bridge for Karpathy's `autoresearch` repo so it can inspect more than just whether the repo exists.
@@ -363,6 +438,8 @@ Useful checks:
 python -m unittest discover -s tests -p "test_*.py" -v
 python -m compileall .
 python -c "from actions.system_capabilities import system_capabilities; print(system_capabilities({'action':'summary'}))"
+python -c "from actions.system_capabilities import system_capabilities; print(system_capabilities({'action':'doctor'}))"
+python -c "from actions.agent_library import agent_library; print(agent_library({'action':'status'}))"
 ```
 
 Practical startup check:

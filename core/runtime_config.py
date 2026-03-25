@@ -70,6 +70,16 @@ DEFAULT_RUNTIME_CONFIG = {
         "antigravity_skills_path": "",
         "search_limit": 8,
     },
+    "agent_library": {
+        "enabled": True,
+        "wshobson_agents_path": "",
+        "awesome_subagents_path": "",
+        "dexter_path": "",
+        "pentagi_path": "",
+        "search_limit": 8,
+        "delegate_limit": 3,
+        "delegate_model": "",
+    },
     "research_repos": {
         "autoresearch_path": "",
     },

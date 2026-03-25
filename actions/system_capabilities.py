@@ -31,6 +31,20 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             pass
         return report
 
+    if action == "doctor":
+        try:
+            from core.doctor import format_doctor_report
+
+            report = format_doctor_report(limit=limit)
+            log_event("capabilities", "doctor_report", report[:2000])
+            try:
+                save_to_nexus("Boot Doctor", report[:2000], kind="capability", source="doctor")
+            except Exception:
+                pass
+            return report
+        except Exception as error:
+            return f"Doctor report failed: {error}"
+
     if action == "context":
         report = format_system_context()
         log_event("capabilities", "system_context", report[:2000])
@@ -48,16 +62,22 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
 
     if action == "integrations":
         try:
+            from core.agent_library import format_agent_library_status
             from core.autoresearch_bridge import format_autoresearch_status
             from core.automaton_bridge import format_automaton_status
+            from core.dexter_bridge import format_dexter_status
             from core.lightpanda_bridge import format_lightpanda_status
             from core.mirofish_bridge import format_mirofish_status
+            from core.pentagi_bridge import format_pentagi_status
 
             report = (
                 f"{format_mirofish_status()}\n\n"
                 f"{format_automaton_status()}\n\n"
+                f"{format_dexter_status()}\n\n"
+                f"{format_pentagi_status()}\n\n"
                 f"{format_lightpanda_status()}\n\n"
-                f"{format_autoresearch_status(limit=limit)}"
+                f"{format_autoresearch_status(limit=limit)}\n\n"
+                f"{format_agent_library_status(limit=limit)}"
             )
             log_event("capabilities", "integrations_status", report[:2000])
             return report
@@ -114,6 +134,36 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
         except Exception as error:
             return f"Skill library status failed: {error}"
 
+    if action == "agents":
+        try:
+            from core.agent_library import format_agent_library_status
+
+            report = format_agent_library_status(limit=limit)
+            log_event("capabilities", "agent_library_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Agent library status failed: {error}"
+
+    if action == "dexter":
+        try:
+            from core.dexter_bridge import format_dexter_status
+
+            report = format_dexter_status()
+            log_event("capabilities", "dexter_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Dexter status failed: {error}"
+
+    if action == "pentagi":
+        try:
+            from core.pentagi_bridge import format_pentagi_status
+
+            report = format_pentagi_status()
+            log_event("capabilities", "pentagi_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"PentAGI status failed: {error}"
+
     if action == "failures":
         rows = recent_failures(limit=limit)
         if not rows:
@@ -161,6 +211,6 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
         return "\n".join(lines)
 
     return (
-        "Unknown action. Use summary, status, context, hardware, integrations, "
-        "mirofish, automaton, lightpanda, autoresearch, skills, failures, events, or tasks."
+        "Unknown action. Use summary, status, doctor, context, hardware, integrations, "
+        "mirofish, automaton, dexter, pentagi, lightpanda, autoresearch, skills, agents, failures, events, or tasks."
     )

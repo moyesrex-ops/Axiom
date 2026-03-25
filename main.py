@@ -49,13 +49,17 @@ from actions.autoresearch_control  import autoresearch_control
 from actions.lightpanda_control    import lightpanda_control
 from actions.self_modifier         import self_modifier, get_dynamic_tool
 from actions.skill_library         import skill_library
+from actions.agent_library         import agent_library
 from actions.system_capabilities   import system_capabilities
+from actions.dexter_control        import dexter_control
+from actions.pentagi_control       import pentagi_control
 from actions.persona_control       import persona_control
 from actions.prompt_studio         import prompt_studio
 from actions.lead_researcher       import lead_researcher
 from actions.swarm_orchestrator    import swarm_orchestrator
 from agent.heartbeat               import HeartbeatDaemon
 from core.capabilities             import format_capability_status
+from core.doctor                   import boot_doctor_lines
 from core.integration_manager      import boot_integrations
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_secret
@@ -689,6 +693,35 @@ TOOL_DECLARATIONS = [
     }
 },
 {
+    "name": "agent_library",
+    "description": (
+        "Searches, reads, recommends, and supervises imported specialist agent catalogs, including "
+        "frontend, backend, design, research, security, studio, and strategy roles. "
+        "Use this when AXIOM should choose specialist agents or delegate a task to them."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | sources | search | recommend | read | delegate"},
+            "query": {"type": "STRING", "description": "Search query or task description"},
+            "task": {"type": "STRING", "description": "Task description for recommend or delegate"},
+            "agent": {"type": "STRING", "description": "Agent id or name for read"},
+            "agents": {
+                "type": "ARRAY",
+                "items": {"type": "STRING"},
+                "description": "Optional list of agent ids or names for delegate"
+            },
+            "source": {"type": "STRING", "description": "Optional source id filter"},
+            "limit": {"type": "INTEGER", "description": "Optional result or delegation limit"},
+            "model": {"type": "STRING", "description": "Optional reasoning model override for delegate"},
+            "context": {"type": "STRING", "description": "Optional extra context for delegate"},
+            "content_limit": {"type": "INTEGER", "description": "Optional text limit for read"},
+            "save": {"type": "BOOLEAN", "description": "Whether to save results to memory"}
+        },
+        "required": []
+    }
+},
+{
     "name": "system_capabilities",
     "description": (
         "Inspects Axiom's current environment, installed integrations, recent runtime events, "
@@ -698,7 +731,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | context | hardware | integrations | mirofish | automaton | lightpanda | autoresearch | skills | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | lightpanda | autoresearch | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -719,6 +752,36 @@ TOOL_DECLARATIONS = [
             "state_dir": {"type": "STRING", "description": "Optional Automaton state directory"},
             "auto_start": {"type": "BOOLEAN", "description": "Whether Automaton should auto-start during AXIOM boot when launchable"},
             "limit": {"type": "INTEGER", "description": "Optional text limit for soul action"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "dexter_control",
+    "description": (
+        "Inspects the imported Dexter financial research runtime and setup. Use this to check repo health, "
+        "configure the repo path, or get real launch instructions."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local Dexter repo path"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "pentagi_control",
+    "description": (
+        "Inspects the imported PentAGI security runtime status. Use this to check whether the repo is actually "
+        "runnable, configure the repo path, or get honest launch instructions when upstream source is unavailable."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local PentAGI repo path"}
         },
         "required": ["action"]
     }
@@ -822,15 +885,20 @@ TOOL_DECLARATIONS = [
 {
     "name": "swarm_orchestrator",
     "description": (
-        "Runs a generalized multi-role AI swarm for research, strategy, build planning, or critique. "
-        "Use when the user wants several expert viewpoints fused into one result."
+        "Runs a generalized multi-role AI swarm for research, strategy, build planning, critique, "
+        "or imported specialist-agent supervision. Use this when the user wants several expert viewpoints fused into one result."
     ),
     "parameters": {
         "type": "OBJECT",
         "properties": {
             "goal":    {"type": "STRING", "description": "The objective for the swarm"},
-            "mode":    {"type": "STRING", "description": "research | strategy | build | critique"},
-            "context": {"type": "STRING", "description": "Optional extra context"}
+            "mode":    {"type": "STRING", "description": "research | strategy | build | critique | specialist"},
+            "context": {"type": "STRING", "description": "Optional extra context"},
+            "query":   {"type": "STRING", "description": "Optional specialist search query"},
+            "agents":  {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional specialist agent ids or names"},
+            "source":  {"type": "STRING", "description": "Optional source id filter"},
+            "limit":   {"type": "INTEGER", "description": "Optional specialist delegation limit"},
+            "model":   {"type": "STRING", "description": "Optional reasoning model override"}
         },
         "required": ["goal"]
     }
@@ -1274,6 +1342,16 @@ class AxiomLive:
                 )
                 result = r or "Done."
 
+            elif name == "agent_library":
+                r = await loop.run_in_executor(
+                    None, lambda: agent_library(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
             elif name == "system_capabilities":
                 r = await loop.run_in_executor(
                     None, lambda: system_capabilities(
@@ -1287,6 +1365,26 @@ class AxiomLive:
             elif name == "automaton_control":
                 r = await loop.run_in_executor(
                     None, lambda: automaton_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "dexter_control":
+                r = await loop.run_in_executor(
+                    None, lambda: dexter_control(
+                        parameters=args,
+                        player=self.ui,
+                        speak=self.speak
+                    )
+                )
+                result = r or "Done."
+
+            elif name == "pentagi_control":
+                r = await loop.run_in_executor(
+                    None, lambda: pentagi_control(
                         parameters=args,
                         player=self.ui,
                         speak=self.speak
@@ -1633,6 +1731,9 @@ def main():
         ui.wait_for_api_key()
         start_telegram_bridge(log_func=ui.write_log)
         boot_integrations(log_func=ui.write_log)
+        for line in boot_doctor_lines(limit=6):
+            ui.write_log(f"SYS: {line}")
+            log_event("doctor", "boot", line[:2000])
 
         axiom = AxiomLive(ui)
         runner_state["axiom"] = axiom

@@ -23,8 +23,11 @@ ABSOLUTE RULES:
 - Use web_search for ANY information retrieval, research, or current data.
 - Use system_capabilities if the task depends on installed integrations or current environment status.
 - Use skill_library when you need an external workflow, coding pattern, debugging checklist, or testing playbook.
+- Use agent_library when the task needs specialist roles, delegated review, or supervisor-style multi-agent execution.
 - Use lightpanda_control when the task depends on an optional Lightpanda browser backend.
 - Use autoresearch_control when the task depends on the local autoresearch repo, program.md, or experiment log.
+- Use dexter_control for the imported Dexter financial research runtime and status.
+- Use pentagi_control for the imported PentAGI security runtime status and limitations.
 - Use file_controller to save content to disk.
 - Use cmd_control to open files or run system commands.
 - Max 5 steps. Use the minimum steps needed.
@@ -125,7 +128,7 @@ dev_agent
   language: string (optional)
 
 system_capabilities
-  action: "summary" | "status" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "lightpanda" | "autoresearch" | "skills" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "lightpanda" | "autoresearch" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 skill_library
@@ -135,6 +138,25 @@ skill_library
   skill: string (for read)
   source: string (optional)
   limit: integer (optional)
+
+agent_library
+  action: "status" | "sources" | "search" | "recommend" | "read" | "delegate" (optional)
+  query: string (for search/delegate)
+  task: string (for recommend/delegate)
+  agent: string (for read)
+  agents: list[string] or comma-separated string (for delegate)
+  source: string (optional)
+  limit: integer (optional)
+  model: string (optional)
+  context: string (optional)
+
+dexter_control
+  action: "status" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
+
+pentagi_control
+  action: "status" | "configure" | "launch_instructions" (required)
+  repo_path: string (optional)
 
 lightpanda_control
   action: "status" | "endpoint" | "configure" | "launch_instructions" (required)
@@ -185,8 +207,13 @@ lead_researcher
 
 swarm_orchestrator
   goal: string (required)
-  mode: "research" | "strategy" | "build" | "critique" (optional)
+  mode: "research" | "strategy" | "build" | "critique" | "specialist" (optional)
   context: string (optional)
+  query: string (optional, for specialist mode)
+  agents: list[string] or comma-separated string (optional, for specialist mode)
+  source: string (optional)
+  limit: integer (optional)
+  model: string (optional)
 
 EXAMPLES:
 
