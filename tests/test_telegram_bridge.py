@@ -51,6 +51,22 @@ class TelegramBridgeTests(unittest.TestCase):
 
         self.assertEqual(rewritten, "change the keyboard lighting to green")
 
+    def test_contextualize_rgb_followup_handles_terse_fuzzy_color(self):
+        with patch.dict(
+            tb._LAST_CHAT_TASK_RESULTS,
+            {
+                "42": {
+                    "task_id": "rgb1",
+                    "goal": "change the keyboard lighting to red",
+                    "result": "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=red.",
+                }
+            },
+            clear=True,
+        ):
+            rewritten = tb._contextualize_task_goal("42", "grain")
+
+        self.assertEqual(rewritten, "change the keyboard lighting to green")
+
     def test_contextualize_open_followup_uses_last_artifact(self):
         with patch.dict(
             tb._LAST_CHAT_TASK_RESULTS,

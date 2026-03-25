@@ -113,7 +113,7 @@ class AgentLibraryTests(unittest.TestCase):
         }
 
         with patch.object(al, "load_runtime_config", return_value=runtime), patch.object(
-            al, "get_secret", return_value=""
+            al, "get_gemini_api_key", return_value=""
         ):
             result = al.delegate_agent_library(task="Build a frontend UI", limit=2)
 

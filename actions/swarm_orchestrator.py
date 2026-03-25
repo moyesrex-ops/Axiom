@@ -4,7 +4,7 @@ from pathlib import Path
 
 from core.agent_library import delegate_agent_library, format_agent_delegate_report
 from core.runtime_config import load_runtime_config
-from core.secret_config import get_secret
+from core.secret_config import get_gemini_api_key
 
 
 def get_base_dir() -> Path:
@@ -44,7 +44,7 @@ ROLE_PRESETS = {
 
 
 def _get_api_key() -> str:
-    return get_secret("gemini_api_key", ["GEMINI_API_KEY"])
+    return get_gemini_api_key()
 
 
 def _run_role(model, role_name: str, instruction: str, goal: str, context: str) -> str:

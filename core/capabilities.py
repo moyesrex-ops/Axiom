@@ -16,7 +16,7 @@ from core.lightpanda_bridge import collect_lightpanda_status
 from core.mirofish_bridge import collect_mirofish_status
 from core.pentagi_bridge import collect_pentagi_status
 from core.runtime_config import load_runtime_config
-from core.secret_config import get_secret
+from core.secret_config import get_gemini_api_key, get_secret
 from core.skill_library import collect_skill_library_status
 from core.tradingagents_bridge import collect_tradingagents_status
 
@@ -70,7 +70,7 @@ def _is_tcp_reachable(url: str, timeout: float = 0.35) -> bool:
 
 
 def _api_key_configured() -> bool:
-    return bool(get_secret("gemini_api_key", ["GEMINI_API_KEY"]))
+    return bool(get_gemini_api_key())
 
 
 def _telegram_token_configured() -> bool:
@@ -148,6 +148,9 @@ def collect_capabilities() -> dict:
     autonomy_cfg = runtime.get("autonomy", {}) or {}
 
     return {
+        "startup_mode": "gemini_first",
+        "startup_required_secret": "gemini_api_key",
+        "startup_ready": _api_key_configured(),
         "voice_backend": runtime.get("voice_backend", "gemini_live"),
         "voice_name": runtime.get("voice_name", "Charon"),
         "live_model": runtime.get("live_model", ""),
@@ -239,6 +242,9 @@ def collect_capabilities() -> dict:
 def format_capability_status() -> str:
     caps = collect_capabilities()
     lines = [
+        "Startup mode: Gemini-first",
+        f"Base startup ready: {'yes' if caps['startup_ready'] else 'no'}",
+        f"Required secret: {caps['startup_required_secret']}",
         f"Voice backend: {caps['voice_backend']}",
         f"Voice name: {caps['voice_name']}",
         f"Live model: {caps['live_model'] or 'unknown'}",
@@ -348,6 +354,9 @@ def format_capability_report() -> str:
     caps = collect_capabilities()
     lines = [
         "AXIOM capability status",
+        f"Startup mode: Gemini-first",
+        f"Base startup ready: {'yes' if caps['startup_ready'] else 'no'}",
+        f"Required startup secret: {caps['startup_required_secret']}",
         f"Voice backend: {caps['voice_backend']}",
         f"Voice name: {caps['voice_name']}",
         f"Live model: {caps['live_model'] or 'unknown'}",

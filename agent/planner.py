@@ -3,6 +3,7 @@ import re
 import sys
 from pathlib import Path
 
+from core.secret_config import get_gemini_api_key
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -11,9 +12,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-
-
 PLANNER_PROMPT = """You are the planning module of AXIOM, a personal AI assistant.
 Your job: break any user goal into a sequence of steps using ONLY the tools listed below.
 
@@ -307,8 +305,7 @@ OUTPUT — return ONLY valid JSON, no markdown, no explanation, no code blocks:
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return get_gemini_api_key()
 
 
 def create_plan(goal: str, context: str = "") -> dict:

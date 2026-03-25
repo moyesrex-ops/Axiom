@@ -13,6 +13,7 @@ import subprocess
 import sys
 import platform
 import re
+import difflib
 import shutil
 from pathlib import Path
 
@@ -48,9 +49,9 @@ BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 import json
+from core.secret_config import get_gemini_api_key
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return get_gemini_api_key()
 
 
 def volume_up():
@@ -637,6 +638,14 @@ _RGB_COLOR_MAP = {
     "rainbow":       (255, 0, 128),
     "gold":          (255, 215, 0),
 }
+_RGB_COLOR_ALIASES = {
+    "grain": "green",
+    "gren": "green",
+    "greeen": "green",
+    "blu": "blue",
+    "bleu": "blue",
+    "reed": "red",
+}
 
 _OPENRGB_EFFECT_ALIASES = {
     "rainbow": ["rainbow", "spectrum", "wave", "cycle"],
@@ -666,6 +675,14 @@ def _extract_rgb_color_hint(*parts: object) -> str:
     for color in _RGB_COLOR_MAP:
         if color and re.search(rf"\b{re.escape(color)}\b", text):
             return color
+    for token in re.findall(r"[a-z]+", text):
+        if len(token) < 4:
+            continue
+        if token in _RGB_COLOR_ALIASES:
+            return _RGB_COLOR_ALIASES[token]
+        match = difflib.get_close_matches(token, list(_RGB_COLOR_MAP.keys()), n=1, cutoff=0.72)
+        if match:
+            return match[0]
     return ""
 
 
@@ -705,7 +722,7 @@ def change_hardware_color(color_name: str = "white") -> str:
         print(msg)
         return msg
 
-    key = color_name.lower().strip()
+    key = _extract_rgb_color_hint(color_name) or color_name.lower().strip()
     rgb = _RGB_COLOR_MAP.get(key)
 
     # Try partial match if exact key not found
@@ -735,7 +752,7 @@ def change_hardware_color(color_name: str = "white") -> str:
                     print(f"[RGB] Mode switch failed on {device.name}: {mode_error}")
 
             device.set_color(color, fast=False)
-            changed.append(f"{device.name}: color={color_name}")
+            changed.append(f"{device.name}: color={key}")
             time.sleep(0.05)
 
         if not changed:

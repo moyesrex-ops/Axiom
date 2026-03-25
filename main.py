@@ -65,7 +65,7 @@ from core.capabilities             import format_capability_status
 from core.doctor                   import boot_doctor_lines
 from core.integration_manager      import boot_integrations
 from core.runtime_config           import load_runtime_config
-from core.secret_config            import get_secret
+from core.secret_config            import get_gemini_api_key, get_secret
 from core.system_context           import format_prompt_system_context
 from core.telegram_bridge          import start_telegram_bridge, stop_telegram_bridge
 from memory.runtime_store          import init_runtime_store, log_event
@@ -88,7 +88,7 @@ CHUNK_SIZE          = 1024
 pya = pyaudio.PyAudio()
 
 def _get_api_key() -> str:
-    return get_secret("gemini_api_key", ["GEMINI_API_KEY"])
+    return get_gemini_api_key()
 
 def _load_system_prompt() -> str:
     try:

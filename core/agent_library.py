@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 from core.runtime_config import load_runtime_config
-from core.secret_config import get_secret
+from core.secret_config import get_gemini_api_key, get_secret
 
 
 _SOURCE_SPECS = {
@@ -663,7 +663,7 @@ def delegate_agent_library(
     if not selected:
         return {"ok": False, "message": "No suitable agents were found for delegation."}
 
-    api_key = get_secret("gemini_api_key", ["GEMINI_API_KEY"])
+    api_key = get_gemini_api_key()
     if not api_key:
         return {"ok": False, "message": "Gemini API key is missing, so agent delegation cannot run."}
 

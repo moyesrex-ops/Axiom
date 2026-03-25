@@ -2,14 +2,16 @@ import json
 import re
 import sys
 import threading
+import difflib
 from pathlib import Path
 from typing import Callable
 
 from agent.planner       import create_plan, replan, reflect_and_improve
 from agent.error_handler import analyze_error, generate_fix, ErrorDecision
 from actions.self_modifier import get_dynamic_tool
+from core.secret_config import get_gemini_api_key
 from memory.memory_manager import save_to_nexus
-from memory.runtime_store import log_event, upsert_knowledge_item
+from memory.runtime_store import log_event, search_knowledge_items, upsert_knowledge_item
 from core.runtime_config import load_runtime_config
 
 
@@ -20,7 +22,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 _TRIVIAL_TOOL_RESULTS = {
     "",
     "done.",
@@ -42,6 +43,14 @@ _RGB_COLOR_HINTS = (
     "rainbow",
     "glowing",
 )
+_RGB_COLOR_ALIASES = {
+    "grain": "green",
+    "gren": "green",
+    "greeen": "green",
+    "blu": "blue",
+    "bleu": "blue",
+    "reed": "red",
+}
 _SPECIALIST_COMPLEXITY_HINTS = (
     "build",
     "create",
@@ -69,8 +78,7 @@ _SPECIALIST_COMPLEXITY_HINTS = (
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    return get_gemini_api_key()
 
 def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "") -> dict:
     if not step_results:
@@ -300,6 +308,14 @@ def _extract_color_hint(text: str) -> str:
     for color in _RGB_COLOR_HINTS:
         if re.search(rf"\b{re.escape(color)}\b", normalized):
             return color
+    for token in re.findall(r"[a-z]+", normalized):
+        if len(token) < 4:
+            continue
+        if token in _RGB_COLOR_ALIASES:
+            return _RGB_COLOR_ALIASES[token]
+        match = difflib.get_close_matches(token, list(_RGB_COLOR_HINTS), n=1, cutoff=0.72)
+        if match:
+            return match[0]
     return ""
 
 
@@ -326,13 +342,53 @@ def _should_prepare_specialists(goal: str) -> bool:
     return _goal_word_count(normalized) >= max(min_words, 10)
 
 
-def _specialist_context(goal: str) -> str:
-    if not _should_prepare_specialists(goal):
+def _learned_strategy_context(goal: str) -> str:
+    cfg = _autonomy_config()
+    if not bool(cfg.get("reuse_task_strategies", True)):
         return ""
+
+    goal_text = str(goal or "").strip()
+    if not goal_text:
+        return ""
+
+    limit = max(1, min(int(cfg.get("task_strategy_limit", 2) or 2), 4))
+    try:
+        rows = search_knowledge_items(goal_text, limit=limit, kinds=["task_strategy"])
+    except Exception as error:
+        log_event("executor", "strategy_context_failed", str(error)[:300])
+        return ""
+
+    if not rows:
+        return ""
+
+    lines = ["[LEARNED STRATEGIES]"]
+    for row in rows[:limit]:
+        title = str(row.get("title", "") or "Task Strategy").strip()
+        content = str(row.get("content", "") or "").strip()
+        if not content:
+            continue
+        compact = re.sub(r"\s+", " ", content)
+        lines.append(f"- {title}: {compact[:480]}")
+
+    if len(lines) == 1:
+        return ""
+
+    context = "\n".join(lines)
+    log_event("executor", "strategy_context_built", goal_text[:240], metadata={"matches": len(lines) - 1})
+    return context
+
+
+def _specialist_context(goal: str) -> str:
+    sections = []
+    strategy_context = _learned_strategy_context(goal)
+    if strategy_context:
+        sections.append(strategy_context)
+
+    if not _should_prepare_specialists(goal):
+        return "\n\n".join(section for section in sections if section).strip()
 
     cfg = _autonomy_config()
     limit = max(1, min(int(cfg.get("specialist_limit", 2) or 2), 3))
-    sections = []
 
     try:
         from core.skill_library import recommend_skill_library
@@ -372,6 +428,24 @@ def _specialist_context(goal: str) -> str:
     return context
 
 
+def _should_direct_research(goal: str) -> bool:
+    normalized = str(goal or "").strip().lower()
+    if not normalized:
+        return False
+    if any(term in normalized for term in (" buy ", " sell ", " trade ", " order ", " execute_mt5", " website", " app", " game")):
+        return False
+    research_starts = (
+        "research ",
+        "analyze ",
+        "investigate ",
+        "deep research ",
+        "deep dive ",
+        "look into ",
+        "compare ",
+    )
+    return any(normalized.startswith(prefix) for prefix in research_starts)
+
+
 def _direct_tool_for_goal(goal: str, specialist_context: str = "") -> tuple[str, dict] | None:
     normalized = str(goal or "").strip().lower()
     if not normalized:
@@ -404,6 +478,36 @@ def _direct_tool_for_goal(goal: str, specialist_context: str = "") -> tuple[str,
             {
                 "action": "hardware_status",
                 "description": goal,
+            },
+        )
+
+    if _should_direct_research(goal):
+        try:
+            from core.deerflow_bridge import collect_deerflow_status
+
+            deerflow = collect_deerflow_status(limit=2)
+            if deerflow.get("proxy_reachable"):
+                return (
+                    "deerflow_control",
+                    {
+                        "action": "query",
+                        "goal": goal,
+                        "mode": "pro",
+                    },
+                )
+        except Exception as error:
+            log_event("executor", "deerflow_direct_route_probe_failed", str(error)[:300])
+
+        context = "Run a deep multi-source research pass with concrete findings, citations, and next actions."
+        if specialist_context:
+            context += f"\n\nSpecialist guidance:\n{specialist_context[:1600]}"
+        return (
+            "web_search",
+            {
+                "query": goal,
+                "mode": "deep",
+                "context": context,
+                "sources": ["web", "discussions"],
             },
         )
 

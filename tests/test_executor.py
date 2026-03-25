@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from agent.executor import AgentExecutor
+from agent.executor import AgentExecutor, _specialist_context
 
 
 class ExecutorDirectRouteTests(unittest.TestCase):
@@ -62,6 +62,39 @@ class ExecutorDirectRouteTests(unittest.TestCase):
             create_plan_mock.call_args.kwargs["context"],
             "[SPECIALIST PREFLIGHT]\nUse frontend reviewer.",
         )
+
+    def test_direct_route_fuzzy_matches_rgb_followup_color(self):
+        executor = AgentExecutor()
+
+        with patch("agent.executor._specialist_context", return_value=""), patch(
+            "agent.executor.create_plan"
+        ) as create_plan_mock, patch(
+            "agent.executor._call_tool",
+            return_value="Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green.",
+        ) as call_tool_mock:
+            result = executor.execute("change the keyboard lighting to grain")
+
+        create_plan_mock.assert_not_called()
+        self.assertEqual(call_tool_mock.call_args.args[0], "computer_settings")
+        self.assertEqual(call_tool_mock.call_args.args[1]["value"], "green")
+        self.assertIn("color=green", result)
+
+    def test_specialist_context_includes_learned_task_strategy(self):
+        with patch(
+            "agent.executor.search_knowledge_items",
+            return_value=[
+                {
+                    "title": "Task Strategy: Build dashboard",
+                    "content": "Goal: build a dashboard. Steps: use codex_builder after frontend skill preflight.",
+                }
+            ],
+        ), patch("core.skill_library.recommend_skill_library", side_effect=Exception("skip")), patch(
+            "core.agent_library.recommend_agent_library", side_effect=Exception("skip")
+        ):
+            context = _specialist_context("build a dashboard")
+
+        self.assertIn("[LEARNED STRATEGIES]", context)
+        self.assertIn("Task Strategy: Build dashboard", context)
 
 
 if __name__ == "__main__":

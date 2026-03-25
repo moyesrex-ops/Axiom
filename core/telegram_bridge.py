@@ -1,6 +1,7 @@
 import threading
 import time
 import re
+import difflib
 from typing import Callable
 
 import requests
@@ -39,6 +40,14 @@ _COLOR_HINTS = (
     "rainbow",
     "glowing",
 )
+_COLOR_ALIASES = {
+    "grain": "green",
+    "gren": "green",
+    "greeen": "green",
+    "blu": "blue",
+    "bleu": "blue",
+    "reed": "red",
+}
 _CHAT_PHRASES = {
     "hi",
     "hello",
@@ -342,6 +351,14 @@ def _extract_color_hint(text: str) -> str:
     for color in _COLOR_HINTS:
         if re.search(rf"\b{re.escape(color)}\b", normalized):
             return color
+    for token in re.findall(r"[a-z]+", normalized):
+        if len(token) < 4:
+            continue
+        if token in _COLOR_ALIASES:
+            return _COLOR_ALIASES[token]
+        match = difflib.get_close_matches(token, list(_COLOR_HINTS), n=1, cutoff=0.72)
+        if match:
+            return match[0]
     return ""
 
 
@@ -400,7 +417,9 @@ def _contextualize_task_goal(chat_id: str, text: str) -> str:
     normalized = _normalize_text(original)
     color = _extract_color_hint(original)
 
-    if color and ("it" in normalized or "back" in normalized) and _looks_like_rgb_context(context_blob):
+    if color and _looks_like_rgb_context(context_blob) and (
+        "it" in normalized or "back" in normalized or len(normalized.split()) <= 3
+    ):
         return f"change the keyboard lighting to {color}"
 
     if re.search(r"\bopen (it|that|the game|the site|the app)\b", normalized):

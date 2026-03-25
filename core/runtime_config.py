@@ -107,6 +107,8 @@ DEFAULT_RUNTIME_CONFIG = {
         "specialist_task_min_words": 6,
         "specialist_limit": 2,
         "save_task_strategies": True,
+        "reuse_task_strategies": True,
+        "task_strategy_limit": 2,
     },
     "system_context": {
         "enable_public_ip_lookup": False,

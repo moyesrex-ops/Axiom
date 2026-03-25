@@ -12,7 +12,7 @@ from core.lightpanda_bridge import collect_lightpanda_status
 from core.mirofish_bridge import collect_mirofish_status
 from core.pentagi_bridge import collect_pentagi_status
 from core.runtime_config import load_runtime_config
-from core.secret_config import get_secret
+from core.secret_config import get_gemini_api_key, get_secret
 from core.skill_library import collect_skill_library_status
 from core.tradingagents_bridge import collect_tradingagents_status
 from memory import runtime_store
@@ -70,9 +70,22 @@ def collect_doctor_report(limit: int = 6) -> dict:
     pentagi = collect_pentagi_status()
     tradingagents = collect_tradingagents_status(limit=2)
     memory = _memory_store_status()
+    integrations_cfg = runtime.get("integrations", {}) or {}
+    deerflow_cfg = runtime.get("deerflow", {}) or {}
 
     checks = []
-    api_ready = bool(get_secret("gemini_api_key", ["GEMINI_API_KEY"]))
+    api_ready = bool(get_gemini_api_key())
+    checks.append(
+        _status_row(
+            "pass" if api_ready else "fail",
+            "Gemini-First Startup",
+            (
+                "Base startup path is ready with Gemini; optional integrations are additive"
+                if api_ready
+                else "Gemini API key is missing, so the base startup path is not ready"
+            ),
+        )
+    )
     checks.append(
         _status_row(
             "pass" if api_ready else "fail",
@@ -147,6 +160,7 @@ def collect_doctor_report(limit: int = 6) -> dict:
             and automaton.get("api_key_present", False)
         )
         automaton_memory_ready = bool(automaton.get("db_path") or automaton.get("soul_path"))
+        automaton_expected = bool(integrations_cfg.get("automaton_auto_start", False))
         detail_parts = []
         if not automaton.get("config_path"):
             detail_parts.append("config missing")
@@ -156,12 +170,14 @@ def collect_doctor_report(limit: int = 6) -> dict:
             detail_parts.append("memory state missing")
         checks.append(
             _status_row(
-                "pass" if automaton_runtime_ready else "warn",
+                "pass" if automaton_runtime_ready else "warn" if automaton_expected or automaton_memory_ready else "info",
                 "Automaton",
                 (
                     "Configured runtime ready"
                     if automaton_runtime_ready
                     else "Repo found but runtime configuration is incomplete"
+                    if automaton_expected or automaton_memory_ready
+                    else "Optional repo detected but runtime is not enabled"
                 ),
                 ", ".join(detail_parts) if detail_parts else automaton.get("repo_path", ""),
             )
@@ -170,11 +186,19 @@ def collect_doctor_report(limit: int = 6) -> dict:
         checks.append(_status_row("info", "Automaton", "Repo not detected"))
 
     if lightpanda.get("repo_path"):
+        lightpanda_selected = str(browser_cfg.get("backend", "playwright") or "playwright").strip().lower() == "lightpanda"
+        lightpanda_expected = lightpanda_selected or bool(browser_cfg.get("lightpanda_auto_start", False))
         checks.append(
             _status_row(
-                "pass" if lightpanda.get("reachable") else "warn",
+                "pass" if lightpanda.get("reachable") else "warn" if lightpanda_expected else "info",
                 "Lightpanda",
-                "Endpoint reachable" if lightpanda.get("reachable") else "Repo found but endpoint offline",
+                (
+                    "Endpoint reachable"
+                    if lightpanda.get("reachable")
+                    else "Repo found but endpoint offline"
+                    if lightpanda_expected
+                    else "Optional repo detected but backend is not selected"
+                ),
                 lightpanda.get("endpoint", ""),
             )
         )
@@ -197,14 +221,17 @@ def collect_doctor_report(limit: int = 6) -> dict:
         checks.append(_status_row("info", "Autoresearch", "Repo not detected"))
 
     if deerflow.get("repo_path"):
+        deerflow_expected = bool(deerflow_cfg.get("gateway_url") or deerflow_cfg.get("langgraph_url"))
         checks.append(
             _status_row(
-                "pass" if deerflow.get("proxy_reachable") else "warn",
+                "pass" if deerflow.get("proxy_reachable") else "warn" if deerflow_expected else "info",
                 "DeerFlow",
                 (
                     "Gateway reachable and super-agent harness is live"
                     if deerflow.get("proxy_reachable")
                     else "Repo detected but DeerFlow gateway is offline"
+                    if deerflow_expected
+                    else "Optional harness is installed but not running"
                 ),
                 deerflow.get("gateway_url", ""),
             )
@@ -257,7 +284,7 @@ def collect_doctor_report(limit: int = 6) -> dict:
     if pentagi.get("repo_path"):
         checks.append(
             _status_row(
-                "warn" if pentagi.get("audit_notice_present") and not pentagi.get("source_available") else "pass",
+                "info" if pentagi.get("audit_notice_present") and not pentagi.get("source_available") else "pass",
                 "PentAGI",
                 (
                     "Repo detected but upstream source is currently unavailable"

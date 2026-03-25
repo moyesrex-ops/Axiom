@@ -5,8 +5,8 @@ from core import doctor
 
 
 class DoctorTests(unittest.TestCase):
-    def test_doctor_report_surfaces_new_agent_and_integration_checks(self):
-        with patch.object(doctor, "load_runtime_config", return_value={"browser": {"backend": "playwright"}, "channels": {"telegram": {"enabled": False}}}), patch.object(
+    def test_doctor_report_surfaces_gemini_first_and_optional_integrations(self):
+        with patch.object(doctor, "load_runtime_config", return_value={"browser": {"backend": "playwright"}, "channels": {"telegram": {"enabled": False}}, "integrations": {}, "deerflow": {}}), patch.object(
             doctor, "get_secret", return_value="secret"
         ), patch.object(doctor, "_memory_store_status", return_value={"ok": True, "db_path": "memory/axiom_state.db"}), patch.object(
             doctor, "_has_module", return_value=True
@@ -45,8 +45,9 @@ class DoctorTests(unittest.TestCase):
         self.assertIn("Agent Library: 200 indexed agents across 4 sources", report)
         self.assertIn("Dexter: Repo detected and Bun available", report)
         self.assertIn("PentAGI: Repo detected but upstream source is currently unavailable", report)
-        self.assertIn("Automaton: Repo found but runtime configuration is incomplete", report)
-        self.assertIn("DeerFlow: Repo detected but DeerFlow gateway is offline", report)
+        self.assertIn("Gemini-First Startup: Base startup path is ready with Gemini; optional integrations are additive", report)
+        self.assertIn("Automaton: Optional repo detected but runtime is not enabled", report)
+        self.assertIn("DeerFlow: Optional harness is installed but not running", report)
         self.assertIn("Codex Builder: Codex CLI available", report)
 
 
