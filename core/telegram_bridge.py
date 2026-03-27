@@ -18,7 +18,7 @@ from memory.memory_manager import (
     remember_conversation_turn,
     search_memory_archive,
 )
-from memory.runtime_store import log_event, recent_task_runs
+from memory.runtime_store import get_channel_state, log_event, recent_task_runs, upsert_channel_state
 
 
 _BRIDGE_LOCK = threading.Lock()
@@ -67,6 +67,16 @@ _CHAT_PHRASES = {
     "tell me a joke",
     "thanks",
     "thank you",
+    "smooth thanks",
+    "ok thanks",
+    "okay thanks",
+    "thanks axiom",
+    "thank you axiom",
+    "nice thanks",
+    "cool thanks",
+    "awesome thanks",
+    "perfect thanks",
+    "got it thanks",
     "are you there",
 }
 _TASK_HINTS = (
@@ -149,6 +159,34 @@ def _plain_message_mode() -> str:
 
 def _api_url(method: str) -> str:
     return f"https://api.telegram.org/bot{_telegram_token()}/{method}"
+
+
+def _channel_state(chat_id: str) -> dict:
+    return get_channel_state("telegram", str(chat_id or "").strip())
+
+
+def _persist_channel_state(
+    chat_id: str,
+    *,
+    active_task_id: str | None = None,
+    last_task_id: str | None = None,
+    last_goal: str | None = None,
+    last_result: str | None = None,
+    last_user_text: str | None = None,
+    last_assistant_text: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    upsert_channel_state(
+        channel="telegram",
+        scope=str(chat_id or "").strip(),
+        active_task_id=active_task_id,
+        last_task_id=last_task_id,
+        last_goal=last_goal,
+        last_result=last_result,
+        last_user_text=last_user_text,
+        last_assistant_text=last_assistant_text,
+        metadata=metadata,
+    )
 
 
 def _trim_message(text: str, limit: int = 3900) -> str:
@@ -252,9 +290,16 @@ def _looks_like_chat_message(text: str) -> bool:
         return False
     if normalized in _CHAT_PHRASES:
         return True
+    if any(token in normalized for token in ("thank", "thanks", "appreciate", "good job", "nice one")):
+        return True
     if _looks_like_capability_question(normalized):
         return True
     if len(normalized.split()) <= 5 and normalized.endswith("?"):
+        return True
+    if len(normalized.split()) <= 4 and any(
+        token in normalized
+        for token in ("cool", "smooth", "nice", "awesome", "perfect", "got it", "all good")
+    ):
         return True
     return any(
         normalized.startswith(prefix)
@@ -348,12 +393,19 @@ def _relevant_memory_block(query: str) -> str:
 
 
 def _active_task_snapshot(chat_id: str) -> dict | None:
-    task_id = _ACTIVE_CHAT_TASKS.get(str(chat_id or "").strip())
+    chat_id = str(chat_id or "").strip()
+    task_id = _ACTIVE_CHAT_TASKS.get(chat_id)
+    if not task_id:
+        state = _channel_state(chat_id)
+        task_id = str(state.get("active_task_id", "") or "").strip()
+        if task_id:
+            _ACTIVE_CHAT_TASKS[chat_id] = task_id
     if not task_id:
         return None
     status = get_queue().get_status(task_id)
     if not status or status.get("status") not in ("pending", "running"):
-        _ACTIVE_CHAT_TASKS.pop(str(chat_id or "").strip(), None)
+        _ACTIVE_CHAT_TASKS.pop(chat_id, None)
+        _persist_channel_state(chat_id, active_task_id="")
         return None
     return status
 
@@ -369,12 +421,47 @@ def _format_active_task_status(chat_id: str) -> str:
     )
 
 
+def _last_task_result(chat_id: str) -> dict:
+    chat_id = str(chat_id or "").strip()
+    cached = _LAST_CHAT_TASK_RESULTS.get(chat_id) or {}
+    if cached:
+        return cached
+
+    state = _channel_state(chat_id)
+    task_id = str(state.get("last_task_id", "") or "").strip()
+    if not task_id:
+        return {}
+    result = {
+        "task_id": task_id,
+        "goal": str(state.get("last_goal", "") or "").strip(),
+        "result": str(state.get("last_result", "") or "").strip(),
+    }
+    _LAST_CHAT_TASK_RESULTS[chat_id] = result
+    return result
+
+
 def _render_task_completion_message(result: str) -> str:
     text = str(result or "").strip()
-    lowered = text.lower()
-    if lowered.startswith(("task failed", "task aborted", "task cancelled", "i couldn't", "i could not")):
-        return text
-    return f"Task complete.\n\n{text}".strip()
+    if not text:
+        return "Done."
+    return text
+
+
+def _task_ack_message(goal: str, task_id: str, explicit: bool = False) -> str:
+    normalized = _normalize_text(goal)
+    if explicit:
+        return f"Queued it.\n\nTask ID: {task_id}\nGoal: {goal[:300]}".strip()
+    if any(term in normalized for term in ("keyboard", "lighting", "backlight", "rgb", "lights")):
+        return "Changing that now."
+    if normalized.startswith(("open ", "launch ", "start ")):
+        return "Opening that now."
+    if normalized.startswith(("close ", "kill ", "restart ", "shutdown ")):
+        return "Handling that now."
+    if normalized.startswith(("search ", "look up ", "research ", "analyze ", "summarize ")):
+        return "Running that now."
+    if normalized.startswith(("create ", "build ", "make ", "write ", "deploy ", "fix ")):
+        return "Working on that now."
+    return "On it."
 
 
 def _extract_color_hint(text: str) -> str:
@@ -437,7 +524,7 @@ def _contextualize_task_goal(chat_id: str, text: str) -> str:
     if not original:
         return original
 
-    last_result = _LAST_CHAT_TASK_RESULTS.get(str(chat_id or "").strip()) or {}
+    last_result = _last_task_result(chat_id)
     if not last_result:
         return original
 
@@ -504,7 +591,7 @@ def _llm_plain_message_decision(text: str, chat_id: str = "") -> dict:
 
         genai.configure(api_key=api_key)
         active_task = _active_task_snapshot(chat_id)
-        last_result = _LAST_CHAT_TASK_RESULTS.get(str(chat_id or "").strip()) or {}
+        last_result = _last_task_result(chat_id)
 
         context_parts = []
         if active_task:
@@ -631,7 +718,7 @@ def _generate_chat_reply(user_text: str, chat_id: str = "") -> str:
         active_task = _active_task_snapshot(chat_id)
         if active_task:
             prompt_parts.append("[ACTIVE TASK]\n" + _format_active_task_status(chat_id))
-        last_result = _LAST_CHAT_TASK_RESULTS.get(str(chat_id or "").strip())
+        last_result = _last_task_result(chat_id)
         if last_result and _looks_like_task_followup(user_text):
             prompt_parts.append(
                 "[LAST TASK RESULT]\n"
@@ -658,7 +745,19 @@ def _generate_chat_reply(user_text: str, chat_id: str = "") -> str:
         reply = _trim_message(getattr(response, "text", "") or "")
         if not reply:
             reply = "I'm here. Send a clear instruction. I can either reply normally or execute the work directly."
-        remember_conversation_turn(user_text, reply)
+        remember_conversation_turn(
+            user_text,
+            reply,
+            channel="telegram",
+            channel_scope=chat_id,
+            metadata={"kind": "chat_reply"},
+        )
+        _persist_channel_state(
+            chat_id,
+            last_user_text=user_text,
+            last_assistant_text=reply,
+            metadata={"last_interaction": "chat_reply"},
+        )
         log_event("telegram", "chat_reply", user_text[:300], metadata={"reply_preview": reply[:220]})
         return reply
     except Exception as error:
@@ -696,7 +795,14 @@ def _format_recent_tasks(limit: int = 8) -> str:
     return "\n".join(lines)
 
 
-def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_func: Callable | None) -> None:
+def _queue_task(
+    chat_id: str,
+    goal: str,
+    reply_to_message_id: int | None,
+    log_func: Callable | None,
+    *,
+    explicit: bool = False,
+) -> None:
     queue = get_queue()
 
     def _on_complete(task_id: str, result: str) -> None:
@@ -709,7 +815,22 @@ def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_fu
             }
             final_text = _render_task_completion_message(result)
             _send_message(chat_id, final_text)
-            remember_conversation_turn(goal, result)
+            remember_conversation_turn(
+                goal,
+                result,
+                channel="telegram",
+                channel_scope=chat_id,
+                metadata={"kind": "task_result", "task_id": task_id},
+            )
+            _persist_channel_state(
+                chat_id,
+                active_task_id="",
+                last_task_id=task_id,
+                last_goal=goal,
+                last_result=result,
+                last_assistant_text=result,
+                metadata={"last_interaction": "task_result", "task_id": task_id},
+            )
             log_event("telegram", "task_finished", f"[{task_id}] {goal[:200]}")
         except Exception as send_error:
             log_event("telegram", "task_finish_send_failed", f"{task_id}: {send_error}")
@@ -719,9 +840,21 @@ def _queue_task(chat_id: str, goal: str, reply_to_message_id: int | None, log_fu
         priority=TaskPriority.NORMAL,
         speak=None,
         on_complete=_on_complete,
+        metadata={
+            "channel": "telegram",
+            "scope": chat_id,
+            "origin": "telegram_bridge",
+        },
     )
     _ACTIVE_CHAT_TASKS[chat_id] = task_id
-    ack = f"On it. Executing that now.\n\nTask ID: {task_id}\nGoal: {goal[:300]}"
+    _persist_channel_state(
+        chat_id,
+        active_task_id=task_id,
+        last_goal=goal,
+        last_user_text=goal,
+        metadata={"last_interaction": "task_queued", "task_id": task_id},
+    )
+    ack = _task_ack_message(goal, task_id, explicit=explicit)
     _send_message(chat_id, ack, reply_to_message_id=reply_to_message_id)
     log_event("telegram", "task_queued", f"[{task_id}] {goal[:200]}")
     if log_func:
@@ -752,6 +885,12 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         _send_message(chat_id, "This Telegram chat is not authorized for AXIOM.")
         log_event("telegram", "unauthorized_chat", chat_id)
         return
+
+    _persist_channel_state(
+        chat_id,
+        last_user_text=text,
+        metadata={"last_message_id": message.get("message_id")},
+    )
 
     reply_to_message_id = message.get("message_id")
     execution_enabled = _chat_can_execute(chat_id)
@@ -821,7 +960,7 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
                 resolved_goal[:300],
                 metadata={"chat_id": chat_id, "original_goal": goal[:300]},
             )
-        _queue_task(chat_id, resolved_goal, reply_to_message_id, log_func)
+        _queue_task(chat_id, resolved_goal, reply_to_message_id, log_func, explicit=True)
         return
 
     active_task = _active_task_snapshot(chat_id)
@@ -867,7 +1006,7 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
                     goal[:300],
                     metadata={"chat_id": chat_id, "original_goal": text[:300]},
                 )
-            _queue_task(chat_id, goal, reply_to_message_id, log_func)
+            _queue_task(chat_id, goal, reply_to_message_id, log_func, explicit=False)
             return
 
     _reply_to_chat(chat_id, text, reply_to_message_id)

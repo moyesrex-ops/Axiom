@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from agent.executor import AgentExecutor, _specialist_context
+from agent.executor import AgentExecutor, _direct_tool_for_goal, _specialist_context
 
 
 class ExecutorDirectRouteTests(unittest.TestCase):
@@ -95,6 +95,36 @@ class ExecutorDirectRouteTests(unittest.TestCase):
 
         self.assertIn("[LEARNED STRATEGIES]", context)
         self.assertIn("Task Strategy: Build dashboard", context)
+
+    def test_specialist_context_includes_skill_preview_guidance(self):
+        with patch("agent.executor.search_knowledge_items", return_value=[]), patch(
+            "agent.executor._should_prepare_specialists",
+            return_value=True,
+        ), patch(
+            "core.skill_library.recommend_skill_library",
+            return_value=[
+                {
+                    "id": "planning_with_files:planning-with-files",
+                    "name": "planning-with-files",
+                    "description": "Persistent file-backed planning workflow.",
+                    "content_preview": "Create task_plan.md, findings.md, and progress.md to keep multi-step work grounded.",
+                }
+            ],
+        ), patch("core.agent_library.recommend_agent_library", return_value=[]):
+            context = _specialist_context("plan a complex implementation")
+
+        self.assertIn("[RECOMMENDED SKILLS]", context)
+        self.assertIn("Guidance: Create task_plan.md", context)
+
+    def test_market_goal_is_not_misrouted_to_codex_builder(self):
+        goal = (
+            "continuous deep analysis of forex markets with appropriate parameters, "
+            "then place MT5 trades based on the research"
+        )
+
+        direct = _direct_tool_for_goal(goal)
+
+        self.assertNotEqual(direct[0] if direct else None, "codex_builder")
 
 
 if __name__ == "__main__":

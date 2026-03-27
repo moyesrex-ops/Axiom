@@ -1,5 +1,5 @@
 # A.X.I.O.M v4.3
-### Windows-first operator with real execution, shared voice and Telegram control, persistent memory, and imported specialist runtimes
+### Windows-first operator with real execution, shared voice and Telegram control, speech-gated interruption, persistent memory, and imported specialist runtimes
 
 <p align="center">
   <img src="assets/banner.png" alt="AXIOM Banner" width="100%">
@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>One local runtime, one command, real tool execution.</b><br>
-  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Memory / SQLite State · Boot Doctor · Imported Skill Libraries · Imported Agent Catalogs · Telegram Operator Mode · DeerFlow · Paperclip · OpenFang · Symphony · lossless-claw
+  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Shared Voice / Telegram State · Speech-Gated Barge-In · Memory / SQLite State · Boot Doctor · Imported Skill Libraries · Imported Agent Catalogs · Telegram Operator Mode · DeerFlow · Paperclip · OpenFang · Symphony · lossless-claw
 </p>
 
 <p align="center">
@@ -170,22 +170,26 @@ flowchart TB
     end
     subgraph State
         Memory[(SQLite state and archives)]
+        ChannelState[(channel handoff state)]
         Config[config/runtime.json<br/>config/runtime.local.json]
     end
 
     Voice --> Main
     Telegram --> Main
     Main --> Planner --> Executor
+    Main --> ChannelState
     Executor --> Actions
     Executor --> Skills
     Executor --> Agents
     Executor --> Bridges
     Main --> Doctor
     Actions --> Memory
+    Actions --> ChannelState
     Skills --> Config
     Agents --> Config
     Bridges --> Config
     Doctor --> Memory
+    ChannelState --> Memory
 ```
 
 The architecture is not "LLM plus random scripts". It has four real layers:
@@ -211,6 +215,7 @@ sequenceDiagram
     participant Planner as Planner
     participant Exec as Executor
     participant Tools as Local tools and sidecars
+    participant State as SQLite handoff state
 
     Voice->>Router: spoken command
     Tg->>Router: plain actionable message
@@ -218,6 +223,8 @@ sequenceDiagram
     Planner->>Exec: tool plan
     Exec->>Tools: browser, desktop, terminal, memory, bridge controls
     Tools-->>Exec: real system result
+    Exec->>State: persist active task / last result / channel context
+    State-->>Router: recover follow-up context across channels
     Exec-->>Voice: UI or spoken response
     Exec-->>Tg: conversational reply plus task status
 ```
@@ -228,6 +235,7 @@ Practical rules:
 - In Telegram `operator` mode, plain actionable messages default toward execution.
 - Clearly conversational or status-style messages stay conversational.
 - Both channels are supposed to hit the same planner, executor, and tool surface.
+- Active task state and last-result context are now written into durable per-channel state so follow-ups can survive reconnects and bridge restarts.
 
 ---
 
@@ -244,10 +252,11 @@ It now persists:
 - archived conversation turns
 - runtime events and failures
 - task lifecycle checkpoints
+- per-channel handoff state for local voice and Telegram
 - structured long-term memory
 - searchable archived knowledge
 
-That gives the runtime an actual recall loop across sessions instead of pretending memory exists because the prompt says so.
+That gives the runtime an actual recall loop across sessions and channels instead of pretending memory exists because the prompt says so.
 
 ---
 
@@ -257,11 +266,21 @@ That gives the runtime an actual recall loop across sessions instead of pretendi
   <img src="assets/live-runtime-resilience.svg" alt="AXIOM live runtime resilience" width="100%">
 </p>
 
-The live layer is built around three practical concerns:
+The live layer is built around four practical concerns:
 
 - better capture of softer or accented speech through adaptive gain behavior
+- speech-gated interruption that waits for sustained speech-like audio instead of cutting off on any random spike
 - operator-mode Telegram routing that can execute plain actionable messages without forcing slash commands
 - reconnect recovery that restores recent context and logs runtime instability
+
+```mermaid
+flowchart LR
+    Playback[AXIOM speaking] --> Gate{speech-gated barge-in}
+    Noise[random spike or click] --> Gate
+    UserSpeech[sustained speech-like audio] --> Gate
+    Gate -->|ignore| Playback
+    Gate -->|interrupt and hand control back| Listen[AXIOM listening]
+```
 
 ---
 
@@ -329,6 +348,16 @@ Important high-level keys:
   "voice_name": "Charon",
   "voice_backend": "gemini_live",
   "live_model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+  "audio": {
+    "target_input_rms": 4200.0,
+    "max_input_gain": 6.2,
+    "interrupt": {
+      "required_speech_frames": 3,
+      "history_frames": 4,
+      "playback_multiplier": 0.34,
+      "speaker_guard_ms": 120
+    }
+  },
   "channels": {
     "telegram": {
       "enabled": false,
@@ -356,6 +385,8 @@ Important high-level keys:
     "enabled": true,
     "everything_claude_code_path": "",
     "superpowers_path": "",
+    "planning_with_files_path": "",
+    "last30days_skill_path": "",
     "antigravity_skills_path": "",
     "impeccable_path": "",
     "gstack_path": "",
@@ -373,6 +404,7 @@ Important high-level keys:
     "tradingagents_path": "",
     "paperclip_path": "",
     "openfang_path": "",
+    "openmanus_path": "",
     "symphony_path": "",
     "lossless_claw_path": "",
     "delegate_limit": 3
@@ -431,6 +463,8 @@ Example local override:
     "gstack_path": "C:\\Users\\you\\Axiom_research\\external\\gstack",
     "cli_anything_path": "C:\\Users\\you\\Axiom_research\\external\\CLI-Anything",
     "uncodixfy_path": "C:\\Users\\you\\Axiom_research\\external\\Uncodixfy",
+    "planning_with_files_path": "C:\\Users\\you\\Axiom_research\\external\\planning-with-files",
+    "last30days_skill_path": "C:\\Users\\you\\Axiom_research\\external\\last30days-skill",
     "paperclip_path": "C:\\Users\\you\\Axiom_research\\external\\paperclip",
     "openfang_path": "C:\\Users\\you\\Axiom_research\\external\\openfang"
   },
@@ -442,6 +476,7 @@ Example local override:
     "tradingagents_path": "C:\\Users\\you\\Axiom_research\\external\\TradingAgents",
     "paperclip_path": "C:\\Users\\you\\Axiom_research\\external\\paperclip",
     "openfang_path": "C:\\Users\\you\\Axiom_research\\external\\openfang",
+    "openmanus_path": "C:\\Users\\you\\Axiom_research\\external\\OpenManus",
     "symphony_path": "C:\\Users\\you\\Axiom_research\\external\\symphony",
     "lossless_claw_path": "C:\\Users\\you\\Axiom_research\\external\\lossless-claw"
   },
@@ -474,6 +509,7 @@ Behavioral notes:
 
 - Telegram is optional.
 - Telegram no longer has to be slash-command driven when `plain_message_mode` is `operator`.
+- Voice interruption is tuned through `audio.interrupt.*` and now expects sustained speech-like audio instead of any single spike.
 - Public IP lookup is opt-in.
 - Browser default stays on Playwright unless you explicitly opt into Lightpanda.
 - Boot doctor summaries are written into the startup log before the live loop starts.
@@ -554,6 +590,8 @@ AXIOM can index local copies of:
 
 - `everything-claude-code`
 - `superpowers`
+- `OthmanAdi/planning-with-files`
+- `mvanhorn/last30days-skill`
 - `antigravity-awesome-skills`
 - `pbakaus/impeccable`
 - `garrytan/gstack`
@@ -572,6 +610,7 @@ Current integrated sources:
 
 - `wshobson/agents`
 - `VoltAgent/awesome-claude-code-subagents`
+- `FoundationAgents/OpenManus` as a planning, MCP, orchestration, and general tool-agent reference source
 - `virattt/dexter` as a finance-research specialist entry
 - `vxcontrol/pentagi` as a security specialist entry with runtime limitations reported honestly
 - `TauricResearch/TradingAgents` as a market-analysis specialist source derived from its analyst/research/trader/risk roles

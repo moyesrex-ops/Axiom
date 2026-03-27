@@ -82,7 +82,11 @@ def skill_library(parameters: dict = None, player=None, speak=None) -> str:
         skill_ref = str(params.get("skill", "") or params.get("id", "") or params.get("slug", "") or "").strip()
         if not skill_ref:
             return "Use action='read' with skill=<source:slug> or a skill name."
-        report = format_skill_entry(skill_ref, source_id=source_id)
+        report = format_skill_entry(
+            skill_ref,
+            source_id=source_id,
+            content_limit=int(params.get("content_limit", 1400) or 1400),
+        )
         log_event("capabilities", "skill_library_read", skill_ref[:200])
         if save and "Skill not found" not in report:
             save_to_nexus(

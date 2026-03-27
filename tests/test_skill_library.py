@@ -115,6 +115,66 @@ class SkillLibraryTests(unittest.TestCase):
 
         self.assertEqual(second[0]["description"], "Updated version")
 
+    def test_recommend_prefers_planning_with_files_for_planning_tasks(self):
+        repo_path = self._workspace_dir("planning_with_files_repo")
+        skill_dir = repo_path / "skills" / "planning-with-files"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: planning-with-files\ndescription: Persistent markdown planning for multi-step work\n---\nBody\n",
+            encoding="utf-8",
+        )
+        runtime = {
+            "skill_library": {
+                "enabled": True,
+                "planning_with_files_path": str(repo_path),
+            }
+        }
+        source_specs = {
+            "planning_with_files": {
+                "name": "planning-with-files",
+                "config_key": "planning_with_files_path",
+                "default_candidates": [],
+                "skills_subdir": "skills",
+            }
+        }
+
+        with patch.object(sk, "load_runtime_config", return_value=runtime), patch.object(
+            sk, "_SOURCE_SPECS", source_specs
+        ):
+            rows = sk.recommend_skill_library("plan and track a multi-step implementation workflow", limit=2)
+
+        self.assertEqual(rows[0]["source_id"], "planning_with_files")
+
+    def test_recommend_prefers_last30days_for_recent_social_research(self):
+        repo_path = self._workspace_dir("last30days_repo")
+        skill_dir = repo_path / "skills" / "last30days"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: last30days\ndescription: Research the last 30 days across Reddit and X\n---\nBody\n",
+            encoding="utf-8",
+        )
+        runtime = {
+            "skill_library": {
+                "enabled": True,
+                "last30days_skill_path": str(repo_path),
+            }
+        }
+        source_specs = {
+            "last30days": {
+                "name": "last30days-skill",
+                "config_key": "last30days_skill_path",
+                "default_candidates": [],
+                "skills_subdir": "skills",
+            }
+        }
+
+        with patch.object(sk, "load_runtime_config", return_value=runtime), patch.object(
+            sk, "_SOURCE_SPECS", source_specs
+        ):
+            rows = sk.recommend_skill_library("research the latest reddit and x trends from the last 30 days", limit=2)
+
+        self.assertEqual(rows[0]["source_id"], "last30days")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,30 @@ _SOURCE_SPECS = {
             Path.home() / "Axiom_research" / "external" / "superpowers",
         ],
     },
+    "planning_with_files": {
+        "name": "planning-with-files",
+        "config_key": "planning_with_files_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "planning-with-files",
+        ],
+        "skills_subdir": "skills",
+    },
+    "last30days": {
+        "name": "last30days-skill",
+        "config_key": "last30days_skill_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "last30days-skill",
+        ],
+        "skills_subdir": "skills",
+    },
+    "last30days_open": {
+        "name": "last30days Open Variant",
+        "config_key": "last30days_skill_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "last30days-skill",
+        ],
+        "skills_subdir": "variants/open",
+    },
     "antigravity": {
         "name": "Antigravity Awesome Skills",
         "config_key": "antigravity_skills_path",
@@ -99,7 +123,7 @@ _SOURCE_SPECS = {
     },
 }
 
-_SKIP_PARTS = {"assets", "docs", "examples", "templates"}
+_SKIP_PARTS = {"assets", "docs", "examples", "fixtures", "plans", "templates", "vendor"}
 _INDEX_CACHE: dict = {"signature": None, "entries": []}
 _CURATED_RECOMMENDATIONS = [
     {
@@ -533,6 +557,16 @@ def recommend_skill_library(task: str, limit: int = 8) -> list[dict]:
             for word in ("plan", "review", "qa", "ship", "orchestrate", "parallel", "workflow", "design")
         ):
             score += 18
+        if source_id == "planning_with_files" and any(
+            word in task_text
+            for word in ("plan", "planning", "organize", "track", "progress", "session", "recover", "workflow")
+        ):
+            score += 34
+        if source_id in {"last30days", "last30days_open"} and any(
+            word in task_text
+            for word in ("research", "latest", "recent", "social", "reddit", "x ", "twitter", "trending", "trend", "30 days")
+        ):
+            score += 34
         if source_id == "cli_anything" and any(
             word in task_text
             for word in ("cli", "desktop", "software", "browser", "automation", "app", "native")

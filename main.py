@@ -65,7 +65,8 @@ from actions.lead_researcher       import lead_researcher
 from actions.swarm_orchestrator    import swarm_orchestrator
 from actions.symphony_control      import symphony_control
 from agent.heartbeat               import HeartbeatDaemon
-from core.capabilities             import format_capability_status
+from core.audio_barge_in           import BargeInDetector, tuning_from_runtime
+from core.capabilities             import format_capability_status, format_operator_surface
 from core.doctor                   import boot_doctor_lines
 from core.integration_manager      import boot_integrations
 from core.runtime_config           import load_runtime_config
@@ -141,10 +142,21 @@ def _is_invalid_resumption_error(error: BaseException) -> bool:
     return "1008" in text and ("not implemented" in text or "session resumption" in text or "operation is not implemented" in text)
 
 
-def _update_memory_async(user_text: str, axiom_text: str) -> None:
+def _update_memory_async(
+    user_text: str,
+    axiom_text: str,
+    channel: str = "voice",
+    channel_scope: str = "local",
+) -> None:
     global _memory_turn_counter, _last_memory_input
 
-    remember_conversation_turn(user_text, axiom_text)
+    remember_conversation_turn(
+        user_text,
+        axiom_text,
+        channel=channel,
+        channel_scope=channel_scope,
+        metadata={"kind": "conversation"},
+    )
 
     with _memory_turn_lock:
         _memory_turn_counter += 1
@@ -393,19 +405,23 @@ TOOL_DECLARATIONS = [
     {
         "name": "cmd_control",
         "description": (
-            "Runs CMD/terminal commands by understanding natural language. "
-            "Use when user wants to: find large files, check disk space, list processes, "
-            "get system info, navigate folders, check network, find files by name, "
-            "or do ANYTHING in the command line they don't know how to do themselves."
+            "Runs serious local terminal work through PowerShell, CMD, Bash, or a VS Code integrated terminal. "
+            "Use this for exact shell commands, PowerShell automation, Codex CLI usage, repo-local terminal work, "
+            "and command-line tasks that should execute on the real machine instead of being described abstractly."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "task":    {"type": "STRING", "description": "Natural language description of what to do. Example: 'find the 10 largest files on C drive'"},
-                "visible": {"type": "BOOLEAN", "description": "Open visible CMD window so user can see. Default: true"},
-                "command": {"type": "STRING", "description": "Optional: exact command if already known"},
+                "task": {"type": "STRING", "description": "Natural language description of what to do. Example: 'open a PowerShell in the repo and run codex --help'"},
+                "command": {"type": "STRING", "description": "Optional exact shell command if already known"},
+                "shell": {"type": "STRING", "description": "auto | powershell | pwsh | cmd | bash"},
+                "cwd": {"type": "STRING", "description": "Working directory path or shortcut: repo | workspace | home | desktop | downloads | documents"},
+                "visible": {"type": "BOOLEAN", "description": "Open a real visible terminal window when true. If omitted, AXIOM infers visibility from the task."},
+                "open_in_vscode": {"type": "BOOLEAN", "description": "Open the workspace in VS Code and send the command to the integrated terminal"},
+                "keep_open": {"type": "BOOLEAN", "description": "Keep the visible terminal open after running the command"},
+                "timeout": {"type": "INTEGER", "description": "Timeout for non-visible execution in seconds"},
             },
-            "required": ["task"]
+            "required": []
         }
     },
     {
@@ -453,7 +469,8 @@ TOOL_DECLARATIONS = [
     "name": "codex_builder",
     "description": (
         "Builds real runnable projects using Codex CLI. "
-        "Use this for polished websites, apps, playable games, and multi-file builds where the user needs a real artifact path, run command, or open target."
+        "Use this for polished websites, apps, playable games, and multi-file builds where the user needs a real artifact path, run command, or open target. "
+        "Do NOT use it for market analysis, trading decisions, generic research, or non-software tasks."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -494,6 +511,7 @@ TOOL_DECLARATIONS = [
         "Always respond to the user in the language they spoke. "
         "Examples: 'research X and save to file', 'find files and organize them', "
         "'fill a form on a website', 'write and test code'. "
+        "If you are about to tell the user that a background or multi-step task is underway, you must call this tool first. "
         "DO NOT use for simple computer commands like volume, refresh, close, scroll, "
         "minimize, screenshot, restart, shutdown - use computer_settings for those. "
         "DO NOT use if the task can be done with a single tool call."
@@ -754,8 +772,9 @@ TOOL_DECLARATIONS = [
     "description": (
         "Searches and reads integrated external skill libraries from Everything Claude Code, "
         "Superpowers, Antigravity, DeerFlow, Impeccable, gstack, CLI-Anything, Uncodixfy, Paperclip, OpenFang, "
-        "and local skills. Use this for coding workflows, debugging patterns, testing playbooks, UI design guidance, "
-        "review checklists, or implementation strategy references."
+        "planning-with-files, last30days, and local skills. Use this for coding workflows, debugging patterns, "
+        "testing playbooks, UI design guidance, planning/recovery workflows, recent-trend research, review checklists, "
+        "or implementation strategy references."
     ),
     "parameters": {
         "type": "OBJECT",
@@ -766,6 +785,7 @@ TOOL_DECLARATIONS = [
             "skill": {"type": "STRING", "description": "Skill id or name for read"},
             "source": {"type": "STRING", "description": "Optional source id filter"},
             "limit": {"type": "INTEGER", "description": "Optional result limit"},
+            "content_limit": {"type": "INTEGER", "description": "Optional text limit for read"},
             "save": {"type": "BOOLEAN", "description": "Whether to save results to memory"}
         },
         "required": []
@@ -775,7 +795,8 @@ TOOL_DECLARATIONS = [
     "name": "agent_library",
     "description": (
         "Searches, reads, recommends, and supervises imported specialist agent catalogs, including "
-        "frontend, backend, design, research, security, studio, and strategy roles. "
+        "frontend, backend, design, research, security, studio, strategy, and orchestration roles from catalogs such as "
+        "OpenManus, TradingAgents, OpenFang, Dexter, and imported subagent libraries. "
         "Use this when AXIOM should choose specialist agents or delegate a task to them."
     ),
     "parameters": {
@@ -810,7 +831,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | doctor | context | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | operator | routing | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -1092,8 +1113,7 @@ class AxiomLive:
         self.is_speaking          = False
         self.TARGET_INPUT_RMS     = 4200.0
         self.MAX_INPUT_GAIN       = 6.2
-        self.MIN_INTERRUPT_RMS    = 850.0
-        self._ambient_rms         = 120.0
+        self._interrupt_detector  = BargeInDetector()
         self._speaker_guard_until = 0.0
 
         self._input_turn_buffer   = []
@@ -1102,8 +1122,23 @@ class AxiomLive:
         self._last_disconnect_reason = ""
         self._session_resumption_handle = ""
         self._session_resumable = False
+        self._session_resumption_supported = True
         self._go_away_requested = False
+        self._last_disconnect_was_planned = False
         self._shutdown_requested = threading.Event()
+        self._apply_audio_runtime_config(load_runtime_config())
+
+    def _apply_audio_runtime_config(self, runtime: dict | None = None) -> None:
+        runtime = runtime or load_runtime_config()
+        audio_cfg = runtime.get("audio", {}) or {}
+        previous_ambient = getattr(self._interrupt_detector, "ambient_rms", 120.0)
+        previous_playback = getattr(self._interrupt_detector, "playback_rms", 0.0)
+
+        self.TARGET_INPUT_RMS = float(audio_cfg.get("target_input_rms", 4200.0) or 4200.0)
+        self.MAX_INPUT_GAIN = float(audio_cfg.get("max_input_gain", 6.2) or 6.2)
+        self._interrupt_detector = BargeInDetector(tuning_from_runtime(runtime))
+        self._interrupt_detector.ambient_rms = previous_ambient
+        self._interrupt_detector.playback_rms = previous_playback
 
     def speak(self, text: str):
         """Thread-safe speak - any thread can call this."""
@@ -1118,10 +1153,13 @@ class AxiomLive:
          )
 
     def _interrupt_threshold(self) -> float:
-        return max(self.MIN_INTERRUPT_RMS, self._ambient_rms * 3.35)
+        return self._interrupt_detector.interrupt_threshold()
 
     def _speaker_guard_threshold(self) -> float:
-        return max(360.0, self._ambient_rms * 2.2)
+        return self._interrupt_detector.speaker_guard_threshold()
+
+    def _speaker_guard_seconds(self) -> float:
+        return self._interrupt_detector.speaker_guard_seconds()
 
     def _adaptive_gain(self, rms: float) -> float:
         if rms <= 60:
@@ -1143,7 +1181,7 @@ class AxiomLive:
         if full_in and len(full_in) > 5:
             threading.Thread(
                 target=_update_memory_async,
-                args=(full_in, full_out),
+                args=(full_in, full_out, "voice", "local"),
                 daemon=True
             ).start()
 
@@ -1162,7 +1200,13 @@ class AxiomLive:
             self.ui.write_log(f"Axiom (recovered): {full_out}")
 
         if full_in and len(full_in) > 5:
-            remember_conversation_turn(full_in, full_out)
+            remember_conversation_turn(
+                full_in,
+                full_out,
+                channel="voice",
+                channel_scope="local",
+                metadata={"kind": "recovered_partial"},
+            )
 
         log_event(
             "session",
@@ -1175,6 +1219,8 @@ class AxiomLive:
         )
 
     def _note_session_resumption_update(self, update: types.LiveServerSessionResumptionUpdate) -> None:
+        if not self._session_resumption_supported:
+            return
         new_handle = str(getattr(update, "new_handle", "") or "").strip()
         resumable = bool(getattr(update, "resumable", False))
         last_index = getattr(update, "last_consumed_client_message_index", None)
@@ -1224,7 +1270,6 @@ class AxiomLive:
         time_left = str(getattr(go_away, "time_left", "") or "").strip()
         detail = time_left or "server requested reconnect"
         self._last_disconnect_reason = f"Server requested reconnect ({detail})"
-        self.ui.write_log("SYS: Live session is rotating. Reconnecting cleanly.")
         log_event(
             "session",
             "go_away",
@@ -1246,7 +1291,9 @@ class AxiomLive:
         memory  = load_memory()
         mem_str = format_memory_for_prompt(memory)
         runtime = load_runtime_config()
+        self._apply_audio_runtime_config(runtime)
         capability_status = format_capability_status()
+        operator_surface = format_operator_surface(limit=4)
         context_status = format_prompt_system_context()
 
         sys_prompt = _load_system_prompt()
@@ -1269,7 +1316,7 @@ class AxiomLive:
                 "Do not act like the conversation context was lost.\n\n"
             )
 
-        prompt_prefix = time_ctx + context_status + "\n\n" + recovery_ctx
+        prompt_prefix = time_ctx + context_status + "\n\n" + operator_surface + "\n\n" + recovery_ctx
         if mem_str:
             sys_prompt = prompt_prefix + mem_str + "\n\n" + capability_status + "\n\n" + sys_prompt
         else:
@@ -1277,17 +1324,12 @@ class AxiomLive:
 
         self.live_model = runtime.get("live_model") or DEFAULT_LIVE_MODEL
         voice_name = runtime.get("voice_name") or "Charon"
-        session_resumption = types.SessionResumptionConfig()
-        if self._session_resumption_handle:
-            session_resumption.handle = self._session_resumption_handle
-
-        return types.LiveConnectConfig(
+        config_kwargs = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction=sys_prompt,
             tools=[{"function_declarations": TOOL_DECLARATIONS}],
-            session_resumption=session_resumption,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -1296,6 +1338,13 @@ class AxiomLive:
                 )
             ),
         )
+        if self._session_resumption_supported:
+            session_resumption = types.SessionResumptionConfig()
+            if self._session_resumption_handle:
+                session_resumption.handle = self._session_resumption_handle
+            config_kwargs["session_resumption"] = session_resumption
+
+        return types.LiveConnectConfig(**config_kwargs)
 
     async def _execute_tool(self, fc) -> types.FunctionResponse:
         name = fc.name
@@ -1429,6 +1478,11 @@ class AxiomLive:
                     goal=goal,
                     priority=priority,
                     speak=self.speak,
+                    metadata={
+                        "channel": "voice",
+                        "scope": "local",
+                        "origin": "agent_task",
+                    },
                 )
                 result = f"Task started (ID: {task_id}). I'll update you as I make progress."
 
@@ -1752,19 +1806,38 @@ class AxiomLive:
                         32767,
                     ).astype(np.int16)
                     boosted_data = boosted_audio.tobytes()
-                    interrupt_threshold = self._interrupt_threshold()
 
-                    if not self.is_speaking and rms < (interrupt_threshold * 0.8):
-                        self._ambient_rms = (self._ambient_rms * 0.92) + (max(rms, 50.0) * 0.08)
+                    interrupt_threshold = self._interrupt_threshold()
+                    if not self.is_speaking:
+                        self._interrupt_detector.reset()
+                        self._interrupt_detector.observe_playback_rms(0.0)
+                        if rms < (interrupt_threshold * 0.8):
+                            self._interrupt_detector.observe_idle_rms(rms)
                     
                     if self.is_speaking:
-                        if rms > interrupt_threshold:
-                            print(f"[AXIOM] Interrupted by user (RMS: {rms:.0f}, threshold: {interrupt_threshold:.0f})")
+                        analysis = self._interrupt_detector.analyze(raw_audio, sample_rate=SEND_SAMPLE_RATE)
+                        if analysis.triggered:
+                            print(
+                                "[AXIOM] Interrupted by user "
+                                f"(RMS: {analysis.rms:.0f}, threshold: {analysis.interrupt_threshold:.0f}, "
+                                f"speech_ratio: {analysis.speech_band_ratio:.2f})"
+                            )
+                            log_event(
+                                "voice",
+                                "barge_in",
+                                f"RMS={analysis.rms:.0f}",
+                                metadata={
+                                    "rms": round(analysis.rms, 2),
+                                    "threshold": round(analysis.interrupt_threshold, 2),
+                                    "speech_band_ratio": round(analysis.speech_band_ratio, 4),
+                                    "zero_crossing_ratio": round(analysis.zero_crossing_ratio, 4),
+                                },
+                            )
                             while not self.audio_in_queue.empty():
                                 try: self.audio_in_queue.get_nowait()
                                 except: break
                             self.is_speaking = False
-                            self._speaker_guard_until = time.time() + 0.10
+                            self._speaker_guard_until = time.time() + self._speaker_guard_seconds()
                             data = boosted_data
                         else:
                             data = b'\x00' * len(data)
@@ -1844,11 +1917,12 @@ class AxiomLive:
         try:
             while True:
                 chunk = await self.audio_in_queue.get()
+                self._interrupt_detector.observe_playback_chunk(chunk)
                 self.is_speaking = True
                 await asyncio.to_thread(stream.write, chunk)
                 if self.audio_in_queue.empty():
                     self.is_speaking = False
-                    self._speaker_guard_until = time.time() + 0.12
+                    self._speaker_guard_until = time.time() + self._speaker_guard_seconds()
         except Exception as e:
             print(f"[AXIOM] Playback error: {e}")
             raise
@@ -1861,91 +1935,101 @@ class AxiomLive:
             api_key=_get_api_key(),
             http_options={"api_version": "v1beta"}
         )
+        heartbeat = HeartbeatDaemon(speak_func=self.speak, log_func=self.ui.write_log)
+        heartbeat_task = asyncio.create_task(heartbeat.start())
 
-        while not self._shutdown_requested.is_set():
-            try:
-                reconnecting = self._disconnect_count > 0
-                print("[AXIOM] Connecting...")
-                config = self._build_config()
+        try:
+            while not self._shutdown_requested.is_set():
+                try:
+                    reconnecting = self._disconnect_count > 0
+                    print("[AXIOM] Connecting...")
+                    config = self._build_config()
 
-                async with (
-                    client.aio.live.connect(model=self.live_model, config=config) as session,
-                    asyncio.TaskGroup() as tg,
-                ):
-                    self.session        = session
-                    self._loop          = asyncio.get_event_loop()
-                    self.audio_in_queue = asyncio.Queue()
-                    self.out_queue      = asyncio.Queue(maxsize=10)
-                    self._go_away_requested = False
+                    async with (
+                        client.aio.live.connect(model=self.live_model, config=config) as session,
+                        asyncio.TaskGroup() as tg,
+                    ):
+                        self.session        = session
+                        self._loop          = asyncio.get_event_loop()
+                        self.audio_in_queue = asyncio.Queue()
+                        self.out_queue      = asyncio.Queue(maxsize=10)
+                        self._go_away_requested = False
 
-                    print("[AXIOM] Connected.")
-                    if reconnecting:
-                        self.ui.write_log("SYS: Live link restored. Recent context was reloaded.")
+                        print("[AXIOM] Connected.")
+                        if reconnecting:
+                            if not self._last_disconnect_was_planned:
+                                self.ui.write_log("SYS: Live link restored. Recent context was reloaded.")
+                            log_event(
+                                "session",
+                                "reconnected",
+                                self._last_disconnect_reason[:500],
+                                metadata={"used_resumption_handle": bool(self._session_resumption_handle)},
+                            )
+                        else:
+                            self.ui.write_log("AXIOM online.")
+                            log_event("session", "connected", "Live session established.")
+                        self._last_disconnect_reason = ""
+
+                        tg.create_task(self._send_realtime())
+                        tg.create_task(self._listen_audio())
+                        tg.create_task(self._receive_audio())
+                        tg.create_task(self._play_audio())
+
+                except Exception as e:
+                    if self._shutdown_requested.is_set():
+                        break
+                    self._disconnect_count += 1
+                    self._last_disconnect_reason = _summarize_exception(e)
+                    planned_rotation = self._go_away_requested and _is_clean_rotation_error(e)
+                    self._last_disconnect_was_planned = planned_rotation
+                    invalid_resumption = _is_invalid_resumption_error(e)
+                    if invalid_resumption:
+                        stale_handle = self._session_resumption_handle
+                        self._session_resumption_handle = ""
+                        self._session_resumable = False
+                        self._session_resumption_supported = False
                         log_event(
                             "session",
-                            "reconnected",
-                            self._last_disconnect_reason[:500],
-                            metadata={"used_resumption_handle": bool(self._session_resumption_handle)},
+                            "resumption_handle_cleared",
+                            stale_handle[:48],
+                            metadata={"reason": self._last_disconnect_reason[:220], "supported": False},
                         )
-                    else:
-                        self.ui.write_log("AXIOM online.")
-                        log_event("session", "connected", "Live session established.")
-                    self._last_disconnect_reason = ""
-
-                    heartbeat = HeartbeatDaemon(speak_func=self.speak, log_func=self.ui.write_log)
-                    tg.create_task(heartbeat.start())
-
-                    tg.create_task(self._send_realtime())
-                    tg.create_task(self._listen_audio())
-                    tg.create_task(self._receive_audio())
-                    tg.create_task(self._play_audio())
-
-            except Exception as e:
-                if self._shutdown_requested.is_set():
-                    break
-                self._disconnect_count += 1
-                self._last_disconnect_reason = _summarize_exception(e)
-                planned_rotation = self._go_away_requested and _is_clean_rotation_error(e)
-                invalid_resumption = _is_invalid_resumption_error(e)
-                if invalid_resumption and self._session_resumption_handle:
-                    stale_handle = self._session_resumption_handle
-                    self._session_resumption_handle = ""
-                    self._session_resumable = False
                     log_event(
                         "session",
-                        "resumption_handle_cleared",
-                        stale_handle[:48],
-                        metadata={"reason": self._last_disconnect_reason[:220]},
+                        "rotation_reconnect" if planned_rotation else "connection_error",
+                        self._last_disconnect_reason[:500],
+                        metadata={
+                            "disconnect_count": self._disconnect_count,
+                            "has_resumption_handle": bool(self._session_resumption_handle),
+                            "go_away_requested": self._go_away_requested,
+                            "invalid_resumption": invalid_resumption,
+                            "resumption_supported": self._session_resumption_supported,
+                        },
                     )
-                log_event(
-                    "session",
-                    "rotation_reconnect" if planned_rotation else "connection_error",
-                    self._last_disconnect_reason[:500],
-                    metadata={
-                        "disconnect_count": self._disconnect_count,
-                        "has_resumption_handle": bool(self._session_resumption_handle),
-                        "go_away_requested": self._go_away_requested,
-                        "invalid_resumption": invalid_resumption,
-                    },
-                )
-                if planned_rotation:
-                    self.ui.write_log("SYS: Live session rotated. Reconnecting with recovered context.")
-                    print(f"[AXIOM] Planned live-session rotation: {e}")
-                else:
-                    self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
-                    print(f"[AXIOM] Error: {e}")
-                    traceback.print_exc()
-            finally:
-                self.session = None
-                self._loop = None
-                self.audio_in_queue = None
-                self.out_queue = None
+                    if planned_rotation:
+                        print(f"[AXIOM] Planned live-session rotation: {e}")
+                    else:
+                        self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
+                        print(f"[AXIOM] Error: {e}")
+                        traceback.print_exc()
+                finally:
+                    self.session = None
+                    self._loop = None
+                    self.audio_in_queue = None
+                    self.out_queue = None
 
-            if self._shutdown_requested.is_set():
-                break
-            delay_seconds = 0.5 if self._go_away_requested else 3
-            print(f"[AXIOM] Reconnecting in {delay_seconds}s...")
-            await asyncio.sleep(delay_seconds)
+                if self._shutdown_requested.is_set():
+                    break
+                delay_seconds = 0.5 if self._go_away_requested else 3
+                print(f"[AXIOM] Reconnecting in {delay_seconds}s...")
+                await asyncio.sleep(delay_seconds)
+        finally:
+            heartbeat.is_running = False
+            heartbeat_task.cancel()
+            try:
+                await heartbeat_task
+            except Exception:
+                pass
 
 def main():
     init_runtime_store()

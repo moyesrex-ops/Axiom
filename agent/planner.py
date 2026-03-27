@@ -19,14 +19,15 @@ ABSOLUTE RULES:
 - NEVER use generated_code.
 - Use codex_builder for runnable multi-file projects, playable games, websites, apps, or when the user needs a real artifact they can open.
 - Use code_helper for single-file scripts, focused edits, explanations, and small code tasks.
-- For complex build, research, debugging, or review tasks, strongly consider skill_library and agent_library early so AXIOM can use specialist workflows and delegated analysis automatically.
+- Never use codex_builder, code_helper, or dev_agent for market analysis, trading decisions, MT5 execution, or general research unless the user explicitly asked to build software or write code.
+- For complex build, research, debugging, review, or orchestration tasks, strongly consider skill_library and agent_library early so AXIOM can use specialist workflows and delegated analysis automatically.
 - Use deerflow_control when DeerFlow is live and the task benefits from a deeper super-agent harness with planning/subagents.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
 - Use system_capabilities if the task depends on installed integrations or current environment status.
 - Use memory_archive when the task depends on saved preferences, archived instructions, or earlier durable knowledge.
-- Use skill_library when you need an external workflow, coding pattern, debugging checklist, or testing playbook.
-- Use agent_library when the task needs specialist roles, delegated review, or supervisor-style multi-agent execution.
+- Use skill_library when you need an external workflow, coding pattern, debugging checklist, testing playbook, planning-with-files workflow, or last30days-style recent research workflow.
+- Use agent_library when the task needs specialist roles, delegated review, OpenManus-style orchestration guidance, or supervisor-style multi-agent execution.
 - Use self_modifier when the user asks AXIOM to change its own voice, add/edit tools, or modify its own behavior.
 - Use persona_control when the task is specifically about PersonaPlex status or configuration.
 - Use lightpanda_control when the task depends on an optional Lightpanda browser backend.
@@ -70,8 +71,14 @@ file_controller
   content: string — file content (for write/create_file)
 
 cmd_control
-  task: string (required) — natural language description of what to do
+  task: string (optional) — natural language description of what to do
+  command: string (optional) — exact shell command when already known
+  shell: "auto" | "powershell" | "pwsh" | "cmd" | "bash" (optional)
+  cwd: string (optional) — path or shortcut such as repo | workspace | home | desktop
   visible: boolean (optional)
+  open_in_vscode: boolean (optional)
+  keep_open: boolean (optional)
+  timeout: integer (optional)
 
 computer_settings
   action: string (required)
@@ -153,7 +160,7 @@ self_modifier
   voice_name: string (optional)
 
 system_capabilities
-  action: "summary" | "status" | "doctor" | "context" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "operator" | "routing" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 memory_archive
@@ -193,6 +200,7 @@ skill_library
   skill: string (for read)
   source: string (optional)
   limit: integer (optional)
+  content_limit: integer (optional)
 
 agent_library
   action: "status" | "sources" | "search" | "recommend" | "read" | "delegate" (optional)

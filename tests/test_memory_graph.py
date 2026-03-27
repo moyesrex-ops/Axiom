@@ -46,6 +46,35 @@ class MemoryGraphTests(unittest.TestCase):
         self.assertIn("graph", hits)
         self.assertTrue(any(row["target_name"] == "Master" for row in hits["graph"]))
 
+    def test_channel_turns_update_durable_channel_state(self):
+        tmpdir = Path(__file__).resolve().parent / "_tmp" / "memory_graph_3"
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        tmpdir.mkdir(parents=True, exist_ok=True)
+        try:
+            db_path = tmpdir / "axiom_state.db"
+            with patch.object(rs, "DB_PATH", db_path), patch.object(mm, "MEMORY_PATH", tmpdir / "long_term.json"):
+                rs._INITIALIZED = False
+                rs.init_runtime_store()
+                rs.log_conversation_turn(
+                    "open the dashboard",
+                    "Opening it now.",
+                    channel="telegram",
+                    channel_scope="42",
+                    metadata={"kind": "chat_reply"},
+                )
+
+                rows = rs.recent_conversation_turns(limit=2, channel="telegram", channel_scope="42")
+                state = rs.get_channel_state("telegram", "42")
+                rs._INITIALIZED = False
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["channel"], "telegram")
+        self.assertEqual(rows[0]["channel_scope"], "42")
+        self.assertEqual(state["last_user_text"], "open the dashboard")
+        self.assertEqual(state["last_assistant_text"], "Opening it now.")
+
 
 if __name__ == "__main__":
     unittest.main()

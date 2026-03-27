@@ -6,6 +6,7 @@ import sys
 
 from memory.runtime_store import (
     log_conversation_turn,
+    recent_channel_states,
     recent_graph_relations,
     recent_conversation_turns,
     recent_events,
@@ -161,9 +162,21 @@ def save_to_nexus(
     return True
 
 
-def remember_conversation_turn(user_text: str, axiom_text: str = "") -> None:
+def remember_conversation_turn(
+    user_text: str,
+    axiom_text: str = "",
+    channel: str = "",
+    channel_scope: str = "",
+    metadata: dict | None = None,
+) -> None:
     try:
-        log_conversation_turn(user_text, axiom_text)
+        log_conversation_turn(
+            user_text,
+            axiom_text,
+            channel=channel,
+            channel_scope=channel_scope,
+            metadata=metadata,
+        )
     except Exception as e:
         _safe_print(f"[Memory] ⚠️ Conversation archive error: {e}")
 
@@ -265,6 +278,15 @@ def format_memory_for_prompt(memory: dict | None) -> str:
 
     lines = []
 
+    def _format_turn_label(row: dict) -> str:
+        channel = str(row.get("channel", "") or "").strip().lower()
+        scope = str(row.get("channel_scope", "") or "").strip()
+        if channel == "telegram":
+            return f"Telegram {scope}" if scope else "Telegram"
+        if channel == "voice":
+            return "Voice"
+        return "Archive"
+
     # Identity
     identity = memory.get("identity", {})
     name = identity.get("name", {}).get("value")
@@ -353,13 +375,38 @@ def format_memory_for_prompt(memory: dict | None) -> str:
                 + "\n".join(graph_lines[:5])
             )
 
+    channel_rows = recent_channel_states(limit=4)
+    if channel_rows:
+        handoff_lines = []
+        for row in channel_rows:
+            channel = str(row.get("channel", "")).strip().lower()
+            if channel not in {"telegram", "voice"}:
+                continue
+            label = "Telegram" if channel == "telegram" else "Voice"
+            last_goal = str(row.get("last_goal", "")).strip()
+            last_result = str(row.get("last_result", "")).strip()
+            active_task_id = str(row.get("active_task_id", "")).strip()
+            if active_task_id and last_goal:
+                handoff_lines.append(f"- {label} active task: {last_goal[:160]}")
+            elif last_goal and last_result:
+                handoff_lines.append(
+                    f"- {label} last task: {last_goal[:120]} -> {last_result[:180]}"
+                )
+        if handoff_lines:
+            sections.append(
+                "[CHANNEL HANDOFFS]\n"
+                "Recent voice and Telegram execution state shared across channels.\n"
+                + "\n".join(handoff_lines[:4])
+            )
+
     recent_turns = list(reversed(recent_conversation_turns(limit=4)))
     if recent_turns:
         convo_lines = []
         for row in recent_turns:
             user_text = str(row.get("user_text", "")).strip()
             ai_text = str(row.get("assistant_text", "")).strip()
-            convo_lines.append(f"- User: {user_text[:180]}")
+            label = _format_turn_label(row)
+            convo_lines.append(f"- [{label}] User: {user_text[:180]}")
             if ai_text:
                 convo_lines.append(f"  Axiom: {ai_text[:180]}")
         sections.append(

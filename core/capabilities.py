@@ -270,6 +270,62 @@ def collect_capabilities() -> dict:
     }
 
 
+def format_operator_surface(limit: int = 4) -> str:
+    caps = collect_capabilities()
+    skill_status = collect_skill_library_status(limit=max(int(limit), 1))
+    agent_status = collect_agent_library_status(limit=max(int(limit), 1))
+
+    lines = [
+        "[OPERATOR SURFACE]",
+        "AXIOM runs one shared execution spine across local voice and Telegram.",
+        "Use cmd_control for real PowerShell, CMD, Bash, or VS Code integrated-terminal work.",
+        "Use system_capabilities as the source of truth when there is any doubt about live integrations.",
+    ]
+
+    if caps["telegram_bridge_enabled"] and caps["telegram_bot_configured"]:
+        lines.append(
+            f"Telegram is live with {caps['telegram_allowed_chat_count']} allowed chat(s) and shares task state with voice."
+        )
+    else:
+        lines.append("Telegram is disabled or missing a bot token, so voice remains the primary live channel.")
+
+    if skill_status["enabled"] and skill_status["sources_count"]:
+        source_names = ", ".join(source["name"] for source in skill_status["sources"][: max(int(limit), 1)])
+        lines.append(
+            f"Skills indexed: {skill_status['total_skills']} across {skill_status['sources_count']} sources. "
+            f"Strong sources currently detected: {source_names}."
+        )
+        lines.append(
+            "For complex builds, reviews, debugging, planning, or recent-trend research, pull skill_library recommend/read before executing."
+        )
+    else:
+        lines.append("No external skill libraries are currently indexed.")
+
+    if agent_status["enabled"] and agent_status["sources_count"]:
+        source_names = ", ".join(source["name"] for source in agent_status["sources"][: max(int(limit), 1)])
+        lines.append(
+            f"Agent catalogs indexed: {agent_status['total_agents']} across {agent_status['sources_count']} sources. "
+            f"Notable sources: {source_names}."
+        )
+        lines.append(
+            "For complex coding, research, security, or orchestration tasks, use agent_library recommend/read and delegate when supervised specialist input will materially help."
+        )
+    else:
+        lines.append("No external agent catalogs are currently indexed.")
+
+    if caps["deerflow_repo_path"]:
+        lines.append(
+            f"DeerFlow sidecar is detected and its gateway is {'reachable' if caps['deerflow_proxy_reachable'] else 'offline'}."
+        )
+    if caps["lightpanda_repo_path"]:
+        lines.append(
+            f"Lightpanda backend is configured for browser acceleration and is {'reachable' if caps['lightpanda_reachable'] else 'not yet live'}."
+        )
+
+    lines.append("Never simulate status, artifacts, or execution. Name the exact path, URL, task id, or failure.")
+    return "\n".join(f"- {line}" if index else line for index, line in enumerate(lines))
+
+
 def format_capability_status() -> str:
     caps = collect_capabilities()
     lines = [

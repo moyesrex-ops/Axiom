@@ -1,4 +1,4 @@
-from core.capabilities import collect_capabilities, format_capability_report
+from core.capabilities import collect_capabilities, format_capability_report, format_operator_surface
 from core.system_context import format_system_context
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import (
@@ -48,6 +48,11 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
     if action == "context":
         report = format_system_context()
         log_event("capabilities", "system_context", report[:2000])
+        return report
+
+    if action in ("operator", "routing"):
+        report = format_operator_surface(limit=limit)
+        log_event("capabilities", "operator_surface", report[:2000])
         return report
 
     if action == "hardware":

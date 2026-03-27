@@ -75,6 +75,43 @@ _SPECIALIST_COMPLEXITY_HINTS = (
     "security",
     "trading",
 )
+_SOFTWARE_GOAL_TARGETS = (
+    "website",
+    "site",
+    "landing page",
+    "portfolio",
+    "dashboard",
+    "web app",
+    "app",
+    "game",
+    "playable",
+    "snake",
+    "arcade",
+    "frontend",
+    "backend",
+    "script",
+    "code",
+    "program",
+)
+_SOFTWARE_BUILD_VERBS = ("build", "create", "make", "design", "generate", "fix", "improve", "upgrade")
+_MARKET_TASK_HINTS = (
+    "forex",
+    "market",
+    "markets",
+    "mt5",
+    "meta trader",
+    "metatrader",
+    "tradingagents",
+    "trade",
+    "trades",
+    "sentiment",
+    "currency",
+    "gold",
+    "silver",
+    "eurusd",
+    "xauusd",
+)
+_SOFTWARE_ONLY_TOOLS = {"codex_builder", "code_helper", "dev_agent"}
 
 
 def _get_api_key() -> str:
@@ -347,6 +384,37 @@ def _goal_word_count(goal: str) -> int:
     return len(re.findall(r"[a-z0-9]+", str(goal or "").lower()))
 
 
+def _contains_phrase(text: str, phrase: str) -> bool:
+    normalized = str(text or "").strip().lower()
+    token = str(phrase or "").strip().lower()
+    if not normalized or not token:
+        return False
+    if " " in token:
+        return token in normalized
+    return bool(re.search(rf"\b{re.escape(token)}\b", normalized))
+
+
+def _goal_is_market_or_trading_task(goal: str) -> bool:
+    normalized = str(goal or "").strip().lower()
+    return any(_contains_phrase(normalized, token) for token in _MARKET_TASK_HINTS)
+
+
+def _goal_is_software_build(goal: str) -> bool:
+    normalized = str(goal or "").strip().lower()
+    has_build_verb = any(_contains_phrase(normalized, verb) for verb in _SOFTWARE_BUILD_VERBS)
+    has_software_target = any(_contains_phrase(normalized, target) for target in _SOFTWARE_GOAL_TARGETS)
+    return has_build_verb and has_software_target
+
+
+def _plan_violates_goal_domain(goal: str, plan: dict) -> bool:
+    if not _goal_is_market_or_trading_task(goal):
+        return False
+    if _goal_is_software_build(goal):
+        return False
+    steps = list(plan.get("steps", []) or [])
+    return any(str(step.get("tool", "") or "").strip() in _SOFTWARE_ONLY_TOOLS for step in steps)
+
+
 def _should_prepare_specialists(goal: str) -> bool:
     cfg = _autonomy_config()
     if not bool(cfg.get("auto_specialists", True)):
@@ -420,6 +488,9 @@ def _specialist_context(goal: str) -> str:
                 lines.append(
                     f"- {row['id']} | {row['name']} | {(row.get('description', '') or 'no summary')[:180]}"
                 )
+                preview = str(row.get("content_preview", "") or "").strip()
+                if preview:
+                    lines.append(f"  Guidance: {preview[:320]}")
             sections.append("\n".join(lines))
     except Exception as error:
         log_event("executor", "specialist_skill_context_failed", str(error)[:300])
@@ -452,7 +523,7 @@ def _should_direct_research(goal: str) -> bool:
     normalized = str(goal or "").strip().lower()
     if not normalized:
         return False
-    if any(term in normalized for term in (" buy ", " sell ", " trade ", " order ", " execute_mt5", " website", " app", " game")):
+    if any(_contains_phrase(normalized, term) for term in ("buy", "sell", "trade", "order", "execute_mt5", "website", "app", "game")):
         return False
     research_starts = (
         "research ",
@@ -531,22 +602,7 @@ def _direct_tool_for_goal(goal: str, specialist_context: str = "") -> tuple[str,
             },
         )
 
-    build_verbs = ("build", "create", "make", "design", "generate", "fix", "improve", "upgrade")
-    build_targets = (
-        "website",
-        "site",
-        "landing page",
-        "portfolio",
-        "dashboard",
-        "web app",
-        "app",
-        "game",
-        "playable",
-        "snake",
-        "arcade",
-        "frontend",
-    )
-    if any(verb in normalized for verb in build_verbs) and any(target in normalized for target in build_targets):
+    if _goal_is_software_build(goal):
         open_when_done = any(
             phrase in normalized
             for phrase in ("open it", "open when done", "launch it", "show it", "playable", "browser")
@@ -609,6 +665,29 @@ class AgentExecutor:
         # 2. Reflection & Critique
         if "steps" in plan and len(plan["steps"]) > 0:
             plan = reflect_and_improve(goal, plan, context=specialist_context)
+
+        if _plan_violates_goal_domain(goal, plan):
+            guard_context = (
+                specialist_context + "\n\n" if specialist_context else ""
+            ) + (
+                "[DOMAIN GUARDRAIL]\n"
+                "This is a market/trading task, not a software build.\n"
+                "Do not use codex_builder, code_helper, or dev_agent unless the user explicitly asked for code or a software artifact.\n"
+                "Prefer tradingagents_control, predict_market, deep_analyzer, web_search, system_capabilities, and mt5_trading when appropriate."
+            )
+            log_event("executor", "plan_domain_violation", goal[:300], metadata={"plan_tools": [step.get("tool", "") for step in plan.get("steps", [])]})
+            plan = create_plan(goal, context=guard_context)
+            if "steps" in plan and len(plan["steps"]) > 0:
+                plan = reflect_and_improve(goal, plan, context=guard_context)
+
+        if _plan_violates_goal_domain(goal, plan):
+            msg = (
+                "I stopped before executing because the planner kept trying coding/build tools for a market or trading task. "
+                "No fake build was run."
+            )
+            if speak:
+                speak(msg)
+            return msg
 
         while True:
             steps = plan.get("steps", [])

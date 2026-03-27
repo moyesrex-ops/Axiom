@@ -124,6 +124,43 @@ class TelegramBridgeTests(unittest.TestCase):
             "open this artifact: C:\\Users\\moyes\\Desktop\\AXIOMProjects\\snake\\index.html",
         )
 
+    def test_contextualize_open_followup_uses_persisted_last_artifact(self):
+        with patch.dict(tb._LAST_CHAT_TASK_RESULTS, {}, clear=True), patch.object(
+            tb,
+            "_channel_state",
+            return_value={
+                "last_task_id": "game1",
+                "last_goal": "create a playable snake game",
+                "last_result": "Project directory: C:\\Users\\moyes\\Desktop\\AXIOMProjects\\snake\nOpen target: C:\\Users\\moyes\\Desktop\\AXIOMProjects\\snake\\index.html",
+            },
+        ):
+            rewritten = tb._contextualize_task_goal("42", "open it")
+
+        self.assertEqual(
+            rewritten,
+            "open this artifact: C:\\Users\\moyes\\Desktop\\AXIOMProjects\\snake\\index.html",
+        )
+
+    def test_active_task_snapshot_recovers_persisted_active_task(self):
+        queue = Mock()
+        queue.get_status.return_value = {
+            "task_id": "abc12345",
+            "goal": "build a playable police chase game",
+            "status": "running",
+            "result": "",
+            "error": "",
+        }
+
+        with patch.dict(tb._ACTIVE_CHAT_TASKS, {}, clear=True), patch.object(
+            tb,
+            "_channel_state",
+            return_value={"active_task_id": "abc12345"},
+        ), patch.object(tb, "get_queue", return_value=queue):
+            status = tb._active_task_snapshot("42")
+            self.assertEqual(tb._ACTIVE_CHAT_TASKS["42"], "abc12345")
+
+        self.assertEqual(status["task_id"], "abc12345")
+
     def test_decide_plain_message_action_falls_back_to_heuristic_when_router_empty(self):
         with patch.object(tb, "_llm_plain_message_decision", return_value={}), patch.object(
             tb, "_plain_message_mode", return_value="smart"
@@ -148,6 +185,23 @@ class TelegramBridgeTests(unittest.TestCase):
 
         self.assertEqual(decision["kind"], "chat")
         self.assertEqual(decision["goal"], "how are you")
+
+    def test_operator_mode_keeps_gratitude_as_chat(self):
+        with patch.object(tb, "_plain_message_mode", return_value="operator"):
+            decision = tb._decide_plain_message_action("smooth thanks", chat_id="42")
+
+        self.assertEqual(decision["kind"], "chat")
+        self.assertEqual(decision["goal"], "smooth thanks")
+
+    def test_render_task_completion_message_drops_robotic_prefix(self):
+        message = tb._render_task_completion_message(
+            "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green."
+        )
+
+        self.assertEqual(
+            message,
+            "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green.",
+        )
 
 
 if __name__ == "__main__":

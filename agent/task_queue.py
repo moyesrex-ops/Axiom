@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Any
 
-from memory.runtime_store import log_event, upsert_task_run
+from memory.runtime_store import log_event, upsert_channel_state, upsert_task_run
 
 
 class TaskStatus(Enum):
@@ -33,6 +33,7 @@ class Task:
     error:       str        = field(compare=False, default="")
     speak:       Any        = field(compare=False, default=None)
     on_complete: Any        = field(compare=False, default=None)
+    metadata:    dict       = field(compare=False, default_factory=dict)
     cancel_flag: threading.Event = field(compare=False, default_factory=threading.Event)
 
 
@@ -75,14 +76,41 @@ class TaskQueue:
         log_event("task_queue", "stopped", "Task queue worker stopped.")
 
     def _snapshot(self, task: Task, metadata: dict | None = None) -> None:
+        snapshot_metadata = {"priority": task.priority, **(task.metadata or {})}
+        if metadata:
+            snapshot_metadata.update(metadata)
         upsert_task_run(
             task_id=task.task_id,
             goal=task.goal,
             status=task.status.value,
             result_text="" if task.result is None else str(task.result),
             error_text=task.error,
-            metadata=metadata or {"priority": task.priority},
+            metadata=snapshot_metadata,
         )
+        channel = str(snapshot_metadata.get("channel", "") or "").strip().lower()
+        scope = str(snapshot_metadata.get("scope", "") or "").strip()
+        if channel:
+            last_result = None
+            active_task_id = None
+            if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                active_task_id = task.task_id
+            else:
+                active_task_id = ""
+                last_result = str(task.result or task.error or task.status.value)[:4000]
+
+            upsert_channel_state(
+                channel=channel,
+                scope=scope,
+                active_task_id=active_task_id,
+                last_task_id=task.task_id if task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING) else None,
+                last_goal=task.goal,
+                last_result=last_result,
+                metadata={
+                    "task_id": task.task_id,
+                    "task_status": task.status.value,
+                    "origin": str(snapshot_metadata.get("origin", "") or ""),
+                },
+            )
 
     def submit(
         self,
@@ -90,6 +118,7 @@ class TaskQueue:
         priority:    TaskPriority = TaskPriority.NORMAL,
         speak:       Callable | None = None,
         on_complete: Callable | None = None,
+        metadata:    dict | None = None,
     ) -> str:
 
         task_id = str(uuid.uuid4())[:8]
@@ -100,6 +129,7 @@ class TaskQueue:
             goal        = goal,
             speak       = speak,
             on_complete = on_complete,
+            metadata    = dict(metadata or {}),
         )
 
         with self._condition:

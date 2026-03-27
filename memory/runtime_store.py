@@ -47,6 +47,31 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _table_columns(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    except Exception:
+        return set()
+    return {str(row["name"]) if isinstance(row, sqlite3.Row) else str(row[1]) for row in rows}
+
+
+def _ensure_column(conn: sqlite3.Connection, table_name: str, column_def: str) -> None:
+    column_name = str(column_def or "").split()[0].strip()
+    if not column_name:
+        return
+    if column_name in _table_columns(conn, table_name):
+        return
+    conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_def}")
+
+
+def _safe_json_loads(raw: str, default):
+    try:
+        payload = json.loads(raw or "")
+        return payload if isinstance(payload, type(default)) else default
+    except Exception:
+        return default
+
+
 def _tokenize(text: str) -> list[str]:
     tokens = []
     for token in re.findall(r"[a-zA-Z0-9_'-]+", str(text or "").lower()):
@@ -257,6 +282,20 @@ def init_runtime_store() -> None:
                     keywords_json TEXT NOT NULL DEFAULT '[]'
                 );
 
+                CREATE TABLE IF NOT EXISTS channel_states (
+                    channel TEXT NOT NULL,
+                    scope TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    active_task_id TEXT NOT NULL DEFAULT '',
+                    last_task_id TEXT NOT NULL DEFAULT '',
+                    last_goal TEXT NOT NULL DEFAULT '',
+                    last_result TEXT NOT NULL DEFAULT '',
+                    last_user_text TEXT NOT NULL DEFAULT '',
+                    last_assistant_text TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY(channel, scope)
+                );
+
                 CREATE TABLE IF NOT EXISTS knowledge_items (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -294,7 +333,16 @@ def init_runtime_store() -> None:
                 );
                 """
             )
+            _ensure_column(conn, "conversation_turns", "channel TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "conversation_turns", "channel_scope TEXT NOT NULL DEFAULT ''")
+            _ensure_column(conn, "conversation_turns", "metadata_json TEXT NOT NULL DEFAULT '{}'")
             _create_fts_tables(conn)
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_conversation_turns_channel
+                ON conversation_turns(channel, channel_scope, id DESC)
+                """
+            )
             conn.commit()
 
         _INITIALIZED = True
@@ -364,21 +412,44 @@ def log_capability(name: str, status: str, details: str = "") -> None:
         conn.commit()
 
 
-def log_conversation_turn(user_text: str, assistant_text: str = "") -> None:
+def log_conversation_turn(
+    user_text: str,
+    assistant_text: str = "",
+    channel: str = "",
+    channel_scope: str = "",
+    metadata: dict | None = None,
+) -> None:
     init_runtime_store()
     user_text = str(user_text or "").strip()
     assistant_text = str(assistant_text or "").strip()
+    channel = str(channel or "").strip().lower()
+    channel_scope = str(channel_scope or "").strip()
     if not user_text:
         return
 
     keywords = sorted(set(_tokenize(user_text) + _tokenize(assistant_text)))[:30]
+    metadata_payload = json.dumps(metadata or {}, ensure_ascii=False)
     with _LOCK, _connect() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO conversation_turns (user_text, assistant_text, keywords_json)
-            VALUES (?, ?, ?)
+            INSERT INTO conversation_turns (
+                user_text,
+                assistant_text,
+                keywords_json,
+                channel,
+                channel_scope,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (user_text[:4000], assistant_text[:4000], json.dumps(keywords, ensure_ascii=False)),
+            (
+                user_text[:4000],
+                assistant_text[:4000],
+                json.dumps(keywords, ensure_ascii=False),
+                channel,
+                channel_scope[:255],
+                metadata_payload,
+            ),
         )
         turn_id = int(cursor.lastrowid)
         try:
@@ -392,6 +463,14 @@ def log_conversation_turn(user_text: str, assistant_text: str = "") -> None:
         except sqlite3.OperationalError:
             pass
         conn.commit()
+    if channel:
+        upsert_channel_state(
+            channel=channel,
+            scope=channel_scope,
+            last_user_text=user_text[:4000],
+            last_assistant_text=assistant_text[:4000],
+            metadata={"last_turn_source": "conversation", **(metadata or {})},
+        )
     _index_graph_from_text(user_text, assistant_text, source_kind="conversation")
 
 
@@ -740,6 +819,176 @@ def upsert_task_run(
         conn.commit()
 
 
+def upsert_channel_state(
+    channel: str,
+    scope: str = "",
+    *,
+    active_task_id: str | None = None,
+    last_task_id: str | None = None,
+    last_goal: str | None = None,
+    last_result: str | None = None,
+    last_user_text: str | None = None,
+    last_assistant_text: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    init_runtime_store()
+    channel = str(channel or "").strip().lower()
+    scope = str(scope or "").strip()
+    if not channel:
+        return
+
+    defaults = {
+        "active_task_id": "",
+        "last_task_id": "",
+        "last_goal": "",
+        "last_result": "",
+        "last_user_text": "",
+        "last_assistant_text": "",
+        "metadata_json": "{}",
+    }
+
+    with _LOCK, _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                active_task_id,
+                last_task_id,
+                last_goal,
+                last_result,
+                last_user_text,
+                last_assistant_text,
+                metadata_json
+            FROM channel_states
+            WHERE channel = ? AND scope = ?
+            """,
+            (channel, scope),
+        ).fetchone()
+
+        current = dict(row) if row else dict(defaults)
+        current_metadata = _safe_json_loads(current.get("metadata_json", "{}"), {})
+        merged_metadata = dict(current_metadata)
+        if metadata:
+            merged_metadata.update(metadata)
+
+        if active_task_id is not None:
+            current["active_task_id"] = str(active_task_id or "")[:255]
+        if last_task_id is not None:
+            current["last_task_id"] = str(last_task_id or "")[:255]
+        if last_goal is not None:
+            current["last_goal"] = str(last_goal or "")[:4000]
+        if last_result is not None:
+            current["last_result"] = str(last_result or "")[:4000]
+        if last_user_text is not None:
+            current["last_user_text"] = str(last_user_text or "")[:4000]
+        if last_assistant_text is not None:
+            current["last_assistant_text"] = str(last_assistant_text or "")[:4000]
+
+        conn.execute(
+            """
+            INSERT INTO channel_states (
+                channel,
+                scope,
+                updated_at,
+                active_task_id,
+                last_task_id,
+                last_goal,
+                last_result,
+                last_user_text,
+                last_assistant_text,
+                metadata_json
+            )
+            VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(channel, scope) DO UPDATE SET
+                updated_at = CURRENT_TIMESTAMP,
+                active_task_id = excluded.active_task_id,
+                last_task_id = excluded.last_task_id,
+                last_goal = excluded.last_goal,
+                last_result = excluded.last_result,
+                last_user_text = excluded.last_user_text,
+                last_assistant_text = excluded.last_assistant_text,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                channel,
+                scope,
+                current["active_task_id"],
+                current["last_task_id"],
+                current["last_goal"],
+                current["last_result"],
+                current["last_user_text"],
+                current["last_assistant_text"],
+                json.dumps(merged_metadata, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+
+
+def get_channel_state(channel: str, scope: str = "") -> dict:
+    init_runtime_store()
+    channel = str(channel or "").strip().lower()
+    scope = str(scope or "").strip()
+    if not channel:
+        return {}
+
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                channel,
+                scope,
+                updated_at,
+                active_task_id,
+                last_task_id,
+                last_goal,
+                last_result,
+                last_user_text,
+                last_assistant_text,
+                metadata_json
+            FROM channel_states
+            WHERE channel = ? AND scope = ?
+            """,
+            (channel, scope),
+        ).fetchone()
+
+    if not row:
+        return {}
+
+    result = dict(row)
+    result["metadata"] = _safe_json_loads(result.get("metadata_json", "{}"), {})
+    return result
+
+
+def recent_channel_states(limit: int = 6) -> list[dict]:
+    init_runtime_store()
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                channel,
+                scope,
+                updated_at,
+                active_task_id,
+                last_task_id,
+                last_goal,
+                last_result,
+                last_user_text,
+                last_assistant_text,
+                metadata_json
+            FROM channel_states
+            ORDER BY updated_at DESC, channel, scope
+            LIMIT ?
+            """,
+            (int(limit),),
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        data = dict(row)
+        data["metadata"] = _safe_json_loads(data.get("metadata_json", "{}"), {})
+        results.append(data)
+    return results
+
+
 def recent_task_runs(limit: int = 10) -> list[dict]:
     init_runtime_store()
     with _connect() as conn:
@@ -763,61 +1012,154 @@ def recent_task_runs(limit: int = 10) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def recent_conversation_turns(limit: int = 8) -> list[dict]:
+def recent_conversation_turns(limit: int = 8, channel: str = "", channel_scope: str = "") -> list[dict]:
     init_runtime_store()
+    channel = str(channel or "").strip().lower()
+    channel_scope = str(channel_scope or "").strip()
     with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, created_at, user_text, assistant_text, keywords_json
-            FROM conversation_turns
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (int(limit),),
-        ).fetchall()
+        if channel:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    created_at,
+                    user_text,
+                    assistant_text,
+                    keywords_json,
+                    channel,
+                    channel_scope,
+                    metadata_json
+                FROM conversation_turns
+                WHERE channel = ? AND channel_scope = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (channel, channel_scope, int(limit)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    created_at,
+                    user_text,
+                    assistant_text,
+                    keywords_json,
+                    channel,
+                    channel_scope,
+                    metadata_json
+                FROM conversation_turns
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
     return [dict(row) for row in rows]
 
 
-def search_conversation_turns(query: str, limit: int = 5, window: int = 250) -> list[dict]:
+def search_conversation_turns(
+    query: str,
+    limit: int = 5,
+    window: int = 250,
+    channel: str = "",
+    channel_scope: str = "",
+) -> list[dict]:
     init_runtime_store()
+    channel = str(channel or "").strip().lower()
+    channel_scope = str(channel_scope or "").strip()
     terms = set(_tokenize(query))
     if not terms:
-        return recent_conversation_turns(limit=limit)
+        return recent_conversation_turns(limit=limit, channel=channel, channel_scope=channel_scope)
 
     match_query = _fts_match_query(query)
     with _connect() as conn:
         if match_query:
             try:
-                rows = conn.execute(
-                    """
-                    SELECT
-                        c.id,
-                        c.created_at,
-                        c.user_text,
-                        c.assistant_text,
-                        c.keywords_json,
-                        bm25(conversation_turns_fts) AS score
-                    FROM conversation_turns_fts
-                    JOIN conversation_turns c ON conversation_turns_fts.rowid = c.id
-                    WHERE conversation_turns_fts MATCH ?
-                    ORDER BY score ASC, c.id DESC
-                    LIMIT ?
-                    """,
-                    (match_query, int(limit)),
-                ).fetchall()
+                if channel:
+                    rows = conn.execute(
+                        """
+                        SELECT
+                            c.id,
+                            c.created_at,
+                            c.user_text,
+                            c.assistant_text,
+                            c.keywords_json,
+                            c.channel,
+                            c.channel_scope,
+                            c.metadata_json,
+                            bm25(conversation_turns_fts) AS score
+                        FROM conversation_turns_fts
+                        JOIN conversation_turns c ON conversation_turns_fts.rowid = c.id
+                        WHERE conversation_turns_fts MATCH ?
+                          AND c.channel = ?
+                          AND c.channel_scope = ?
+                        ORDER BY score ASC, c.id DESC
+                        LIMIT ?
+                        """,
+                        (match_query, channel, channel_scope, int(limit)),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        """
+                        SELECT
+                            c.id,
+                            c.created_at,
+                            c.user_text,
+                            c.assistant_text,
+                            c.keywords_json,
+                            c.channel,
+                            c.channel_scope,
+                            c.metadata_json,
+                            bm25(conversation_turns_fts) AS score
+                        FROM conversation_turns_fts
+                        JOIN conversation_turns c ON conversation_turns_fts.rowid = c.id
+                        WHERE conversation_turns_fts MATCH ?
+                        ORDER BY score ASC, c.id DESC
+                        LIMIT ?
+                        """,
+                        (match_query, int(limit)),
+                    ).fetchall()
                 return [dict(row) for row in rows]
             except sqlite3.OperationalError:
                 pass
 
-        rows = conn.execute(
-            """
-            SELECT id, created_at, user_text, assistant_text, keywords_json
-            FROM conversation_turns
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (int(window),),
-        ).fetchall()
+        if channel:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    created_at,
+                    user_text,
+                    assistant_text,
+                    keywords_json,
+                    channel,
+                    channel_scope,
+                    metadata_json
+                FROM conversation_turns
+                WHERE channel = ? AND channel_scope = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (channel, channel_scope, int(window)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT
+                    id,
+                    created_at,
+                    user_text,
+                    assistant_text,
+                    keywords_json,
+                    channel,
+                    channel_scope,
+                    metadata_json
+                FROM conversation_turns
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(window),),
+            ).fetchall()
 
     scored: list[tuple[int, int, dict]] = []
     for row in rows:

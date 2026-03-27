@@ -73,6 +73,28 @@ class AgentLibraryTests(unittest.TestCase):
             "tradingagents": tradingagents,
         }
 
+    def _make_openmanus_repo(self) -> Path:
+        repo = self._workspace_dir("openmanus_repo")
+        (repo / "app" / "agent").mkdir(parents=True, exist_ok=True)
+        (repo / "app" / "flow").mkdir(parents=True, exist_ok=True)
+        (repo / "README.md").write_text("OpenManus README", encoding="utf-8")
+        (repo / "main.py").write_text("print('main')\n", encoding="utf-8")
+        (repo / "run_mcp.py").write_text("print('mcp runner with stdio and sse')\n", encoding="utf-8")
+        (repo / "run_flow.py").write_text("print('planning flow runner')\n", encoding="utf-8")
+        (repo / "app" / "agent" / "manus.py").write_text(
+            "class Manus:\n    pass\n# browser automation and tool calling\n",
+            encoding="utf-8",
+        )
+        (repo / "app" / "flow" / "planning.py").write_text(
+            "class PlanningFlow:\n    pass\n# planning flow orchestration\n",
+            encoding="utf-8",
+        )
+        (repo / "app" / "agent" / "data_analysis.py").write_text(
+            "class DataAnalysis:\n    pass\n",
+            encoding="utf-8",
+        )
+        return repo
+
     def test_indexes_catalog_and_special_sources(self):
         repos = self._make_catalogs()
         runtime = {
@@ -216,6 +238,35 @@ class AgentLibraryTests(unittest.TestCase):
         self.assertEqual(len(entries), 1)
         self.assertEqual(entries[0]["source_id"], "tradingagents")
         self.assertEqual(entries[0]["name"], "Market Analyst")
+
+    def test_indexes_openmanus_special_entries(self):
+        repo = self._make_openmanus_repo()
+        runtime = {
+            "agent_library": {
+                "enabled": True,
+                "openmanus_path": str(repo),
+            }
+        }
+        source_specs = {
+            "openmanus": {
+                "name": "OpenManus",
+                "config_key": "openmanus_path",
+                "default_candidates": [],
+                "special": "openmanus",
+            }
+        }
+
+        with patch.object(al, "load_runtime_config", return_value=runtime), patch.object(
+            al, "_SOURCE_SPECS", source_specs
+        ):
+            entries = al.index_agent_library()
+            search = al.search_agent_library("mcp browser sandbox", limit=2)
+            recommend = al.recommend_agent_library("orchestrate a multi-agent browser sandbox with mcp", limit=2)
+
+        self.assertEqual(len(entries), 4)
+        self.assertTrue(any(row["id"] == "openmanus:mcp-agent-runner" for row in entries))
+        self.assertEqual(search[0]["source_id"], "openmanus")
+        self.assertEqual(recommend[0]["source_id"], "openmanus")
 
 
 if __name__ == "__main__":

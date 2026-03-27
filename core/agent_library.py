@@ -68,6 +68,14 @@ _SOURCE_SPECS = {
         ],
         "special": "openfang",
     },
+    "openmanus": {
+        "name": "OpenManus",
+        "config_key": "openmanus_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "OpenManus",
+        ],
+        "special": "openmanus",
+    },
     "symphony": {
         "name": "Symphony",
         "config_key": "symphony_path",
@@ -253,6 +261,8 @@ def _agent_source_row(source_id: str, spec: dict, repo_path: Path) -> dict:
         row["agent_files"] = len(_tradingagents_role_cards(repo_path))
     elif spec.get("special") == "openfang":
         row["agent_files"] = len(_openfang_hand_cards(repo_path))
+    elif spec.get("special") == "openmanus":
+        row["agent_files"] = 4
     elif spec.get("special"):
         row["agent_files"] = 1
     elif spec.get("glob"):
@@ -293,6 +303,9 @@ def resolve_agent_library_sources() -> list[dict]:
                 continue
         elif spec.get("special") == "openfang":
             if not (repo_path / "README.md").exists() or not (repo_path / "crates" / "openfang-hands").exists():
+                continue
+        elif spec.get("special") == "openmanus":
+            if not (repo_path / "README.md").exists() or not (repo_path / "app" / "agent" / "manus.py").exists():
                 continue
         elif spec.get("special") == "symphony":
             if not (repo_path / "README.md").exists() or not (repo_path / "SPEC.md").exists():
@@ -336,6 +349,20 @@ def _signature_files_for_source(source: dict) -> list[Path]:
                 if path.exists():
                     rows.append(path)
         return rows
+    if special == "openmanus":
+        return [
+            path
+            for path in [
+                repo_path / "README.md",
+                repo_path / "main.py",
+                repo_path / "run_mcp.py",
+                repo_path / "run_flow.py",
+                repo_path / "app" / "agent" / "manus.py",
+                repo_path / "app" / "flow" / "planning.py",
+                repo_path / "app" / "agent" / "data_analysis.py",
+            ]
+            if path.exists()
+        ]
     if special == "symphony":
         return [
             path
@@ -513,6 +540,82 @@ def _special_openfang_entries(source: dict) -> list[dict]:
     return entries
 
 
+def _special_openmanus_entries(source: dict) -> list[dict]:
+    repo_path = Path(source["repo_path"])
+    readme_text = _safe_read_text(repo_path / "README.md", limit=2600)
+    manus_text = _safe_read_text(repo_path / "app" / "agent" / "manus.py", limit=2600)
+    mcp_text = _safe_read_text(repo_path / "run_mcp.py", limit=2200)
+    flow_text = _safe_read_text(repo_path / "app" / "flow" / "planning.py", limit=2600)
+    data_analysis_text = _safe_read_text(repo_path / "app" / "agent" / "data_analysis.py", limit=2200)
+
+    return [
+        {
+            "id": "openmanus:general-manus-agent",
+            "source_id": "openmanus",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "general-manus-agent",
+            "name": "OpenManus General Agent",
+            "description": (
+                "General tool-calling agent that combines Python execution, browser automation, "
+                "file editing, ask-human, terminate control, and optional MCP tool injection."
+            ),
+            "category": "general agent",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "app" / "agent" / "manus.py"),
+            "content_preview": (manus_text or readme_text).strip(),
+        },
+        {
+            "id": "openmanus:mcp-agent-runner",
+            "source_id": "openmanus",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "mcp-agent-runner",
+            "name": "OpenManus MCP Agent Runner",
+            "description": (
+                "MCP-oriented entrypoint that connects over stdio or SSE and exposes a tool-augmented "
+                "agent session against remote or local MCP servers."
+            ),
+            "category": "mcp orchestration",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "run_mcp.py"),
+            "content_preview": (mcp_text or readme_text).strip(),
+        },
+        {
+            "id": "openmanus:planning-flow",
+            "source_id": "openmanus",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "planning-flow",
+            "name": "OpenManus Planning Flow",
+            "description": (
+                "Planning/execution flow that creates plan steps, selects executor agents, "
+                "marks step status transitions, and summarizes completed plans."
+            ),
+            "category": "planning and orchestration",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "app" / "flow" / "planning.py"),
+            "content_preview": (flow_text or readme_text).strip(),
+        },
+        {
+            "id": "openmanus:data-analysis-agent",
+            "source_id": "openmanus",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "data-analysis-agent",
+            "name": "OpenManus Data Analysis Agent",
+            "description": (
+                "Optional specialist role for data analysis and visualization used by the OpenManus "
+                "multi-agent planning flow."
+            ),
+            "category": "data analysis",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "app" / "agent" / "data_analysis.py"),
+            "content_preview": (data_analysis_text or readme_text).strip(),
+        },
+    ]
+
+
 def _special_symphony_entry(source: dict) -> dict:
     repo_path = Path(source["repo_path"])
     spec_path = repo_path / "SPEC.md"
@@ -644,6 +747,9 @@ def index_agent_library() -> list[dict]:
             continue
         if special == "openfang":
             entries.extend(_special_openfang_entries(source))
+            continue
+        if special == "openmanus":
+            entries.extend(_special_openmanus_entries(source))
             continue
         if special == "symphony":
             entries.append(_special_symphony_entry(source))
@@ -808,6 +914,11 @@ def recommend_agent_library(task: str, limit: int = 8, source_id: str = "") -> l
             word in task_text for word in ("autonomous", "24/7", "browser", "lead", "research", "operate", "telegram")
         ):
             score += 18
+        if entry["source_id"] == "openmanus" and any(
+            word in task_text
+            for word in ("openmanus", "mcp", "sandbox", "browser", "tool calling", "planning flow", "multi-agent", "orchestrate")
+        ):
+            score += 22
         if entry["source_id"] == "symphony" and any(
             word in task_text for word in ("ticket", "issue", "workflow", "workspace", "parallel", "orchestrate", "handoff")
         ):
