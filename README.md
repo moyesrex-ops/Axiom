@@ -55,6 +55,15 @@ AXIOM is primarily a Python runtime, but the project now intentionally documents
 
 If a visitor sees Python, Rust, TypeScript, or PowerShell mentioned here, that is intentional: AXIOM can now supervise and expose capabilities from repos written in those ecosystems instead of pretending the world ends at one language.
 
+## GitHub Language Mix
+
+GitHub currently reports this repo as:
+
+- Python: 99.38%
+- JavaScript: 0.40%
+- PowerShell: 0.20%
+- Batchfile: 0.01%
+
 ---
 
 ## Operating Model
