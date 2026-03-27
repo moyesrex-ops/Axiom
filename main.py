@@ -69,6 +69,7 @@ from core.audio_barge_in           import BargeInDetector, tuning_from_runtime
 from core.capabilities             import format_capability_status, format_operator_surface
 from core.doctor                   import boot_doctor_lines
 from core.integration_manager      import boot_integrations
+from core.live_session_policy      import compute_rotation_deadline, should_rotate_now
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_gemini_api_key, get_secret
 from core.system_context           import format_prompt_system_context
@@ -140,6 +141,15 @@ def _is_clean_rotation_error(error: BaseException) -> bool:
 def _is_invalid_resumption_error(error: BaseException) -> bool:
     text = _summarize_exception(error).lower()
     return "1008" in text and ("not implemented" in text or "session resumption" in text or "operation is not implemented" in text)
+
+
+def _safe_queue_size(queue: asyncio.Queue | None) -> int:
+    if queue is None:
+        return 0
+    try:
+        return int(queue.qsize())
+    except Exception:
+        return 0
 
 
 def _update_memory_async(
@@ -1124,13 +1134,24 @@ class AxiomLive:
         self._session_resumable = False
         self._session_resumption_supported = True
         self._go_away_requested = False
+        self._go_away_deadline = 0.0
+        self._go_away_detail = ""
+        self._planned_reconnect_started = False
         self._last_disconnect_was_planned = False
+        self._last_user_audio_at = 0.0
+        self._tool_calls_in_flight = 0
+        self._live_context_window_compression = True
+        self._rotation_lead_seconds = 4.0
+        self._idle_rotate_window_seconds = 0.9
+        self._rapid_reconnect_seconds = 0.75
+        self._error_reconnect_seconds = 3.0
         self._shutdown_requested = threading.Event()
         self._apply_audio_runtime_config(load_runtime_config())
 
     def _apply_audio_runtime_config(self, runtime: dict | None = None) -> None:
         runtime = runtime or load_runtime_config()
         audio_cfg = runtime.get("audio", {}) or {}
+        live_cfg = runtime.get("live", {}) or {}
         previous_ambient = getattr(self._interrupt_detector, "ambient_rms", 120.0)
         previous_playback = getattr(self._interrupt_detector, "playback_rms", 0.0)
 
@@ -1139,6 +1160,25 @@ class AxiomLive:
         self._interrupt_detector = BargeInDetector(tuning_from_runtime(runtime))
         self._interrupt_detector.ambient_rms = previous_ambient
         self._interrupt_detector.playback_rms = previous_playback
+        self._live_context_window_compression = bool(
+            live_cfg.get("enable_context_window_compression", True)
+        )
+        self._rotation_lead_seconds = max(
+            0.0,
+            float(live_cfg.get("rotation_lead_seconds", 4.0) or 4.0),
+        )
+        self._idle_rotate_window_seconds = max(
+            0.2,
+            float(live_cfg.get("idle_rotate_window_ms", 900) or 900) / 1000.0,
+        )
+        self._rapid_reconnect_seconds = max(
+            0.1,
+            float(live_cfg.get("rapid_reconnect_seconds", 0.75) or 0.75),
+        )
+        self._error_reconnect_seconds = max(
+            self._rapid_reconnect_seconds,
+            float(live_cfg.get("error_reconnect_seconds", 3.0) or 3.0),
+        )
 
     def speak(self, text: str):
         """Thread-safe speak - any thread can call this."""
@@ -1165,6 +1205,60 @@ class AxiomLive:
         if rms <= 60:
             return 1.0
         return min(self.MAX_INPUT_GAIN, max(1.0, self.TARGET_INPUT_RMS / max(rms, 1.0)))
+
+    def _note_user_audio_activity(self, rms: float) -> None:
+        floor = max(240.0, self._interrupt_detector.ambient_rms * 1.4)
+        if float(rms) >= floor:
+            self._last_user_audio_at = time.time()
+
+    def _has_partial_turn(self) -> bool:
+        return bool(self._input_turn_buffer or self._output_turn_buffer)
+
+    def _should_rotate_session_now(self) -> bool:
+        return should_rotate_now(
+            now=time.time(),
+            deadline=self._go_away_deadline,
+            is_speaking=self.is_speaking,
+            playback_backlog=_safe_queue_size(self.audio_in_queue),
+            tool_calls_in_flight=self._tool_calls_in_flight,
+            has_partial_turn=self._has_partial_turn(),
+            last_user_audio_at=self._last_user_audio_at,
+            idle_window_seconds=self._idle_rotate_window_seconds,
+        )
+
+    async def _trigger_planned_reconnect(self, trigger: str) -> bool:
+        if self._planned_reconnect_started or not self.session:
+            return False
+
+        self._planned_reconnect_started = True
+        now = time.time()
+        self._last_disconnect_reason = f"Server requested reconnect ({self._go_away_detail or 'rotation window'})"
+        log_event(
+            "session",
+            "planned_reconnect_started",
+            trigger[:500],
+            metadata={
+                "go_away_detail": self._go_away_detail[:120],
+                "deadline_in_seconds": round(max(self._go_away_deadline - now, 0.0), 3),
+                "playback_backlog": _safe_queue_size(self.audio_in_queue),
+                "tool_calls_in_flight": self._tool_calls_in_flight,
+                "has_partial_turn": self._has_partial_turn(),
+            },
+        )
+        try:
+            await self.session.close()
+        except Exception as close_error:
+            self._planned_reconnect_started = False
+            log_event("session", "go_away_close_error", _summarize_exception(close_error)[:500])
+            return False
+        return True
+
+    async def _maybe_rotate_session(self, trigger: str) -> bool:
+        if not self._go_away_requested:
+            return False
+        if not self._should_rotate_session_now():
+            return False
+        return await self._trigger_planned_reconnect(trigger)
 
     def _finalize_transcript_turn(self) -> None:
         full_in = " ".join(self._input_turn_buffer).strip()
@@ -1219,8 +1313,6 @@ class AxiomLive:
         )
 
     def _note_session_resumption_update(self, update: types.LiveServerSessionResumptionUpdate) -> None:
-        if not self._session_resumption_supported:
-            return
         new_handle = str(getattr(update, "new_handle", "") or "").strip()
         resumable = bool(getattr(update, "resumable", False))
         last_index = getattr(update, "last_consumed_client_message_index", None)
@@ -1269,6 +1361,12 @@ class AxiomLive:
         self._go_away_requested = True
         time_left = str(getattr(go_away, "time_left", "") or "").strip()
         detail = time_left or "server requested reconnect"
+        self._go_away_detail = detail
+        self._go_away_deadline = compute_rotation_deadline(
+            time_left,
+            now=time.time(),
+            lead_seconds=self._rotation_lead_seconds,
+        )
         self._last_disconnect_reason = f"Server requested reconnect ({detail})"
         log_event(
             "session",
@@ -1277,13 +1375,10 @@ class AxiomLive:
             metadata={
                 "has_resumption_handle": bool(self._session_resumption_handle),
                 "resumable": self._session_resumable,
+                "deadline_in_seconds": round(max(self._go_away_deadline - time.time(), 0.0), 3),
             },
         )
-        try:
-            if self.session:
-                await self.session.close()
-        except Exception as close_error:
-            log_event("session", "go_away_close_error", _summarize_exception(close_error)[:500])
+        await self._maybe_rotate_session("go_away_received")
 
     def _build_config(self) -> types.LiveConnectConfig:
         from datetime import datetime
@@ -1338,6 +1433,10 @@ class AxiomLive:
                 )
             ),
         )
+        if self._live_context_window_compression:
+            config_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow()
+            )
         if self._session_resumption_supported:
             session_resumption = types.SessionResumptionConfig()
             if self._session_resumption_handle:
@@ -1811,6 +1910,7 @@ class AxiomLive:
                     if not self.is_speaking:
                         self._interrupt_detector.reset()
                         self._interrupt_detector.observe_playback_rms(0.0)
+                        self._note_user_audio_activity(rms)
                         if rms < (interrupt_threshold * 0.8):
                             self._interrupt_detector.observe_idle_rms(rms)
                     
@@ -1851,6 +1951,7 @@ class AxiomLive:
                     pass
                     
                 await self.out_queue.put({"data": data, "mime_type": "audio/pcm"})
+                await self._maybe_rotate_session("microphone_idle")
         except Exception as e:
             print(f"[AXIOM] Mic error: {e}")
             raise
@@ -1888,16 +1989,22 @@ class AxiomLive:
 
                         if sc.turn_complete:
                             self._finalize_transcript_turn()
+                            await self._maybe_rotate_session("turn_complete")
 
                     if response.tool_call:
                         fn_responses = []
                         for fc in response.tool_call.function_calls:
                             print(f"[AXIOM] Tool call: {fc.name}")
-                            fr = await self._execute_tool(fc)
+                            self._tool_calls_in_flight += 1
+                            try:
+                                fr = await self._execute_tool(fc)
+                            finally:
+                                self._tool_calls_in_flight = max(0, self._tool_calls_in_flight - 1)
                             fn_responses.append(fr)
                         await self.session.send_tool_response(
                             function_responses=fn_responses
                         )
+                        await self._maybe_rotate_session("tool_response_sent")
 
         except Exception as e:
             self._recover_partial_transcript(str(e) or "Connection dropped while a turn was in progress.")
@@ -1923,6 +2030,7 @@ class AxiomLive:
                 if self.audio_in_queue.empty():
                     self.is_speaking = False
                     self._speaker_guard_until = time.time() + self._speaker_guard_seconds()
+                    await self._maybe_rotate_session("playback_idle")
         except Exception as e:
             print(f"[AXIOM] Playback error: {e}")
             raise
@@ -1939,6 +2047,7 @@ class AxiomLive:
         heartbeat_task = asyncio.create_task(heartbeat.start())
 
         try:
+            next_delay_seconds = self._error_reconnect_seconds
             while not self._shutdown_requested.is_set():
                 try:
                     reconnecting = self._disconnect_count > 0
@@ -1954,6 +2063,11 @@ class AxiomLive:
                         self.audio_in_queue = asyncio.Queue()
                         self.out_queue      = asyncio.Queue(maxsize=10)
                         self._go_away_requested = False
+                        self._go_away_deadline = 0.0
+                        self._go_away_detail = ""
+                        self._planned_reconnect_started = False
+                        self._tool_calls_in_flight = 0
+                        self._last_user_audio_at = time.time()
 
                         print("[AXIOM] Connected.")
                         if reconnecting:
@@ -1987,13 +2101,17 @@ class AxiomLive:
                         stale_handle = self._session_resumption_handle
                         self._session_resumption_handle = ""
                         self._session_resumable = False
-                        self._session_resumption_supported = False
                         log_event(
                             "session",
                             "resumption_handle_cleared",
                             stale_handle[:48],
-                            metadata={"reason": self._last_disconnect_reason[:220], "supported": False},
+                            metadata={"reason": self._last_disconnect_reason[:220], "supported": True},
                         )
+                    next_delay_seconds = (
+                        self._rapid_reconnect_seconds
+                        if (self._go_away_requested or invalid_resumption)
+                        else self._error_reconnect_seconds
+                    )
                     log_event(
                         "session",
                         "rotation_reconnect" if planned_rotation else "connection_error",
@@ -2004,6 +2122,7 @@ class AxiomLive:
                             "go_away_requested": self._go_away_requested,
                             "invalid_resumption": invalid_resumption,
                             "resumption_supported": self._session_resumption_supported,
+                            "reconnect_delay_seconds": next_delay_seconds,
                         },
                     )
                     if planned_rotation:
@@ -2020,9 +2139,8 @@ class AxiomLive:
 
                 if self._shutdown_requested.is_set():
                     break
-                delay_seconds = 0.5 if self._go_away_requested else 3
-                print(f"[AXIOM] Reconnecting in {delay_seconds}s...")
-                await asyncio.sleep(delay_seconds)
+                print(f"[AXIOM] Reconnecting in {next_delay_seconds}s...")
+                await asyncio.sleep(next_delay_seconds)
         finally:
             heartbeat.is_running = False
             heartbeat_task.cancel()

@@ -50,6 +50,7 @@ class RuntimeConfigTests(unittest.TestCase):
             self.assertTrue(loaded["channels"]["telegram"]["enabled"])
             self.assertEqual(loaded["integrations"]["mirofish_path"], "local-path")
             self.assertTrue(loaded["system_context"]["enable_public_ip_lookup"])
+            self.assertTrue(loaded["live"]["enable_context_window_compression"])
 
 
 if __name__ == "__main__":

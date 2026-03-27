@@ -19,6 +19,13 @@ DEFAULT_RUNTIME_CONFIG = {
     "voice_name": "Charon",
     "voice_backend": "gemini_live",
     "live_model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+    "live": {
+        "enable_context_window_compression": True,
+        "rotation_lead_seconds": 4.0,
+        "idle_rotate_window_ms": 900,
+        "rapid_reconnect_seconds": 0.75,
+        "error_reconnect_seconds": 3.0,
+    },
     "audio": {
         "target_input_rms": 4200.0,
         "max_input_gain": 6.2,
