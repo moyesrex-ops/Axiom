@@ -75,36 +75,6 @@ def _get_default_browser_id() -> str:
             )
             return result.stdout.lower()
 
-def _get_default_browser_id() -> str:
-    """Returns raw default browser identifier string for current OS."""
-    system = platform.system()
-    try:
-        if system == "Windows":
-            import winreg
-            key     = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice"
-            )
-            prog_id = winreg.QueryValueEx(key, "ProgId")[0].lower()
-            winreg.CloseKey(key)
-            return prog_id
-
-        elif system == "Darwin":
-            result = subprocess.run(
-                ["defaults", "read",
-                 "com.apple.LaunchServices/com.apple.launchservices.secure",
-                 "LSHandlers"],
-                capture_output=True, text=True, timeout=5
-            )
-            return result.stdout.lower()
-
-        elif system == "Linux":
-            result = subprocess.run(
-                ["xdg-settings", "get", "default-web-browser"],
-                capture_output=True, text=True, timeout=5
-            )
-            return result.stdout.lower()
-
     except Exception:
         pass
 
