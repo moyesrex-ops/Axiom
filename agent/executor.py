@@ -8,6 +8,11 @@ from typing import Callable
 
 from agent.planner       import create_plan, replan, reflect_and_improve
 from agent.error_handler import analyze_error, generate_fix, ErrorDecision
+from agent.completion_verifier import (
+    verify_goal_completion,
+    extract_and_save_lessons,
+    assess_result_quality,
+)
 from actions.self_modifier import get_dynamic_tool
 from core.secret_config import get_gemini_api_key
 from memory.memory_manager import save_to_nexus
@@ -216,10 +221,9 @@ def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
         from actions.codex_builder import codex_builder
         return codex_builder(parameters=parameters, player=None, speak=speak) or "Done."
 
-    elif tool == "screen_process":
-        from actions.screen_processor import screen_process
-        screen_process(parameters=parameters, player=None)
-        return "Screen captured and analyzed."
+    elif tool in ("screen_process", "vision_tool"):
+        from actions.vision_engine import vision_tool
+        return vision_tool(parameters=parameters, player=None, speak=speak) or "Done."
 
     elif tool == "send_message":
         from actions.send_message import send_message
@@ -631,6 +635,12 @@ class AgentExecutor:
         speak:       Callable | None        = None,
         cancel_flag: threading.Event | None = None,
     ) -> str:
+        from agent.self_monitor import start_monitoring, get_monitor
+        start_monitoring()
+        if get_monitor().should_throttle():
+            if speak: speak("High task volume detected. Pacing myself.")
+            import time; time.sleep(3)
+
         print(f"\n[Executor] Goal: {goal}")
 
         specialist_context = _specialist_context(goal)
@@ -722,7 +732,12 @@ class AgentExecutor:
                     if cancel_flag and cancel_flag.is_set():
                         break
                     try:
+                        from agent.self_monitor import start_task_tracking, end_task_tracking
+                        start_task_tracking(f"[{tool}] {desc[:30]}")
+                        
                         result = _call_tool(tool, params, speak)
+                        
+                        end_task_tracking(success=True)
                         step_results[step_num] = result
                         completed_steps.append(step)
                         print(f"[Executor] Step {step_num} done: {str(result)[:100]}")
@@ -730,12 +745,13 @@ class AgentExecutor:
                         break
 
                     except Exception as e:
+                        try:
+                            from agent.self_monitor import end_task_tracking
+                            end_task_tracking(success=False)
+                        except Exception:
+                            pass
                         error_msg = str(e)
                         print(f"[Executor] Step {step_num} attempt {attempt} failed: {error_msg}")
-
-                        recovery = analyze_error(step, error_msg, attempt=attempt)
-                        decision = recovery["decision"]
-                        user_msg = recovery.get("user_message", "")
 
                         if speak and user_msg:
                             speak(user_msg)
@@ -790,6 +806,30 @@ class AgentExecutor:
             if success:
                 self._remember_task_strategy(goal, completed_steps, step_results, replanned=bool(replan_attempts))
 
+                # Phase 2: Post-execution verification
+                try:
+                    report = verify_goal_completion(goal, completed_steps, step_results)
+                    extract_and_save_lessons(goal, report, completed_steps)
+
+                    if not report.is_complete and report.confidence < 0.6 and replan_attempts < self.MAX_REPLAN_ATTEMPTS:
+                        # Verification says incomplete — try to fix
+                        print(f"[Executor] ⚠️ Verifier flagged incomplete ({report.confidence:.0%}): {report.missing_items}")
+                        if speak:
+                            speak("Let me double-check — I'm not confident this is fully done.")
+                        replan_attempts += 1
+                        missing_context = (
+                            f"Previous attempt was evaluated as INCOMPLETE. "
+                            f"Missing items: {', '.join(report.missing_items[:3])}. "
+                            f"Please add the missing steps."
+                        )
+                        plan = create_plan(goal, context=(specialist_context + "\n" + missing_context)[:3000])
+                        if "steps" in plan and len(plan["steps"]) > 0:
+                            plan = reflect_and_improve(goal, plan, context=specialist_context)
+                        continue  # Re-enter the execution loop
+
+                except Exception as verify_error:
+                    print(f"[Executor] ⚠️ Verification error (non-blocking): {verify_error}")
+
                 if replan_attempts > 0:
                     topic = f"learned_strategy_{goal.replace(' ', '_')[:30]}"
                     learned_content = f"Goal: {goal}\nSuccessful sequence:\n" + "\n".join(
@@ -802,6 +842,13 @@ class AgentExecutor:
 
             if replan_attempts >= self.MAX_REPLAN_ATTEMPTS:
                 msg = f"Task failed after {replan_attempts} replan attempts."
+                # Phase 2: Log failure for learning
+                log_event(
+                    "failure",
+                    "task_failed",
+                    f"{goal[:300]} — failed after {replan_attempts} replans",
+                    metadata={"failed_step": str(failed_step or {}).get("tool", "unknown"), "error": failed_error[:300]},
+                )
                 if speak: speak(msg)
                 return msg
 

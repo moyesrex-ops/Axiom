@@ -165,16 +165,73 @@ def _is_valid_youtube_url(url: str) -> bool:
     return bool(re.search(r"(youtube\.com|youtu\.be)", url or ""))
 
 
+def _get_user_media_preferences() -> str:
+    """Pull user media/music preferences from memory for smarter query expansion."""
+    try:
+        from memory.memory_manager import load_memory
+        memory = load_memory()
+        prefs = memory.get("preferences", {})
+        lines = []
+        for key, entry in list(prefs.items())[:10]:
+            val = entry.get("value") if isinstance(entry, dict) else entry
+            if val:
+                lines.append(f"{key.replace('_', ' ')}: {val}")
+        return "; ".join(lines) if lines else ""
+    except Exception:
+        return ""
+
+
 def _refine_play_query(query: str) -> str:
+    """
+    Refine a YouTube play query. Uses Gemini for intelligent expansion of
+    vague queries, with the hardcoded map as a fast-path and final fallback.
+    """
     raw = str(query or "").strip()
     normalized = re.sub(r"\s+", " ", raw.lower())
 
+    # Fast path: exact match in hardcoded map
     if normalized in _GENERIC_YOUTUBE_QUERY_MAP:
         return _GENERIC_YOUTUBE_QUERY_MAP[normalized]
 
     tokens = re.findall(r"[a-z0-9']+", normalized)
     content_tokens = [token for token in tokens if token not in _GENERIC_YOUTUBE_WORDS]
 
+    # If query has 2+ meaningful words, it's specific enough — use as-is
+    if len(content_tokens) >= 2:
+        return raw
+
+    # Vague query — try Gemini intelligent expansion
+    user_prefs = _get_user_media_preferences()
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+        prompt = f"""Convert this vague YouTube search into a SPECIFIC, high-quality search query.
+
+Rules:
+- Return ONLY the search query text, nothing else
+- Make it specific enough to find good YouTube content
+- Consider the user's preferences if available
+- Keep it natural (how a human would search YouTube)
+- Maximum 8 words
+
+{f"User preferences: {user_prefs}" if user_prefs else ""}
+
+Vague request: {query}
+YouTube search query:"""
+
+        response = model.generate_content(prompt)
+        expanded = response.text.strip().strip('"').strip("'").strip()
+
+        if expanded and len(expanded) > 3:
+            print(f"[YouTube] 🔄 Smart expand: {query!r} → {expanded!r}")
+            return expanded
+
+    except Exception as e:
+        print(f"[YouTube] ⚠️ Intelligent expansion failed ({e}), using fallback")
+
+    # Final fallback: original hardcoded behavior
     if not content_tokens:
         if "funny" in tokens:
             return "funny video compilation"
@@ -187,6 +244,7 @@ def _refine_play_query(query: str) -> str:
         return "beautiful relaxing nature video 4k"
 
     return raw
+
 
 def _get_transcript(video_id: str) -> str | None:
 

@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from core.secret_config import get_gemini_api_key
+from memory.runtime_store import log_event, search_knowledge_items
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -89,20 +90,6 @@ computer_settings
 computer_control
   action: "type" | "click" | "hotkey" | "press" | "scroll" | "screenshot" | "screen_find" | "screen_click" (required)
   text: string (for type)
-  x, y: int (for click)
-  keys: string (for hotkey, e.g. "ctrl+c")
-  key: string (for press)
-  direction: "up" | "down" (for scroll)
-  description: string (for screen_find/screen_click)
-
-screen_process
-  text: string (required) — what to analyze or ask about the screen
-  angle: "screen" | "camera" (optional)
-
-send_message
-  receiver: string (required)
-  message_text: string (required)
-  platform: string (required)
 
 reminder
   date: string YYYY-MM-DD (required)
@@ -382,8 +369,118 @@ def _get_api_key() -> str:
     return get_gemini_api_key()
 
 
+_VAGUE_WORDS = {
+    "a", "an", "the", "some", "something", "nice", "good", "cool",
+    "interesting", "random", "any", "stuff", "thing", "things",
+    "whatever", "anything", "play", "search", "find", "show",
+    "me", "just", "do", "make", "get", "it", "that", "this",
+    "for", "on", "youtube", "video", "videos", "watch", "open",
+    "look", "up", "about", "please", "can", "you", "would",
+}
+
+
+def _goal_is_vague(goal: str) -> bool:
+    """Detect if a goal is too generic/vague to produce good results."""
+    tokens = re.findall(r"[a-z0-9']+", str(goal or "").lower())
+    if not tokens:
+        return True
+    content_tokens = [t for t in tokens if t not in _VAGUE_WORDS]
+    # If fewer than 2 meaningful words, it's vague
+    return len(content_tokens) < 2
+
+
+def _recall_user_preferences(goal: str) -> str:
+    """Pull relevant user preferences and prior context from memory."""
+    try:
+        from memory.memory_manager import load_memory, search_memory_archive
+        memory = load_memory()
+
+        # Pull explicit preferences
+        prefs = memory.get("preferences", {})
+        pref_lines = []
+        for key, entry in list(prefs.items())[:8]:
+            val = entry.get("value") if isinstance(entry, dict) else entry
+            if val:
+                pref_lines.append(f"- {key.replace('_', ' ').title()}: {val}")
+
+        # Search memory for relevant past knowledge
+        results = search_memory_archive(goal, limit=3)
+        archive_lines = []
+        for item in (results.get("knowledge", []) or [])[:3]:
+            title = str(item.get("title", "")).strip()
+            content = str(item.get("content", "")).strip()
+            if title and content:
+                archive_lines.append(f"- {title}: {content[:200]}")
+
+        sections = []
+        if pref_lines:
+            sections.append("User preferences:\n" + "\n".join(pref_lines))
+        if archive_lines:
+            sections.append("Relevant prior knowledge:\n" + "\n".join(archive_lines))
+        return "\n".join(sections)
+    except Exception as e:
+        print(f"[Planner] ⚠️ Memory recall failed: {e}")
+        return ""
+
+
+def _reformulate_goal(goal: str, memory_context: str = "") -> str:
+    """
+    If a goal is vague or generic, reformulate it into something specific
+    and actionable using a lightweight Gemini call + memory context.
+    Returns the original goal unchanged if it's already specific enough.
+    """
+    if not _goal_is_vague(goal):
+        return goal
+
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+        prompt = f"""You are a query reformulator for an AI assistant.
+The user gave a VAGUE or GENERIC request. Your job is to make it SPECIFIC and ACTIONABLE.
+
+Rules:
+- Turn generic phrases into specific, searchable queries
+- Use the user's known preferences to personalize the query
+- Keep the reformulated goal concise (1-2 sentences max)
+- Return ONLY the reformulated goal, nothing else
+- If the intent is clear despite vague wording, preserve and sharpen it
+- Do NOT add instructions to the AI, just rewrite the user's goal
+
+Examples:
+- "play something nice" → "play a beautiful ambient lo-fi music video"
+- "search for that thing" → (need context) → keep as-is
+- "find me a cool video" → "find a highly-rated cinematic short documentary"
+- "play some chill music" → "play a lo-fi chill beats study playlist on YouTube"
+
+{f"User Context:{chr(10)}{memory_context}" if memory_context else "(No user context available)"}
+
+Original goal: {goal}
+Reformulated goal:"""
+
+        response = model.generate_content(prompt)
+        reformulated = response.text.strip().strip('"').strip("'").strip()
+
+        if reformulated and len(reformulated) > 3 and reformulated.lower() != goal.lower():
+            print(f"[Planner] 🔄 Reformulated: {goal!r} → {reformulated!r}")
+            log_event("planner", "goal_reformulated", f"{goal} → {reformulated}")
+            return reformulated
+
+    except Exception as e:
+        print(f"[Planner] ⚠️ Reformulation failed: {e}")
+
+    return goal
+
+
 def create_plan(goal: str, context: str = "") -> dict:
     import google.generativeai as genai
+
+    # Phase 1: Recall user preferences and relevant memory
+    memory_context = _recall_user_preferences(goal)
+
+    # Phase 1: Reformulate vague goals into specific ones
+    enriched_goal = _reformulate_goal(goal, memory_context=memory_context)
 
     genai.configure(api_key=_get_api_key())
     model = genai.GenerativeModel(
@@ -391,9 +488,11 @@ def create_plan(goal: str, context: str = "") -> dict:
         system_instruction=PLANNER_PROMPT
     )
 
-    user_input = f"Goal: {goal}"
+    user_input = f"Goal: {enriched_goal}"
+    if memory_context:
+        user_input += f"\n\nUser Memory Context:\n{memory_context[:1200]}"
     if context:
-        user_input += f"\n\nContext: {context}"
+        user_input += f"\n\nExecution Context: {context}"
 
     try:
         response = model.generate_content(user_input)

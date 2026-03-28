@@ -91,7 +91,7 @@ def _mirofish_context_block(asset: str, source_mode: str = "auto") -> tuple[str,
 def _run_swarm_agent(model, role: str, asset: str, soul_lessons: str, context: str) -> str:
     """
     Run a single swarm agent with a specific role and return its analysis.
-    Each agent is a simulated expert human analyst.
+    Each agent is a specialized analyst role with a constrained viewpoint.
     """
     role_prompts = {
         "macro_economist": f"""

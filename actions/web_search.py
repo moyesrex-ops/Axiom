@@ -71,6 +71,56 @@ def _gemini_search(query: str) -> str:
     return text.strip()
 
 
+def _smart_query_expansion(query: str) -> str:
+    """
+    Expand vague/generic search queries into specific, effective search terms.
+    Uses a fast Gemini call enriched by user memory if available.
+    """
+    # Don't expand already-specific queries
+    words = query.lower().split()
+    if len(words) > 6:  # Already detailed enough
+        return query
+
+    vague_indicators = {"search", "find", "look", "show", "get", "what", "how"}
+    specific_words = [w for w in words if w not in vague_indicators and len(w) > 2]
+    if len(specific_words) >= 3:  # Has enough content
+        return query
+
+    try:
+        # Try to get user preferences for context
+        memory_context = ""
+        try:
+            from core.user_preferences import get_all_preferences
+            prefs = get_all_preferences()
+            if prefs:
+                pref_lines = [f"- {k}: {v}" for k, v in list(prefs.items())[:5]]
+                memory_context = "User preferences:\n" + "\n".join(pref_lines)
+        except Exception:
+            pass
+
+        import google.generativeai as genai
+        genai.configure(api_key=_get_api_key())
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+        prompt = f"""Expand this search query into a more specific, effective search query.
+Keep it concise (under 15 words). Return ONLY the expanded query, nothing else.
+
+{f"Context: {memory_context}" if memory_context else ""}
+
+Original query: {query}
+Expanded query:"""
+
+        response = model.generate_content(prompt)
+        expanded = response.text.strip().strip('"').strip("'").strip()
+        if expanded and len(expanded) > len(query) and len(expanded) < 200:
+            print(f"[WebSearch] 🔄 Query expanded: {query!r} → {expanded!r}")
+            return expanded
+    except Exception as e:
+        print(f"[WebSearch] ⚠️ Query expansion failed: {e}")
+
+    return query
+
+
 def _normalized_vane_url() -> str:
     return str(_research_config().get("vane_url", "") or "").strip().rstrip("/")
 

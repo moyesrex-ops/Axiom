@@ -2,6 +2,7 @@ import json
 import threading
 import time
 from typing import Optional
+from memory.runtime_store import log_event
 
 try:
     import MetaTrader5 as mt5
@@ -112,13 +113,17 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
     take_profit = params.get("take_profit")
 
     if mt5 is None:
-        return (
+        message = (
             "MetaTrader5 is not installed in the current Python environment. "
             "Please run 'pip install MetaTrader5' to enable ultra-low latency native trading."
         )
+        log_event("trading", "mt5_unavailable", message)
+        return message
 
     if not mt5.initialize():
-        return f"Failed to initialize MT5, error: {mt5.last_error()}"
+        message = f"Failed to initialize MT5, error: {mt5.last_error()}"
+        log_event("trading", "mt5_initialize_failed", message)
+        return message
 
     if action == "info":
         account_info = mt5.account_info()
@@ -161,6 +166,12 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         res = "\n".join(lines)
         if speak:
             speak(res)
+        log_event(
+            "trading",
+            "mt5_info",
+            res[:1500],
+            metadata={"symbol_filter": symbol_filter, "positions": len(positions)},
+        )
         mt5.shutdown()
         return res
 
@@ -205,7 +216,9 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
             stop_loss = data.get("stop_loss")
             take_profit = data.get("take_profit")
         except Exception as e:
-            return f"Parameter extraction failed: {e}"
+            message = f"Parameter extraction failed: {e}"
+            log_event("trading", "mt5_parameter_extraction_failed", message[:1000], metadata={"prompt": str(prompt_raw)[:300]})
+            return message
 
     if action in ("buy", "sell"):
         if speak:
@@ -214,19 +227,25 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
             mt5.shutdown()
-            return f"Symbol {symbol} not found in MetaTrader."
+            message = f"Symbol {symbol} not found in MetaTrader."
+            log_event("trading", "mt5_symbol_missing", message, metadata={"symbol": symbol})
+            return message
 
         if not symbol_info.visible:
             if not mt5.symbol_select(symbol, True):
                 mt5.shutdown()
-                return f"Symbol {symbol} select failed."
+                message = f"Symbol {symbol} select failed."
+                log_event("trading", "mt5_symbol_select_failed", message, metadata={"symbol": symbol})
+                return message
 
         order_type = mt5.ORDER_TYPE_BUY if action == "buy" else mt5.ORDER_TYPE_SELL
 
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             mt5.shutdown()
-            return f"Could not get tick data for {symbol}."
+            message = f"Could not get tick data for {symbol}."
+            log_event("trading", "mt5_tick_failed", message, metadata={"symbol": symbol})
+            return message
 
         price = tick.ask if action == "buy" else tick.bid
         point = symbol_info.point
@@ -271,11 +290,18 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
 
         if result is None:
             error = f"Order send failed completely. ({mt5.last_error()})"
+            log_event("trading", "mt5_order_failed", error, metadata={"symbol": symbol, "action": action, "volume": volume})
             mt5.shutdown()
             return error
 
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             error = f"Order failed, retcode={result.retcode} ({mt5.last_error()})"
+            log_event(
+                "trading",
+                "mt5_order_failed",
+                error,
+                metadata={"symbol": symbol, "action": action, "volume": volume, "retcode": int(result.retcode)},
+            )
             mt5.shutdown()
             return error
 
@@ -284,6 +310,20 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         msg = (
             f"Order placed! Ticket: {result.order}, Price: {result.price}, "
             f"Volume: {result.volume}{sl_info}{tp_info}"
+        )
+        log_event(
+            "trading",
+            "mt5_order_placed",
+            msg,
+            metadata={
+                "symbol": symbol,
+                "action": action,
+                "volume": float(volume),
+                "ticket": int(result.order),
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "magic": magic,
+            },
         )
         if speak:
             speak("Order successfully executed in the market.")
@@ -294,4 +334,6 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         return msg
 
     mt5.shutdown()
-    return f"Unknown action: {action}. Supported: info, buy, sell."
+    message = f"Unknown action: {action}. Supported: info, buy, sell."
+    log_event("trading", "mt5_unknown_action", message)
+    return message

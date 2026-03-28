@@ -25,7 +25,7 @@ def get_base_dir():
 BASE_DIR           = get_base_dir()
 API_CONFIG_PATH    = BASE_DIR / "config" / "api_keys.json"
 PROJECTS_DIR       = Path.home() / "Desktop" / "AXIOMProjects"
-MAX_FIX_ATTEMPTS   = 4
+MAX_FIX_ATTEMPTS   = 6
 MODEL_PLANNER      = "gemini-2.5-flash"
 MODEL_WRITER       = "gemini-2.5-flash-lite"
 
@@ -153,14 +153,29 @@ def _write_file(
     project_description: str,
     all_files: list[dict],
     language: str,
-    project_dir: Path
+    project_dir: Path,
+    written_files: dict | None = None,
 ) -> str:
-    """Write one file. Returns the generated code."""
+    """Write one file with full context of already-written files."""
     model = _get_model(MODEL_WRITER)
 
     file_list = "\n".join(
         f"  - {f['path']}: {f['description']}" for f in all_files
     )
+
+    # Build context from already-written files so imports/APIs match
+    context_block = ""
+    if written_files:
+        context_parts = []
+        for wf_path, wf_code in list(written_files.items())[:5]:  # Last 5 files
+            # Send first 120 lines of each to keep prompt manageable
+            truncated = "\n".join(wf_code.splitlines()[:120])
+            context_parts.append(f"--- {wf_path} ---\n{truncated}")
+        if context_parts:
+            context_block = (
+                "\n\nAlready written project files (use these EXACT imports/APIs):\n"
+                + "\n\n".join(context_parts)
+            )
 
     prompt = f"""You are an expert {language} developer.
 Write the code for ONE specific file in a larger project.
@@ -169,16 +184,18 @@ Project goal: {project_description}
 
 All files in this project:
 {file_list}
+{context_block}
 
 Now write ONLY the file: {file_path}
 Purpose of this file: {file_description}
 
 Rules:
 - Output ONLY the code for this file. No explanation, no markdown, no backticks.
-- Import from other project files using relative imports where needed.
+- Import from other project files using the EXACT function/class names from the written files above.
 - Add helpful inline comments.
 - Handle errors properly.
 - Use modern best practices.
+- Match the API signatures already defined in other project files.
 
 Code for {file_path}:"""
 
@@ -277,6 +294,37 @@ def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
     except Exception as e:
         return f"Run error: {e}"
 
+def _auto_requirements(file_codes: dict, project_dir: Path) -> list[str]:
+    """Scan all written files and generate requirements.txt from imports."""
+    stdlib = {
+        "os", "sys", "re", "json", "time", "math", "random", "datetime",
+        "pathlib", "subprocess", "threading", "asyncio", "collections",
+        "functools", "itertools", "typing", "dataclasses", "abc",
+        "io", "shutil", "tempfile", "shlex", "traceback", "logging",
+        "unittest", "argparse", "hashlib", "base64", "copy", "enum",
+        "uuid", "socket", "struct", "csv", "sqlite3", "http",
+        "urllib", "email", "html", "xml", "contextlib", "textwrap",
+    }
+    third_party = set()
+    for code in file_codes.values():
+        for line in code.splitlines():
+            line = line.strip()
+            if line.startswith("import "):
+                mod = line.split()[1].split(".")[0]
+                if mod not in stdlib:
+                    third_party.add(mod)
+            elif line.startswith("from ") and " import " in line:
+                mod = line.split()[1].split(".")[0]
+                if mod not in stdlib and not mod.startswith("."):
+                    third_party.add(mod)
+
+    if third_party:
+        req_path = project_dir / "requirements.txt"
+        req_path.write_text("\n".join(sorted(third_party)) + "\n", encoding="utf-8")
+        print(f"[DevAgent] 📦 Generated requirements.txt: {sorted(third_party)}")
+    return sorted(third_party)
+
+
 def _fix_file(
     file_path: str,
     current_code: str,
@@ -284,14 +332,34 @@ def _fix_file(
     project_description: str,
     all_files: list[dict],
     language: str,
-    project_dir: Path
+    project_dir: Path,
+    file_codes: dict | None = None,
+    error_history: list | None = None,
 ) -> str:
-    """Ask Gemini to fix a specific file based on error output."""
+    """Fix a file with full project context and accumulated error history."""
     model = _get_model(MODEL_PLANNER)
 
     file_list = "\n".join(
         f"  - {f['path']}: {f['description']}" for f in all_files
     )
+
+    # Include related files' actual code for cross-file fixes
+    related_context = ""
+    if file_codes:
+        related_parts = []
+        for fp, fc in file_codes.items():
+            if fp != file_path:
+                truncated = "\n".join(fc.splitlines()[:80])
+                related_parts.append(f"--- {fp} ---\n{truncated}")
+        if related_parts:
+            related_context = "\n\nOther project files for reference:\n" + "\n\n".join(related_parts[:4])
+
+    # Include error history so we don't repeat the same fix
+    history_block = ""
+    if error_history:
+        history_block = "\n\nPrevious fix attempts that FAILED (do NOT repeat them):\n"
+        for i, eh in enumerate(error_history[-3:], 1):
+            history_block += f"  Attempt {i}: {eh[:200]}\n"
 
     prompt = f"""You are an expert {language} debugger.
 Fix the file below. It caused an error when the project was run.
@@ -300,11 +368,13 @@ Project goal: {project_description}
 
 All files in this project:
 {file_list}
+{related_context}
 
 File to fix: {file_path}
 
 Error output:
 {error_output[:3000]}
+{history_block}
 
 Current code:
 {current_code}
@@ -384,7 +454,8 @@ def _build_project(
         try:
             code = _write_file(
                 file_path, file_desc, description,
-                files, language, project_dir
+                files, language, project_dir,
+                written_files=file_codes,  # Pass already-written files as context
             )
             file_codes[file_path] = code
         except RateLimitError:
@@ -406,7 +477,11 @@ def _build_project(
 
     _open_vscode(project_dir)
 
+    # Auto-generate requirements.txt from actual imports
+    _auto_requirements(file_codes, project_dir)
+
     last_output = ""
+    error_history: list[str] = []  # Track errors across attempts
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
 
@@ -425,11 +500,13 @@ def _build_project(
         if attempt == MAX_FIX_ATTEMPTS:
             break
 
+        error_history.append(last_output[:300])
+
         error_file = _identify_error_file(last_output, list(file_codes.keys()))
         if not error_file:
             error_file = entry_point
 
-        log(f"Error in '{error_file}', fixing...")
+        log(f"Error in '{error_file}', fixing (attempt {attempt})...")
 
         try:
             fixed = _fix_file(
@@ -439,7 +516,9 @@ def _build_project(
                 description,
                 files,
                 language,
-                project_dir
+                project_dir,
+                file_codes=file_codes,
+                error_history=error_history,
             )
             file_codes[error_file] = fixed
         except RateLimitError:

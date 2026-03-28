@@ -271,6 +271,86 @@ def search_memory_archive(query: str, limit: int = 5) -> dict:
     }
 
 
+def recall_relevant_context(goal: str, limit: int = 5) -> str:
+    """
+    Search across all memory sources for context relevant to a goal.
+    Returns a formatted string ready for injection into planner/executor prompts.
+
+    This is the key function that makes AXIOM's memory *actively* drive decisions
+    instead of just passively recording.
+    """
+    goal_text = str(goal or "").strip()
+    if not goal_text:
+        return ""
+
+    sections = []
+
+    # 1. Search knowledge items (task strategies, lessons, archived knowledge)
+    try:
+        results = search_memory_archive(goal_text, limit=limit)
+
+        knowledge = results.get("knowledge", [])
+        if knowledge:
+            k_lines = ["[PRIOR KNOWLEDGE]"]
+            for item in knowledge[:limit]:
+                title = str(item.get("title", "")).strip()
+                content = str(item.get("content", "")).strip()
+                kind = str(item.get("kind", "")).strip()
+                if title and content:
+                    k_lines.append(f"- [{kind}] {title}: {content[:300]}")
+            if len(k_lines) > 1:
+                sections.append("\n".join(k_lines))
+
+        # 2. Graph memory relations
+        graph = results.get("graph", [])
+        if graph:
+            g_lines = ["[RELATED FACTS]"]
+            for item in graph[:4]:
+                source = str(item.get("source_name", "")).strip()
+                relation = str(item.get("relation", "")).strip().replace("_", " ")
+                target = str(item.get("target_name", "")).strip()
+                if source and relation and target:
+                    g_lines.append(f"- {source} → {relation} → {target}")
+            if len(g_lines) > 1:
+                sections.append("\n".join(g_lines))
+
+        # 3. Recent relevant conversations
+        conversations = results.get("conversations", [])
+        if conversations:
+            c_lines = ["[RELEVANT PAST CONVERSATIONS]"]
+            for item in conversations[:3]:
+                user_text = str(item.get("user_text", "")).strip()
+                ai_text = str(item.get("assistant_text", "")).strip()
+                if user_text:
+                    c_lines.append(f"- User: {user_text[:200]}")
+                    if ai_text:
+                        c_lines.append(f"  Axiom: {ai_text[:200]}")
+            if len(c_lines) > 1:
+                sections.append("\n".join(c_lines))
+
+    except Exception as e:
+        _safe_print(f"[Memory] ⚠️ Context recall failed: {e}")
+
+    # 4. User preferences
+    try:
+        memory = load_memory()
+        prefs = memory.get("preferences", {})
+        pref_lines = []
+        for key, entry in list(prefs.items())[:8]:
+            val = entry.get("value") if isinstance(entry, dict) else entry
+            if val:
+                pref_lines.append(f"- {key.replace('_', ' ').title()}: {val}")
+        if pref_lines:
+            sections.append("[USER PREFERENCES]\n" + "\n".join(pref_lines))
+    except Exception:
+        pass
+
+    context = "\n\n".join(sections)
+    if len(context) > 2400:
+        context = context[:2397] + "..."
+    return context
+
+
 
 def format_memory_for_prompt(memory: dict | None) -> str:
     if not memory:

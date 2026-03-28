@@ -1,5 +1,5 @@
-# A.X.I.O.M v4.3
-### Windows-first operator with real execution, shared voice and Telegram control, speech-gated interruption, persistent memory, and imported specialist runtimes
+# A.X.I.O.M v4.4
+### Windows-first operator with real execution, shared voice and Telegram control, speech-gated interruption, persistent Neural Link memory, Sentinel self-monitoring, Vision verification, and imported specialist runtimes
 
 <p align="center">
   <img src="assets/banner.png" alt="AXIOM Banner" width="100%">
@@ -169,16 +169,18 @@ flowchart TB
         Main[main.py live session]
         Planner[agent/planner.py]
         Executor[agent/executor.py]
+        Monitor[agent/self_monitor.py<br/>Sentinel daemon]
     end
     subgraph Tooling
         Actions[actions/* machine tools]
+        Vision[actions/vision_engine.py]
         Skills[core/skill_library.py]
         Agents[core/agent_library.py]
         Bridges[DeerFlow, Paperclip, OpenFang, Symphony, lossless-claw]
         Doctor[doctor and capabilities]
     end
     subgraph State
-        Memory[(SQLite state and archives)]
+        Memory[(SQLite state and Neural Link archives)]
         ChannelState[(channel handoff state)]
         Config[config/runtime.json<br/>config/runtime.local.json]
     end
@@ -186,14 +188,18 @@ flowchart TB
     Voice --> Main
     Telegram --> Main
     Main --> Planner --> Executor
+    Main --> Monitor
+    Executor --> Monitor
     Main --> ChannelState
     Executor --> Actions
+    Executor --> Vision
     Executor --> Skills
     Executor --> Agents
     Executor --> Bridges
     Main --> Doctor
     Actions --> Memory
     Actions --> ChannelState
+    Vision --> Memory
     Skills --> Config
     Agents --> Config
     Bridges --> Config

@@ -75,6 +75,36 @@ def _get_default_browser_id() -> str:
             )
             return result.stdout.lower()
 
+def _get_default_browser_id() -> str:
+    """Returns raw default browser identifier string for current OS."""
+    system = platform.system()
+    try:
+        if system == "Windows":
+            import winreg
+            key     = winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\http\UserChoice"
+            )
+            prog_id = winreg.QueryValueEx(key, "ProgId")[0].lower()
+            winreg.CloseKey(key)
+            return prog_id
+
+        elif system == "Darwin":
+            result = subprocess.run(
+                ["defaults", "read",
+                 "com.apple.LaunchServices/com.apple.launchservices.secure",
+                 "LSHandlers"],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.stdout.lower()
+
+        elif system == "Linux":
+            result = subprocess.run(
+                ["xdg-settings", "get", "default-web-browser"],
+                capture_output=True, text=True, timeout=5
+            )
+            return result.stdout.lower()
+
     except Exception:
         pass
 
@@ -82,28 +112,73 @@ def _get_default_browser_id() -> str:
 
 _BROWSER_BINARIES = {
     "Windows": {
-        "opera":   ["opera.exe"],
+        "comet":   ["comet.exe"],
+        "arc":     ["arc.exe"],
+        "opera":   ["opera.exe", "launcher.exe"],
         "brave":   ["brave.exe"],
         "vivaldi": ["vivaldi.exe"],
         "chrome":  ["chrome.exe"],
+        "edge":    ["msedge.exe"],
         "firefox": ["firefox.exe"],
     },
     "Darwin": {
+        "comet":   ["comet"],
+        "arc":     ["arc"],
         "opera":   ["opera"],
         "brave":   ["brave browser", "brave"],
         "vivaldi": ["vivaldi"],
         "chrome":  ["google chrome", "google-chrome"],
+        "edge":    ["microsoft edge"],
         "firefox": ["firefox"],
     },
     "Linux": {
+        "comet":   ["comet"],
+        "arc":     ["arc"],
         "opera":   ["opera", "opera-stable"],
         "brave":   ["brave-browser", "brave"],
         "vivaldi": ["vivaldi-stable", "vivaldi"],
         "chrome":  ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"],
+        "edge":    ["microsoft-edge", "microsoft-edge-stable"],
         "firefox": ["firefox"],
     },
 }
 
+def _scan_windows_browser_paths(binary_names: list[str]) -> str | None:
+    """Aggressively scan common Windows installation paths for browser executable."""
+    if platform.system() != "Windows":
+        return None
+        
+    common_dirs = [
+        Path(os.environ.get("PROGRAMFILES", "C:\\Program Files")),
+        Path(os.environ.get("PROGRAMFILES(X86)", "C:\\Program Files (x86)")),
+        Path(os.environ.get("LOCALAPPDATA", "C:\\Users\\Default\\AppData\\Local")),
+        Path(os.environ.get("APPDATA", "C:\\Users\\Default\\AppData\\Roaming")),
+    ]
+    
+    # Common subfolder patterns for browsers
+    subfolders = [
+        "Comet\\Application",
+        "Google\\Chrome\\Application",
+        "Microsoft\\Edge\\Application",
+        "BraveSoftware\\Brave-Browser\\Application",
+        "Vivaldi\\Application",
+        "Opera Software\\Opera Stable",
+        "Mozilla Firefox",
+        "The Browser Company\\Arc",
+    ]
+    
+    for base_dir in common_dirs:
+        if not base_dir.exists(): continue
+        for sub in subfolders:
+            folder = base_dir / sub
+            if not folder.exists(): continue
+            for name in binary_names:
+                exe_path = folder / name
+                if exe_path.exists() and exe_path.is_file():
+                    return str(exe_path)
+    return None
+
+import os
 
 def _get_opera_executable() -> str | None:
     if platform.system() != "Windows":
@@ -145,35 +220,50 @@ def _find_browser_executable(prog_id: str) -> tuple:
         return "webkit", None, None
 
     if "edge" in prog_id:
-        return "chromium", None, "msedge"
+        exe = _scan_windows_browser_paths(os_bins.get("edge", []))
+        return "chromium", exe, "msedge" if not exe else None
 
     if "opera" in prog_id:
         exe = _get_opera_executable()
-        if exe:
-            return "chromium", exe, None
-        for binary in os_bins.get("opera", []):
-            path = shutil.which(binary)
-            if path:
-                return "chromium", path, None
+        if not exe: exe = _scan_windows_browser_paths(os_bins.get("opera", []))
+        if exe: return "chromium", exe, None
 
     browser_patterns = {
+        "comet":   ["comet"],
+        "arc":     ["arc"],
         "brave":   ["brave"],
         "vivaldi": ["vivaldi"],
         "chrome":  ["chrome"],
     }
+    
     for browser_name, patterns in browser_patterns.items():
         if not any(p in prog_id for p in patterns):
             continue
+            
         binaries = os_bins.get(browser_name, [])
         for binary in binaries:
             path = shutil.which(binary)
             if path:
-                print(f"[Browser] Found {browser_name} at: {path}")
+                print(f"[Browser] Found {browser_name} in PATH: {path}")
                 return "chromium", path, None
+                
+        exe = _scan_windows_browser_paths(binaries)
+        if exe:
+            print(f"[Browser] Found {browser_name} in system paths: {exe}")
+            return "chromium", exe, None
 
     if "chrome" in prog_id or not prog_id:
+        exe = _scan_windows_browser_paths(os_bins.get("chrome", []))
+        if exe: return "chromium", exe, None
         return "chromium", None, "chrome"
 
+    # Fallback: scan for any known chromium-based browser if all else fails
+    for browser_name in ["comet", "brave", "chrome", "edge", "arc", "vivaldi"]:
+        binaries = os_bins.get(browser_name, [])
+        exe = _scan_windows_browser_paths(binaries)
+        if exe:
+            print(f"[Browser] Fallback found {browser_name}: {exe}")
+            return "chromium", exe, None
 
     return "chromium", None, None
 
@@ -298,6 +388,20 @@ class _BrowserThread:
                 print(f"[Browser] Warning: Lightpanda connect failed ({e}), falling back to local browser")
 
         prog_id                        = _get_default_browser_id()
+        # Check user's preferred browser first
+        try:
+            from core.user_preferences import get_browser_preference
+            preferred = get_browser_preference()
+            if preferred:
+                preferred_lower = preferred.lower()
+                print(f"[Browser] User prefers: {preferred}")
+                # Inject the preferred browser into prog_id so
+                # _find_browser_executable picks it up
+                if preferred_lower not in prog_id.lower():
+                    prog_id = preferred_lower
+        except Exception:
+            pass
+
         engine_name, exe_path, channel = _find_browser_executable(prog_id)
         engine                         = getattr(self._playwright, engine_name)
 
