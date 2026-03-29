@@ -74,6 +74,7 @@ from core.live_session_policy      import compute_rotation_deadline, should_rota
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_gemini_api_key, get_secret
 from core.system_context           import format_prompt_system_context
+from core.task_channels            import submit_channel_task
 from core.telegram_bridge          import start_telegram_bridge, stop_telegram_bridge
 from core.tool_runtime             import execute_tool
 from memory.runtime_store          import init_runtime_store, log_event
@@ -1505,7 +1506,7 @@ class AxiomLive:
                 goal         = args.get("goal", "")
                 priority_str = args.get("priority", "normal").lower()
 
-                from agent.task_queue import get_queue, TaskPriority
+                from agent.task_queue import TaskPriority
                 priority_map = {
                     "low":    TaskPriority.LOW,
                     "normal": TaskPriority.NORMAL,
@@ -1513,16 +1514,13 @@ class AxiomLive:
                 }
                 priority = priority_map.get(priority_str, TaskPriority.NORMAL)
 
-                queue   = get_queue()
-                task_id = queue.submit(
-                    goal=goal,
+                task_id = submit_channel_task(
+                    goal,
+                    channel="voice",
+                    scope="local",
+                    origin="agent_task",
                     priority=priority,
                     speak=self.speak,
-                    metadata={
-                        "channel": "voice",
-                        "scope": "local",
-                        "origin": "agent_task",
-                    },
                 )
                 result = f"Task started (ID: {task_id}). I'll update you as I make progress."
             else:

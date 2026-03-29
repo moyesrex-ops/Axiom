@@ -293,6 +293,7 @@ def format_operator_surface(limit: int = 4) -> str:
     lines = [
         "[OPERATOR SURFACE]",
         "AXIOM runs one shared execution spine across local voice and Telegram.",
+        "Deferred work now runs through a shared mission journal with persisted phases, plan revisions, step checkpoints, and event history.",
         "Use cmd_control for real PowerShell, CMD, Bash, or VS Code integrated-terminal work.",
         "Use system_capabilities as the source of truth when there is any doubt about live integrations.",
     ]
@@ -328,21 +329,21 @@ def format_operator_surface(limit: int = 4) -> str:
     else:
         lines.append("No external agent catalogs are currently indexed.")
 
-    if caps["deerflow_repo_path"]:
+    if caps.get("deerflow_repo_path"):
         lines.append(
-            f"DeerFlow sidecar is detected and its gateway is {'reachable' if caps['deerflow_proxy_reachable'] else 'offline'}."
+            f"DeerFlow sidecar is detected and its gateway is {'reachable' if caps.get('deerflow_proxy_reachable') else 'offline'}."
         )
-    if caps["lightpanda_repo_path"]:
+    if caps.get("lightpanda_repo_path"):
         lines.append(
-            f"Lightpanda backend is configured for browser acceleration and is {'reachable' if caps['lightpanda_reachable'] else 'not yet live'}."
+            f"Lightpanda backend is configured for browser acceleration and is {'reachable' if caps.get('lightpanda_reachable') else 'not yet live'}."
         )
-    if caps["crucix_repo_path"]:
+    if caps.get("crucix_repo_path"):
         lines.append(
-            f"Crucix intelligence engine is {'reachable' if caps['crucix_reachable'] else 'configured but offline'} at {caps['crucix_api_url']}."
+            f"Crucix intelligence engine is {'reachable' if caps.get('crucix_reachable') else 'configured but offline'} at {caps.get('crucix_api_url', 'unknown')}."
         )
 
     lines.append(
-        f"Learning daemon is {'enabled' if caps['learning_enabled'] and caps['learning_auto_run'] else 'available but not auto-running'}."
+        f"Learning daemon is {'enabled' if caps.get('learning_enabled') and caps.get('learning_auto_run') else 'available but not auto-running'}."
     )
 
     lines.append("Never simulate status, artifacts, or execution. Name the exact path, URL, task id, or failure.")

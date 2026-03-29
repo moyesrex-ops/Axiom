@@ -305,9 +305,18 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             return "No recent task checkpoints recorded."
         lines = ["Recent task checkpoints"]
         for row in rows:
+            metadata = dict(row.get("metadata") or {})
+            phase = str(metadata.get("phase", "") or "").strip().lower()
+            channel = str(metadata.get("channel", "") or "").strip().lower()
+            suffix = []
+            if phase:
+                suffix.append(f"phase={phase}")
+            if channel:
+                suffix.append(f"channel={channel}")
             lines.append(
                 f"- [{row['task_id']}] {row['status']} | {row['goal'][:90]} | "
                 f"updated={row['updated_at']}"
+                + (f" | {' '.join(suffix)}" if suffix else "")
             )
         return "\n".join(lines)
 

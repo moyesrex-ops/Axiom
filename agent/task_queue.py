@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Any
 
-from memory.runtime_store import log_event, upsert_channel_state, upsert_task_run
+from memory.runtime_store import append_task_event, log_event, upsert_channel_state, upsert_task_run
 
 
 class TaskStatus(Enum):
@@ -65,14 +65,14 @@ class TaskQueue:
             name="AxiomTaskQueue"
         )
         self._worker_thread.start()
-        print("[TaskQueue] ✅ Started")
+        print("[TaskQueue] Started")
         log_event("task_queue", "started", "Task queue worker started.")
 
     def stop(self) -> None:
         self._running = False
         with self._condition:
             self._condition.notify_all()
-        print("[TaskQueue] 🔴 Stopped")
+        print("[TaskQueue] Stopped")
         log_event("task_queue", "stopped", "Task queue worker stopped.")
 
     def _snapshot(self, task: Task, metadata: dict | None = None) -> None:
@@ -138,8 +138,15 @@ class TaskQueue:
             self._tasks[task_id] = task
             self._condition.notify()
 
-        print(f"[TaskQueue] 📥 Task queued: [{task_id}] {goal[:60]}")
+        print(f"[TaskQueue] Task queued: [{task_id}] {goal[:60]}")
         self._snapshot(task)
+        append_task_event(
+            task_id,
+            "queued",
+            "Task queued.",
+            phase="queued",
+            metadata=task.metadata,
+        )
         log_event("task_queue", "queued", f"[{task_id}] {goal[:300]}")
         return task_id
 
@@ -154,8 +161,15 @@ class TaskQueue:
 
             task.cancel_flag.set()
             task.status = TaskStatus.CANCELLED
-            print(f"[TaskQueue] 🚫 Task cancelled: [{task_id}]")
+            print(f"[TaskQueue] Task cancelled: [{task_id}]")
             self._snapshot(task)
+            append_task_event(
+                task_id,
+                "cancelled",
+                "Task cancelled before completion.",
+                phase="cancelled",
+                metadata=task.metadata,
+            )
             log_event("task_queue", "cancelled", f"[{task_id}] {task.goal[:300]}")
             return True
 
@@ -203,6 +217,13 @@ class TaskQueue:
                     except ValueError:
                         pass
                     self._snapshot(task)
+                    append_task_event(
+                        task.task_id,
+                        "running",
+                        "Task execution started.",
+                        phase="executing",
+                        metadata=task.metadata,
+                    )
                     log_event("task_queue", "running", f"[{task.task_id}] {task.goal[:300]}")
 
             if task:
@@ -222,13 +243,41 @@ class TaskQueue:
         return None
 
     def _run_task(self, task: Task) -> None:
-        print(f"[TaskQueue] ▶️ Running: [{task.task_id}] {task.goal[:60]}")
+        print(f"[TaskQueue] Running: [{task.task_id}] {task.goal[:60]}")
         try:
             executor = self._get_executor()
+
+            def _progress_callback(event: dict | None) -> None:
+                payload = dict(event or {})
+                if not payload:
+                    return
+
+                with self._lock:
+                    phase = str(payload.get("phase", "") or "").strip().lower()
+                    if phase:
+                        task.metadata["phase"] = phase
+                    if payload.get("plan_revision") not in (None, ""):
+                        task.metadata["plan_revision"] = int(payload.get("plan_revision") or 0)
+                    if payload.get("step_index") not in (None, ""):
+                        task.metadata["current_step_index"] = int(payload.get("step_index") or 0)
+                    if payload.get("step_total") not in (None, ""):
+                        task.metadata["step_total"] = int(payload.get("step_total") or 0)
+                    if payload.get("tool"):
+                        task.metadata["current_tool"] = str(payload.get("tool") or "")
+                    if payload.get("topic"):
+                        task.metadata["last_progress_topic"] = str(payload.get("topic") or "")
+                    if payload.get("message"):
+                        task.metadata["last_progress"] = str(payload.get("message") or "")[:500]
+                    task.metadata["last_progress_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                    self._snapshot(task)
+
             result   = executor.execute(
                 goal        = task.goal,
                 speak       = task.speak,
                 cancel_flag = task.cancel_flag,
+                task_id     = task.task_id,
+                task_metadata = dict(task.metadata),
+                progress_callback = _progress_callback,
             )
 
             with self._lock:
@@ -244,14 +293,22 @@ class TaskQueue:
                 self._active_count -= 1
                 self._snapshot(task)
 
+            append_task_event(
+                task.task_id,
+                task.status.value,
+                str(result or task.error or task.status.value)[:1200],
+                phase=task.status.value,
+                metadata=task.metadata,
+            )
+
             if task.on_complete:
                 try:
                     callback_result = result if not task.cancel_flag.is_set() else "Task cancelled."
                     task.on_complete(task.task_id, callback_result)
                 except Exception as e:
-                    print(f"[TaskQueue] ⚠️ on_complete callback error: {e}")
+                    print(f"[TaskQueue] WARNING on_complete callback error: {e}")
 
-            print(f"[TaskQueue] ✅ Finished: [{task.task_id}] {task.status.value}")
+            print(f"[TaskQueue] Finished: [{task.task_id}] {task.status.value}")
             log_event("task_queue", task.status.value, f"[{task.task_id}] {task.goal[:300]}")
 
         except Exception as e:
@@ -260,13 +317,20 @@ class TaskQueue:
                 task.error  = str(e)
                 self._active_count -= 1
                 self._snapshot(task)
-            print(f"[TaskQueue] ❌ Failed: [{task.task_id}] {e}")
+            append_task_event(
+                task.task_id,
+                "failed",
+                str(e)[:1200],
+                phase="failed",
+                metadata=task.metadata,
+            )
+            print(f"[TaskQueue] Failed: [{task.task_id}] {e}")
             log_event("task_queue", "failed", f"[{task.task_id}] {task.goal[:300]} | {e}")
             if task.on_complete:
                 try:
                     task.on_complete(task.task_id, f"Task failed: {e}")
                 except Exception as callback_error:
-                    print(f"[TaskQueue] ⚠️ on_complete callback error: {callback_error}")
+                    print(f"[TaskQueue] WARNING on_complete callback error: {callback_error}")
 
         with self._condition:
             self._condition.notify()

@@ -11,12 +11,17 @@ from agent.error_handler import analyze_error, generate_fix, ErrorDecision
 from agent.completion_verifier import (
     verify_goal_completion,
     extract_and_save_lessons,
-    assess_result_quality,
 )
 from core.tool_runtime import execute_tool
 from core.secret_config import get_gemini_api_key
 from memory.memory_manager import save_to_nexus
-from memory.runtime_store import log_event, search_knowledge_items, upsert_knowledge_item
+from memory.runtime_store import (
+    append_task_event,
+    log_event,
+    search_knowledge_items,
+    upsert_knowledge_item,
+    upsert_task_step,
+)
 from core.runtime_config import load_runtime_config
 
 
@@ -474,6 +479,9 @@ class AgentExecutor:
         goal:        str,
         speak:       Callable | None        = None,
         cancel_flag: threading.Event | None = None,
+        task_id: str = "",
+        task_metadata: dict | None = None,
+        progress_callback: Callable | None = None,
     ) -> str:
         from agent.self_monitor import start_monitoring, get_monitor
         start_monitoring()
@@ -482,6 +490,114 @@ class AgentExecutor:
             import time; time.sleep(3)
 
         print(f"\n[Executor] Goal: {goal}")
+        base_task_metadata = dict(task_metadata or {})
+        plan_revision = 0
+
+        def _safe_step_index(value, fallback: int) -> int:
+            try:
+                return int(value)
+            except Exception:
+                return int(fallback)
+
+        def _notify(
+            topic: str,
+            message: str,
+            *,
+            phase: str = "",
+            step_index: int | None = None,
+            step_total: int | None = None,
+            tool: str = "",
+            description: str = "",
+            parameters: dict | None = None,
+            step_status: str = "",
+            result_text: str = "",
+            error_text: str = "",
+            revision: int | None = None,
+            metadata: dict | None = None,
+        ) -> None:
+            payload = dict(base_task_metadata)
+            payload.update(metadata or {})
+            if revision not in (None, ""):
+                payload["plan_revision"] = int(revision)
+            if step_total not in (None, ""):
+                payload["step_total"] = int(step_total)
+            if description:
+                payload["description"] = str(description)[:500]
+
+            if task_id:
+                append_task_event(
+                    task_id,
+                    topic,
+                    str(message or "")[:4000],
+                    phase=phase,
+                    metadata=payload,
+                )
+                if step_index is not None:
+                    upsert_task_step(
+                        task_id,
+                        int(step_index),
+                        revision=max(int(revision or plan_revision or 1), 1),
+                        tool=tool,
+                        description=description,
+                        status=step_status or topic,
+                        parameters=parameters,
+                        result_text=result_text,
+                        error_text=error_text,
+                        metadata=payload,
+                    )
+
+            if progress_callback:
+                try:
+                    progress_callback(
+                        {
+                            "topic": topic,
+                            "message": str(message or ""),
+                            "phase": phase,
+                            "step_index": step_index,
+                            "step_total": step_total,
+                            "tool": tool,
+                            "description": description,
+                            "step_status": step_status or topic,
+                            "plan_revision": revision or plan_revision,
+                            "metadata": payload,
+                        }
+                    )
+                except Exception:
+                    pass
+
+        def _publish_plan(plan_obj: dict, topic: str, message: str) -> int:
+            nonlocal plan_revision
+            plan_revision += 1
+            steps = list(plan_obj.get("steps", []) or [])
+            if task_id:
+                for fallback_index, step in enumerate(steps, start=1):
+                    step_index = _safe_step_index(step.get("step"), fallback_index)
+                    upsert_task_step(
+                        task_id,
+                        step_index,
+                        revision=plan_revision,
+                        tool=str(step.get("tool", "") or ""),
+                        description=str(step.get("description", "") or ""),
+                        status="planned",
+                        parameters=step.get("parameters", {}) or {},
+                        metadata={
+                            **base_task_metadata,
+                            "critical": bool(step.get("critical", False)),
+                            "phase": "planning",
+                            "plan_revision": plan_revision,
+                        },
+                    )
+            _notify(
+                topic,
+                message,
+                phase="planning",
+                step_total=len(steps),
+                revision=plan_revision,
+                metadata={"planned_steps": len(steps)},
+            )
+            return plan_revision
+
+        _notify("executor_started", "Executor accepted the task.", phase="planning", revision=plan_revision)
 
         specialist_context = _specialist_context(goal)
         direct = _direct_tool_for_goal(goal, specialist_context=specialist_context)
@@ -489,11 +605,52 @@ class AgentExecutor:
             tool, params = direct
             print(f"[Executor] Direct route: [{tool}] {params}")
             try:
+                _publish_plan(
+                    {
+                        "goal": goal,
+                        "steps": [
+                            {
+                                "step": 1,
+                                "tool": tool,
+                                "description": goal,
+                                "parameters": params,
+                                "critical": True,
+                            }
+                        ],
+                    },
+                    "direct_route_selected",
+                    f"Direct route selected: {tool}.",
+                )
+                _notify(
+                    "step_started",
+                    f"Starting direct step with {tool}.",
+                    phase="executing",
+                    step_index=1,
+                    step_total=1,
+                    tool=tool,
+                    description=goal,
+                    parameters=params,
+                    step_status="running",
+                    revision=plan_revision,
+                )
                 result = _call_tool(
                     tool,
                     params,
                     speak,
                     metadata={"goal": goal, "path": "direct_route", "description": goal},
+                )
+                _notify(
+                    "step_completed",
+                    f"Direct step completed with {tool}.",
+                    phase="executing",
+                    step_index=1,
+                    step_total=1,
+                    tool=tool,
+                    description=goal,
+                    parameters=params,
+                    step_status="completed",
+                    result_text=result,
+                    revision=plan_revision,
                 )
                 self._remember_task_strategy(
                     goal,
@@ -501,14 +658,36 @@ class AgentExecutor:
                     {1: result},
                     replanned=False,
                 )
-                return self._summarize(
+                summary = self._summarize(
                     goal,
                     [{"step": 1, "tool": tool, "parameters": params, "description": goal}],
                     {1: result},
                     speak,
                 )
+                _notify(
+                    "task_completed",
+                    "Task completed through the direct route.",
+                    phase="completed",
+                    step_index=1,
+                    step_total=1,
+                    tool=tool,
+                    description=goal,
+                    result_text=summary,
+                    revision=plan_revision,
+                )
+                return summary
             except Exception as error:
                 print(f"[Executor] Direct route failed, falling back to planner: {error}")
+                _notify(
+                    "direct_route_failed",
+                    f"Direct route failed: {str(error)[:300]}",
+                    phase="planning",
+                    tool=tool,
+                    description=goal,
+                    parameters=params,
+                    error_text=str(error),
+                    revision=plan_revision or 1,
+                )
 
         replan_attempts = 0
         completed_steps = []
@@ -516,10 +695,12 @@ class AgentExecutor:
         
         # 1. Draft
         plan = create_plan(goal, context=specialist_context)
+        _publish_plan(plan, "plan_created", "Initial plan created.")
         
         # 2. Reflection & Critique
         if "steps" in plan and len(plan["steps"]) > 0:
             plan = reflect_and_improve(goal, plan, context=specialist_context)
+            _publish_plan(plan, "plan_refined", "Planner reflection refined the execution plan.")
 
         if _plan_violates_goal_domain(goal, plan):
             guard_context = (
@@ -531,9 +712,18 @@ class AgentExecutor:
                 "Prefer tradingagents_control, predict_market, deep_analyzer, web_search, system_capabilities, and mt5_trading when appropriate."
             )
             log_event("executor", "plan_domain_violation", goal[:300], metadata={"plan_tools": [step.get("tool", "") for step in plan.get("steps", [])]})
+            _notify(
+                "plan_domain_violation",
+                "Planner proposed tools outside the task domain, regenerating plan.",
+                phase="planning",
+                revision=plan_revision,
+                metadata={"plan_tools": [step.get("tool", "") for step in plan.get("steps", [])]},
+            )
             plan = create_plan(goal, context=guard_context)
+            _publish_plan(plan, "plan_regenerated", "Domain guard regenerated the plan.")
             if "steps" in plan and len(plan["steps"]) > 0:
                 plan = reflect_and_improve(goal, plan, context=guard_context)
+                _publish_plan(plan, "plan_refined", "Domain-guard reflection refined the regenerated plan.")
 
         if _plan_violates_goal_domain(goal, plan):
             msg = (
@@ -542,6 +732,12 @@ class AgentExecutor:
             )
             if speak:
                 speak(msg)
+            _notify(
+                "task_failed",
+                msg,
+                phase="failed",
+                revision=plan_revision,
+            )
             return msg
 
         while True:
@@ -550,18 +746,23 @@ class AgentExecutor:
             if not steps:
                 msg = "I couldn't create a valid plan for this task."
                 if speak: speak(msg)
+                _notify("task_failed", msg, phase="failed", revision=plan_revision)
                 return msg
 
             success      = True
             failed_step  = None
             failed_error = ""
+            total_steps = len(steps)
 
-            for step in steps:
+            for fallback_index, step in enumerate(steps, start=1):
                 if cancel_flag and cancel_flag.is_set():
-                    if speak: speak("Task cancelled.")
-                    return "Task cancelled."
+                    msg = "Task cancelled."
+                    if speak:
+                        speak(msg)
+                    _notify("task_cancelled", msg, phase="cancelled", revision=plan_revision)
+                    return msg
 
-                step_num = step.get("step", "?")
+                step_num = _safe_step_index(step.get("step"), fallback_index)
                 tool     = step.get("tool") or "web_search"
                 desc     = step.get("description", "")
                 params   = step.get("parameters", {})
@@ -576,6 +777,19 @@ class AgentExecutor:
                 while attempt <= 3:
                     if cancel_flag and cancel_flag.is_set():
                         break
+                    _notify(
+                        "step_started",
+                        f"Starting step {step_num} with {tool}.",
+                        phase="executing",
+                        step_index=step_num,
+                        step_total=total_steps,
+                        tool=tool,
+                        description=desc,
+                        parameters=params,
+                        step_status="running",
+                        revision=plan_revision,
+                        metadata={"attempt": attempt},
+                    )
                     try:
                         from agent.self_monitor import start_task_tracking, end_task_tracking
                         start_task_tracking(f"[{tool}] {desc[:30]}")
@@ -596,6 +810,19 @@ class AgentExecutor:
                         step_results[step_num] = result
                         completed_steps.append(step)
                         print(f"[Executor] Step {step_num} done: {str(result)[:100]}")
+                        _notify(
+                            "step_completed",
+                            f"Step {step_num} completed with {tool}.",
+                            phase="executing",
+                            step_index=step_num,
+                            step_total=total_steps,
+                            tool=tool,
+                            description=desc,
+                            parameters=params,
+                            step_status="completed",
+                            result_text=result,
+                            revision=plan_revision,
+                        )
                         step_ok = True
                         break
 
@@ -607,24 +834,81 @@ class AgentExecutor:
                             pass
                         error_msg = str(e)
                         print(f"[Executor] Step {step_num} attempt {attempt} failed: {error_msg}")
-
+                        recovery = analyze_error(step, error_msg, attempt=attempt, max_attempts=3)
+                        decision = recovery.get("decision", ErrorDecision.REPLAN)
+                        if isinstance(decision, str):
+                            decision = {
+                                "retry": ErrorDecision.RETRY,
+                                "skip": ErrorDecision.SKIP,
+                                "replan": ErrorDecision.REPLAN,
+                                "abort": ErrorDecision.ABORT,
+                            }.get(decision.strip().lower(), ErrorDecision.REPLAN)
+                        user_msg = str(recovery.get("user_message", "") or "").strip()
+                        decision_name = decision.value if isinstance(decision, ErrorDecision) else str(decision)
+                        _notify(
+                            "step_failed",
+                            f"Step {step_num} failed: {error_msg[:300]}",
+                            phase="executing",
+                            step_index=step_num,
+                            step_total=total_steps,
+                            tool=tool,
+                            description=desc,
+                            parameters=params,
+                            step_status="failed",
+                            error_text=error_msg,
+                            revision=plan_revision,
+                            metadata={
+                                "attempt": attempt,
+                                "decision": decision_name,
+                                "reason": str(recovery.get("reason", "") or "")[:300],
+                            },
+                        )
                         if speak and user_msg:
                             speak(user_msg)
 
                         if decision == ErrorDecision.RETRY:
+                            _notify(
+                                "step_retry",
+                                f"Retrying step {step_num}.",
+                                phase="executing",
+                                step_index=step_num,
+                                step_total=total_steps,
+                                tool=tool,
+                                description=desc,
+                                parameters=params,
+                                step_status="retrying",
+                                error_text=error_msg,
+                                revision=plan_revision,
+                                metadata={"attempt": attempt + 1},
+                            )
                             attempt += 1
                             import time; time.sleep(2)
                             continue
 
                         elif decision == ErrorDecision.SKIP:
                             print(f"[Executor] Skipping step {step_num}")
+                            step_results[step_num] = "Skipped by recovery policy."
                             completed_steps.append(step)
+                            _notify(
+                                "step_skipped",
+                                f"Step {step_num} skipped after recovery analysis.",
+                                phase="executing",
+                                step_index=step_num,
+                                step_total=total_steps,
+                                tool=tool,
+                                description=desc,
+                                parameters=params,
+                                step_status="skipped",
+                                result_text="Skipped by recovery policy.",
+                                revision=plan_revision,
+                            )
                             step_ok = True
                             break
 
                         elif decision == ErrorDecision.ABORT:
                             msg = f"Task aborted. {recovery.get('reason', '')}"
                             if speak: speak(msg)
+                            _notify("task_failed", msg, phase="failed", revision=plan_revision)
                             return msg
 
                         else:
@@ -632,6 +916,19 @@ class AgentExecutor:
                             if fix_suggestion:
                                 try:
                                     fixed_step = generate_fix(step, error_msg, fix_suggestion)
+                                    _notify(
+                                        "recovery_step_started",
+                                        f"Trying recovery step for original step {step_num}.",
+                                        phase="fixing",
+                                        step_index=step_num,
+                                        step_total=total_steps,
+                                        tool=fixed_step.get("tool", tool),
+                                        description=fixed_step.get("description", desc),
+                                        parameters=fixed_step.get("parameters", {}),
+                                        step_status="running",
+                                        error_text=error_msg,
+                                        revision=plan_revision,
+                                    )
                                     if speak: speak("Trying an alternative approach.")
                                     res = _call_tool(
                                         fixed_step["tool"],
@@ -646,10 +943,36 @@ class AgentExecutor:
                                     )
                                     step_results[step_num] = res
                                     completed_steps.append(step)
+                                    _notify(
+                                        "recovery_step_completed",
+                                        f"Recovery step completed for original step {step_num}.",
+                                        phase="fixing",
+                                        step_index=step_num,
+                                        step_total=total_steps,
+                                        tool=fixed_step.get("tool", tool),
+                                        description=fixed_step.get("description", desc),
+                                        parameters=fixed_step.get("parameters", {}),
+                                        step_status="completed",
+                                        result_text=res,
+                                        revision=plan_revision,
+                                    )
                                     step_ok = True
                                     break
                                 except Exception as fix_err:
                                     print(f"[Executor] Fix failed: {fix_err}")
+                                    _notify(
+                                        "recovery_step_failed",
+                                        f"Recovery step failed: {str(fix_err)[:300]}",
+                                        phase="fixing",
+                                        step_index=step_num,
+                                        step_total=total_steps,
+                                        tool=fixed_step.get("tool", tool) if 'fixed_step' in locals() else tool,
+                                        description=fixed_step.get("description", desc) if 'fixed_step' in locals() else desc,
+                                        parameters=fixed_step.get("parameters", {}) if 'fixed_step' in locals() else params,
+                                        step_status="failed",
+                                        error_text=str(fix_err),
+                                        revision=plan_revision,
+                                    )
 
                             failed_step  = step
                             failed_error = error_msg
@@ -660,6 +983,19 @@ class AgentExecutor:
                     failed_step  = step
                     failed_error = "Max retries exceeded"
                     success      = False
+                    _notify(
+                        "step_failed",
+                        f"Step {step_num} exhausted retries.",
+                        phase="executing",
+                        step_index=step_num,
+                        step_total=total_steps,
+                        tool=tool,
+                        description=desc,
+                        parameters=params,
+                        step_status="failed",
+                        error_text=failed_error,
+                        revision=plan_revision,
+                    )
 
                 if not success:
                     break
@@ -669,14 +1005,32 @@ class AgentExecutor:
 
                 # Phase 2: Post-execution verification
                 try:
+                    _notify(
+                        "verification_started",
+                        "Running completion verification.",
+                        phase="verifying",
+                        step_total=total_steps,
+                        revision=plan_revision,
+                    )
                     report = verify_goal_completion(goal, completed_steps, step_results)
                     extract_and_save_lessons(goal, report, completed_steps)
 
                     if not report.is_complete and report.confidence < 0.6 and replan_attempts < self.MAX_REPLAN_ATTEMPTS:
-                        # Verification says incomplete — try to fix
-                        print(f"[Executor] ⚠️ Verifier flagged incomplete ({report.confidence:.0%}): {report.missing_items}")
+                        # Verification says incomplete; try to fix
+                        print(f"[Executor] WARNING verifier flagged incomplete ({report.confidence:.0%}): {report.missing_items}")
+                        _notify(
+                            "verification_incomplete",
+                            f"Verification flagged missing items: {', '.join(report.missing_items[:3])}",
+                            phase="fixing",
+                            step_total=total_steps,
+                            revision=plan_revision,
+                            metadata={
+                                "confidence": float(report.confidence),
+                                "missing_items": report.missing_items[:5],
+                            },
+                        )
                         if speak:
-                            speak("Let me double-check — I'm not confident this is fully done.")
+                            speak("Let me double-check - I'm not confident this is fully done.")
                         replan_attempts += 1
                         missing_context = (
                             f"Previous attempt was evaluated as INCOMPLETE. "
@@ -684,12 +1038,33 @@ class AgentExecutor:
                             f"Please add the missing steps."
                         )
                         plan = create_plan(goal, context=(specialist_context + "\n" + missing_context)[:3000])
+                        _publish_plan(plan, "verification_replan_created", "Verification requested a new plan.")
                         if "steps" in plan and len(plan["steps"]) > 0:
                             plan = reflect_and_improve(goal, plan, context=specialist_context)
+                            _publish_plan(plan, "verification_replan_refined", "Reflection refined the verification-driven replan.")
                         continue  # Re-enter the execution loop
 
+                    _notify(
+                        "verification_passed",
+                        "Completion verification passed.",
+                        phase="verifying",
+                        step_total=total_steps,
+                        revision=plan_revision,
+                        metadata={
+                            "confidence": float(report.confidence),
+                            "missing_items": report.missing_items[:5],
+                        },
+                    )
+
                 except Exception as verify_error:
-                    print(f"[Executor] ⚠️ Verification error (non-blocking): {verify_error}")
+                    print(f"[Executor] WARNING verification error (non-blocking): {verify_error}")
+                    _notify(
+                        "verification_error",
+                        f"Verification raised a non-blocking error: {str(verify_error)[:300]}",
+                        phase="verifying",
+                        step_total=total_steps,
+                        revision=plan_revision,
+                    )
 
                 if replan_attempts > 0:
                     topic = f"learned_strategy_{goal.replace(' ', '_')[:30]}"
@@ -699,7 +1074,16 @@ class AgentExecutor:
                     save_to_nexus(topic, learned_content)
                     if speak: speak("I learned from my mistakes and saved this strategy to my memory archive.")
 
-                return self._summarize(goal, completed_steps, step_results, speak)
+                summary = self._summarize(goal, completed_steps, step_results, speak)
+                _notify(
+                    "task_completed",
+                    "Task completed successfully.",
+                    phase="completed",
+                    step_total=total_steps,
+                    result_text=summary,
+                    revision=plan_revision,
+                )
+                return summary
 
             if replan_attempts >= self.MAX_REPLAN_ATTEMPTS:
                 msg = f"Task failed after {replan_attempts} replan attempts."
@@ -707,8 +1091,17 @@ class AgentExecutor:
                 log_event(
                     "failure",
                     "task_failed",
-                    f"{goal[:300]} — failed after {replan_attempts} replans",
+                    f"{goal[:300]} - failed after {replan_attempts} replans",
                     metadata={"failed_step": str(failed_step or {}).get("tool", "unknown"), "error": failed_error[:300]},
+                )
+                _notify(
+                    "task_failed",
+                    msg,
+                    phase="failed",
+                    tool=str((failed_step or {}).get("tool", "") or ""),
+                    description=str((failed_step or {}).get("description", "") or ""),
+                    error_text=failed_error,
+                    revision=plan_revision,
                 )
                 if speak: speak(msg)
                 return msg
@@ -716,7 +1109,17 @@ class AgentExecutor:
             if speak: speak("Adjusting my approach.")
 
             replan_attempts += 1
+            _notify(
+                "replan_requested",
+                f"Replanning after failure on step {str((failed_step or {}).get('step', '?'))}.",
+                phase="fixing",
+                tool=str((failed_step or {}).get("tool", "") or ""),
+                description=str((failed_step or {}).get("description", "") or ""),
+                error_text=failed_error,
+                revision=plan_revision,
+            )
             plan = replan(goal, completed_steps, failed_step, failed_error, context=specialist_context)
+            _publish_plan(plan, "replan_created", "Replan created after step failure.")
 
     def _remember_task_strategy(
         self,

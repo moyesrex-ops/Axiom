@@ -274,6 +274,32 @@ def init_runtime_store() -> None:
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
 
+                CREATE TABLE IF NOT EXISTS task_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    phase TEXT NOT NULL DEFAULT '',
+                    topic TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS task_steps (
+                    task_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    step_index INTEGER NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    tool TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT '',
+                    parameters_json TEXT NOT NULL DEFAULT '{}',
+                    result_text TEXT NOT NULL DEFAULT '',
+                    error_text TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    PRIMARY KEY(task_id, revision, step_index)
+                );
+
                 CREATE TABLE IF NOT EXISTS tool_traces (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -362,6 +388,18 @@ def init_runtime_store() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_tool_traces_tool_created
                 ON tool_traces(tool, created_at DESC, id DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_events_task_created
+                ON task_events(task_id, id DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_task_steps_task_revision
+                ON task_steps(task_id, revision DESC, step_index ASC)
                 """
             )
             conn.commit()
@@ -840,6 +878,95 @@ def upsert_task_run(
         conn.commit()
 
 
+def append_task_event(
+    task_id: str,
+    topic: str,
+    content: str = "",
+    *,
+    phase: str = "",
+    metadata: dict | None = None,
+) -> int:
+    init_runtime_store()
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return 0
+    with _LOCK, _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO task_events (task_id, phase, topic, content, metadata_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                task_id,
+                str(phase or "").strip(),
+                str(topic or "").strip() or "event",
+                str(content or "")[:4000],
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def upsert_task_step(
+    task_id: str,
+    step_index: int,
+    *,
+    revision: int = 1,
+    tool: str = "",
+    description: str = "",
+    status: str = "",
+    parameters: dict | None = None,
+    result_text: str = "",
+    error_text: str = "",
+    metadata: dict | None = None,
+) -> None:
+    init_runtime_store()
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return
+    with _LOCK, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO task_steps (
+                task_id,
+                revision,
+                step_index,
+                tool,
+                description,
+                status,
+                parameters_json,
+                result_text,
+                error_text,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(task_id, revision, step_index) DO UPDATE SET
+                updated_at = CURRENT_TIMESTAMP,
+                tool = excluded.tool,
+                description = excluded.description,
+                status = excluded.status,
+                parameters_json = excluded.parameters_json,
+                result_text = excluded.result_text,
+                error_text = excluded.error_text,
+                metadata_json = excluded.metadata_json
+            """,
+            (
+                task_id,
+                max(int(revision or 1), 1),
+                int(step_index),
+                str(tool or "").strip(),
+                str(description or "")[:1000],
+                str(status or "").strip(),
+                json.dumps(parameters or {}, ensure_ascii=False),
+                str(result_text or "")[:12000],
+                str(error_text or "")[:4000],
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+
+
 def upsert_channel_state(
     channel: str,
     scope: str = "",
@@ -979,6 +1106,38 @@ def get_channel_state(channel: str, scope: str = "") -> dict:
     return result
 
 
+def get_task_run(task_id: str) -> dict:
+    init_runtime_store()
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return {}
+
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                task_id,
+                created_at,
+                updated_at,
+                goal,
+                status,
+                result_text,
+                error_text,
+                metadata_json
+            FROM task_runs
+            WHERE task_id = ?
+            """,
+            (task_id,),
+        ).fetchone()
+
+    if not row:
+        return {}
+
+    result = dict(row)
+    result["metadata"] = _safe_json_loads(result.get("metadata_json", "{}"), {})
+    return result
+
+
 def recent_channel_states(limit: int = 6) -> list[dict]:
     init_runtime_store()
     with _connect() as conn:
@@ -1030,7 +1189,96 @@ def recent_task_runs(limit: int = 10) -> list[dict]:
             """,
             (int(limit),),
         ).fetchall()
-    return [dict(row) for row in rows]
+    results = []
+    for row in rows:
+        data = dict(row)
+        data["metadata"] = _safe_json_loads(data.get("metadata_json", "{}"), {})
+        results.append(data)
+    return results
+
+
+def list_task_steps(task_id: str, revision: int | None = None, limit: int | None = None) -> list[dict]:
+    init_runtime_store()
+    task_id = str(task_id or "").strip()
+    if not task_id:
+        return []
+
+    clauses = ["task_id = ?"]
+    params: list = [task_id]
+
+    if revision is not None:
+        clauses.append("revision = ?")
+        params.append(int(revision))
+
+    limit_sql = ""
+    if limit is not None:
+        limit_sql = " LIMIT ?"
+        params.append(int(limit))
+
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                task_id,
+                revision,
+                step_index,
+                created_at,
+                updated_at,
+                tool,
+                description,
+                status,
+                parameters_json,
+                result_text,
+                error_text,
+                metadata_json
+            FROM task_steps
+            WHERE {' AND '.join(clauses)}
+            ORDER BY revision DESC, step_index ASC{limit_sql}
+            """,
+            tuple(params),
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        data = dict(row)
+        data["parameters"] = _safe_json_loads(data.get("parameters_json", "{}"), {})
+        data["metadata"] = _safe_json_loads(data.get("metadata_json", "{}"), {})
+        results.append(data)
+    return results
+
+
+def recent_task_events(task_id: str = "", limit: int = 20) -> list[dict]:
+    init_runtime_store()
+    task_id = str(task_id or "").strip()
+    with _connect() as conn:
+        if task_id:
+            rows = conn.execute(
+                """
+                SELECT id, task_id, created_at, phase, topic, content, metadata_json
+                FROM task_events
+                WHERE task_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (task_id, int(limit)),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, task_id, created_at, phase, topic, content, metadata_json
+                FROM task_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+
+    results = []
+    for row in rows:
+        data = dict(row)
+        data["metadata"] = _safe_json_loads(data.get("metadata_json", "{}"), {})
+        results.append(data)
+    return results
 
 
 def record_tool_trace(

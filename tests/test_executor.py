@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch
 
 from agent.executor import AgentExecutor, _direct_tool_for_goal, _specialist_context
+from agent.completion_verifier import CompletionReport
+from agent.error_handler import ErrorDecision
 
 
 class ExecutorDirectRouteTests(unittest.TestCase):
@@ -55,7 +57,15 @@ class ExecutorDirectRouteTests(unittest.TestCase):
             "agent.executor._specialist_context", return_value="[SPECIALIST PREFLIGHT]\nUse frontend reviewer."
         ), patch("agent.executor.create_plan", return_value=fake_plan) as create_plan_mock, patch(
             "agent.executor.reflect_and_improve", return_value=fake_plan
-        ), patch("agent.executor._call_tool", return_value="done"):
+        ), patch("agent.executor._call_tool", return_value="done"), patch(
+            "agent.executor.verify_goal_completion",
+            return_value=CompletionReport(
+                goal="build a frontend dashboard",
+                is_complete=True,
+                confidence=0.9,
+                summary="Verification passed.",
+            ),
+        ), patch("agent.executor.extract_and_save_lessons"):
             executor.execute("build a frontend dashboard")
 
         self.assertEqual(
@@ -125,6 +135,63 @@ class ExecutorDirectRouteTests(unittest.TestCase):
         direct = _direct_tool_for_goal(goal)
 
         self.assertNotEqual(direct[0] if direct else None, "codex_builder")
+
+    def test_executor_retry_recovery_path_no_longer_references_undefined_state(self):
+        executor = AgentExecutor()
+        fake_plan = {
+            "goal": "research dashboard competitors",
+            "steps": [
+                {
+                    "step": 1,
+                    "tool": "web_search",
+                    "description": "Research dashboard competitors",
+                    "parameters": {"query": "dashboard competitors"},
+                    "critical": True,
+                }
+            ],
+        }
+        call_results = [RuntimeError("temporary network issue"), "Search results for: dashboard competitors"]
+
+        def _fake_call(*args, **kwargs):
+            result = call_results.pop(0)
+            if isinstance(result, BaseException):
+                raise result
+            return result
+
+        with patch("agent.executor._direct_tool_for_goal", return_value=None), patch(
+            "agent.executor._specialist_context", return_value=""
+        ), patch("agent.executor.create_plan", return_value=fake_plan), patch(
+            "agent.executor.reflect_and_improve", return_value=fake_plan
+        ), patch("agent.executor._call_tool", side_effect=_fake_call), patch(
+            "agent.executor.analyze_error",
+            return_value={
+                "decision": ErrorDecision.RETRY,
+                "reason": "Transient network issue",
+                "fix_suggestion": "",
+                "user_message": "Retrying.",
+            },
+        ), patch(
+            "agent.executor.verify_goal_completion",
+            return_value=CompletionReport(
+                goal="research dashboard competitors",
+                is_complete=True,
+                confidence=0.91,
+                summary="Verification passed.",
+            ),
+        ), patch("agent.executor.extract_and_save_lessons"), patch(
+            "agent.executor.append_task_event"
+        ) as append_event_mock, patch(
+            "agent.executor.upsert_task_step"
+        ) as upsert_step_mock:
+            result = executor.execute(
+                "research dashboard competitors",
+                task_id="abc123",
+                task_metadata={"channel": "telegram"},
+            )
+
+        self.assertIn("Search results for", result)
+        self.assertTrue(append_event_mock.called)
+        self.assertTrue(upsert_step_mock.called)
 
 
 if __name__ == "__main__":

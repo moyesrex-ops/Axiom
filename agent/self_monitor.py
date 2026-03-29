@@ -201,14 +201,14 @@ class SelfMonitor:
                     self._resource_history.append(snapshot)
                     self._check_thresholds(snapshot)
                 except Exception as e:
-                    print(f"[Monitor] ⚠️ Snapshot error: {e}")
+                    print(f"[Monitor] WARNING snapshot error: {e}")
                 self._stop_event.wait(interval)
 
         self._monitor_thread = threading.Thread(
             target=_monitor_loop, daemon=True, name="AxiomSelfMonitor"
         )
         self._monitor_thread.start()
-        print("[Monitor] ✅ Self-monitor started")
+        print("[Monitor] Self-monitor started")
 
     def stop(self):
         """Stop background monitoring."""
@@ -243,7 +243,7 @@ class SelfMonitor:
             w = f"[{now_str}] High memory: {snap.memory_mb:.0f}MB ({snap.memory_percent:.1f}%)"
             self._warning_log.append(w)
             if snap.memory_percent > 95:
-                print(f"[Monitor] 🔴 CRITICAL: {w}")
+                print(f"[Monitor] CRITICAL: {w}")
 
         if snap.disk_free_gb < 2.0:
             w = f"[{now_str}] Low disk: {snap.disk_free_gb:.1f}GB free"

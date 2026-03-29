@@ -12,6 +12,8 @@ from agent.task_queue import TaskPriority, get_queue
 from core.capabilities import format_capability_status
 from core.intelligence_router import route_message_kind
 from core.runtime_config import load_runtime_config
+from core.task_channels import submit_channel_task
+from core.task_journal import format_task_snapshot
 from core.secret_config import BASE_DIR, get_secret
 from memory.memory_manager import (
     format_memory_for_prompt,
@@ -415,11 +417,10 @@ def _format_active_task_status(chat_id: str) -> str:
     status = _active_task_snapshot(chat_id)
     if not status:
         return "No active Telegram task is running for this chat right now."
-    return (
-        f"Active task [{status['task_id']}]\n"
-        f"Status: {status['status']}\n"
-        f"Goal: {str(status.get('goal', ''))[:260]}"
-    )
+    snapshot = format_task_snapshot(str(status.get("task_id", "") or ""))
+    if snapshot.startswith("Task ["):
+        return snapshot.replace("Task [", "Active task [", 1)
+    return snapshot
 
 
 def _last_task_result(chat_id: str) -> dict:
@@ -826,8 +827,17 @@ def _format_recent_tasks(limit: int = 8) -> str:
 
     lines = ["Recent task checkpoints"]
     for row in rows:
+        metadata = dict(row.get("metadata") or {})
+        phase = str(metadata.get("phase", "") or "").strip().lower()
+        channel = str(metadata.get("channel", "") or "").strip().lower()
+        extras = []
+        if phase:
+            extras.append(f"phase={phase}")
+        if channel:
+            extras.append(f"channel={channel}")
         lines.append(
             f"- [{row['task_id']}] {row['status']} | {row['goal'][:90]} | {row['updated_at']}"
+            + (f" | {' '.join(extras)}" if extras else "")
         )
     return "\n".join(lines)
 
@@ -840,8 +850,6 @@ def _queue_task(
     *,
     explicit: bool = False,
 ) -> None:
-    queue = get_queue()
-
     def _on_complete(task_id: str, result: str) -> None:
         try:
             _ACTIVE_CHAT_TASKS.pop(chat_id, None)
@@ -872,16 +880,14 @@ def _queue_task(
         except Exception as send_error:
             log_event("telegram", "task_finish_send_failed", f"{task_id}: {send_error}")
 
-    task_id = queue.submit(
-        goal=goal,
+    task_id = submit_channel_task(
+        goal,
+        channel="telegram",
+        scope=chat_id,
+        origin="telegram_bridge",
         priority=TaskPriority.NORMAL,
         speak=None,
         on_complete=_on_complete,
-        metadata={
-            "channel": "telegram",
-            "scope": chat_id,
-            "origin": "telegram_bridge",
-        },
     )
     _ACTIVE_CHAT_TASKS[chat_id] = task_id
     _persist_channel_state(

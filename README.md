@@ -40,6 +40,7 @@ Core ideas:
 ## Latest Runtime Upgrades
 
 - Voice and Telegram now share one tool execution backbone instead of separate hardcoded dispatch trees.
+- Deferred work now runs through one shared mission journal with persisted phases, plan revisions, step checkpoints, and event history.
 - Every tool call is written into SQLite tool traces so AXIOM can mine recurring success and failure patterns.
 - A background learning daemon converts recent traces into routing insights stored in durable memory.
 - `computer_use` is now a higher-level desktop operator that can observe the screen, find targets by description, click or type into them, and verify outcomes.
@@ -286,7 +287,7 @@ It now persists:
 
 - archived conversation turns
 - runtime events and failures
-- task lifecycle checkpoints
+- task lifecycle checkpoints, plan revisions, and per-step execution records
 - per-channel handoff state for local voice and Telegram
 - structured long-term memory
 - searchable archived knowledge
