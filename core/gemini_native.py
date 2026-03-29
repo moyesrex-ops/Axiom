@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -35,8 +36,9 @@ def _require_api_key() -> str:
     return api_key
 
 
-def get_client() -> genai.Client:
-    return genai.Client(api_key=_require_api_key())
+def get_client(api_key: str = "") -> genai.Client:
+    resolved = _non_empty_string(api_key) or _require_api_key()
+    return genai.Client(api_key=resolved)
 
 
 def _non_empty_string(value: Any) -> str:
@@ -55,7 +57,7 @@ def _model_from_config(
         value = _non_empty_string(fallback)
         if value:
             return value
-    return "gemini-2.5-flash"
+    return "gemini-3-flash-preview"
 
 
 def search_model_name() -> str:
@@ -64,7 +66,7 @@ def search_model_name() -> str:
         "search_model",
         models.get("fast", ""),
         models.get("default", ""),
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
     )
 
 
@@ -74,7 +76,7 @@ def planning_model_name() -> str:
         "planning_model",
         models.get("fast", ""),
         models.get("default", ""),
-        "gemini-2.5-flash-lite",
+        "gemini-3.1-flash-lite-preview",
     )
 
 
@@ -84,7 +86,7 @@ def reflection_model_name() -> str:
         "reflection_model",
         models.get("default", ""),
         models.get("reasoning", ""),
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
     )
 
 
@@ -94,7 +96,7 @@ def router_model_name() -> str:
         "router_model",
         models.get("fast", ""),
         models.get("default", ""),
-        "gemini-2.5-flash-lite",
+        "gemini-3.1-flash-lite-preview",
     )
 
 
@@ -104,7 +106,7 @@ def url_context_model_name() -> str:
         "url_context_model",
         models.get("default", ""),
         models.get("fast", ""),
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
     )
 
 
@@ -114,7 +116,7 @@ def code_execution_model_name() -> str:
         "code_execution_model",
         models.get("default", ""),
         models.get("fast", ""),
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
     )
 
 
@@ -124,7 +126,7 @@ def maps_model_name() -> str:
         "maps_model",
         models.get("default", ""),
         models.get("fast", ""),
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
     )
 
 
@@ -133,7 +135,7 @@ def file_search_model_name() -> str:
     return _model_from_config(
         "file_search_model",
         models.get("default", ""),
-        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
     )
 
 
@@ -190,6 +192,62 @@ def _build_config(
     return types.GenerateContentConfig(**kwargs)
 
 
+def _compat_content_part(item: Any) -> Any:
+    if item is None:
+        return ""
+    if isinstance(item, types.Part):
+        return item
+    if isinstance(item, (bytes, bytearray)):
+        return types.Part.from_bytes(data=bytes(item), mime_type="application/octet-stream")
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        text = _non_empty_string(item.get("text", ""))
+        if text:
+            return text
+        mime_type = _non_empty_string(item.get("mime_type", "") or item.get("mimeType", ""))
+        data = item.get("data")
+        if mime_type and isinstance(data, (bytes, bytearray)):
+            return types.Part.from_bytes(data=bytes(data), mime_type=mime_type)
+        if mime_type and isinstance(data, str):
+            try:
+                return types.Part.from_bytes(data=base64.b64decode(data), mime_type=mime_type)
+            except Exception:
+                pass
+    return _non_empty_string(item)
+
+
+def normalize_contents(contents: Any) -> Any:
+    if isinstance(contents, (list, tuple)):
+        return [_compat_content_part(item) for item in contents]
+    return _compat_content_part(contents)
+
+
+def generate_response(
+    contents: Any,
+    *,
+    model: str,
+    system_instruction: str = "",
+    tools: list[Any] | None = None,
+    tool_config: Any = None,
+    response_mime_type: str = "",
+    response_json_schema: dict | None = None,
+    api_key: str = "",
+) -> Any:
+    client = get_client(api_key=api_key)
+    return client.models.generate_content(
+        model=model,
+        contents=normalize_contents(contents),
+        config=_build_config(
+            system_instruction=system_instruction,
+            tools=tools,
+            response_mime_type=response_mime_type,
+            response_json_schema=response_json_schema,
+            tool_config=tool_config,
+        ),
+    )
+
+
 def generate_text(
     prompt: str,
     *,
@@ -198,15 +256,12 @@ def generate_text(
     tools: list[Any] | None = None,
     tool_config: Any = None,
 ) -> str:
-    client = get_client()
-    response = client.models.generate_content(
+    response = generate_response(
+        _non_empty_string(prompt),
         model=model,
-        contents=_non_empty_string(prompt),
-        config=_build_config(
-            system_instruction=system_instruction,
-            tools=tools,
-            tool_config=tool_config,
-        ),
+        system_instruction=system_instruction,
+        tools=tools,
+        tool_config=tool_config,
     )
     return _flatten_text(response)
 
@@ -220,17 +275,14 @@ def generate_json(
     tools: list[Any] | None = None,
     tool_config: Any = None,
 ) -> dict:
-    client = get_client()
-    response = client.models.generate_content(
+    response = generate_response(
+        _non_empty_string(prompt),
         model=model,
-        contents=_non_empty_string(prompt),
-        config=_build_config(
-            system_instruction=system_instruction,
-            tools=tools,
-            response_mime_type="application/json",
-            response_json_schema=schema,
-            tool_config=tool_config,
-        ),
+        system_instruction=system_instruction,
+        tools=tools,
+        response_mime_type="application/json",
+        response_json_schema=schema,
+        tool_config=tool_config,
     )
     raw = _flatten_text(response)
     if not raw:

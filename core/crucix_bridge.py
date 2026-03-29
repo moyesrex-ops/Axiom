@@ -206,7 +206,7 @@ def _crucix_runtime_env() -> dict:
         str(cfg.get("llm_model", "") or "").strip()
         or str(text_models.get("fast", "") or "").strip()
         or str(text_models.get("default", "") or "").strip()
-        or "gemini-2.5-flash"
+        or "gemini-3-flash-preview"
     )
     env.setdefault("LLM_PROVIDER", "gemini")
     env.setdefault("LLM_API_KEY", api_key)

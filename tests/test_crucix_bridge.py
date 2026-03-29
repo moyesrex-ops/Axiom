@@ -13,8 +13,8 @@ class CrucixBridgeTests(unittest.TestCase):
                 "llm_model": "",
             },
             "text_models": {
-                "fast": "gemini-2.5-flash-lite",
-                "default": "gemini-2.5-flash",
+                "fast": "gemini-3.1-flash-lite-preview",
+                "default": "gemini-3-flash-preview",
             },
         }
 
@@ -25,7 +25,7 @@ class CrucixBridgeTests(unittest.TestCase):
 
         self.assertEqual(env["LLM_PROVIDER"], "gemini")
         self.assertEqual(env["LLM_API_KEY"], "secret-key")
-        self.assertEqual(env["LLM_MODEL"], "gemini-2.5-flash-lite")
+        self.assertEqual(env["LLM_MODEL"], "gemini-3.1-flash-lite-preview")
 
     def test_market_context_surfaces_asset_relevant_headlines(self):
         status = {

@@ -100,12 +100,12 @@ def swarm_orchestrator(parameters: dict = None, player=None, speak=None) -> str:
     if speak:
         speak(f"Launching {len(roles)} swarm agents for {mode}.")
 
-    import google.generativeai as genai
+    from core import gemini_compat as genai
 
     genai.configure(api_key=_get_api_key())
     runtime = load_runtime_config()
     model = genai.GenerativeModel(
-        str((runtime.get("text_models", {}) or {}).get("reasoning", "gemini-2.5-pro") or "gemini-2.5-pro")
+        str((runtime.get("text_models", {}) or {}).get("reasoning", "gemini-3.1-pro-preview") or "gemini-3.1-pro-preview")
     )
 
     reports = []

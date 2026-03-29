@@ -9,7 +9,7 @@ class GeminiNativeActionTests(unittest.TestCase):
         with patch(
             "actions.gemini_native.gn.google_search",
             return_value={
-                "model": "gemini-2.5-flash",
+                "model": "gemini-3-flash-preview",
                 "text": "Spain won Euro 2024.",
                 "citations": [{"title": "UEFA", "uri": "https://uefa.com"}],
                 "search_queries": ["who won euro 2024"],

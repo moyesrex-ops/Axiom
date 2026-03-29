@@ -996,7 +996,7 @@ def _delegate_model_name() -> str:
     configured = str(_runtime_agent_config().get("delegate_model", "") or "").strip()
     if configured:
         return configured
-    return str((runtime.get("text_models", {}) or {}).get("reasoning", "gemini-2.5-pro") or "gemini-2.5-pro")
+    return str((runtime.get("text_models", {}) or {}).get("reasoning", "gemini-3.1-pro-preview") or "gemini-3.1-pro-preview")
 
 
 def delegate_agent_library(
@@ -1032,10 +1032,10 @@ def delegate_agent_library(
     if not api_key:
         return {"ok": False, "message": "Gemini API key is missing, so agent delegation cannot run."}
 
-    import google.generativeai as genai
+    from core import gemini_compat as genai
 
     genai.configure(api_key=api_key)
-    resolved_model = str(model_name or _delegate_model_name()).strip() or "gemini-2.5-pro"
+    resolved_model = str(model_name or _delegate_model_name()).strip() or "gemini-3.1-pro-preview"
     model = genai.GenerativeModel(resolved_model)
 
     agent_reports = []

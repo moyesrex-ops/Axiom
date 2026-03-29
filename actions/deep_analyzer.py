@@ -87,7 +87,7 @@ def deep_analyze(file_path: str, prompt: str, player=None) -> str:
         player.write_log("Analyzing video content...")
         
     response = client.models.generate_content(
-        model='gemini-2.5-pro',
+        model='gemini-3.1-pro-preview',
         contents=[
             video_file,
             f"You are AXIOM. Deeply process this video logically according to what the user wants: {prompt}"

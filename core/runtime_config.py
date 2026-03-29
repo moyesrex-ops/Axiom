@@ -18,13 +18,14 @@ RUNTIME_LOCAL_CONFIG_PATH = CONFIG_DIR / "runtime.local.json"
 DEFAULT_RUNTIME_CONFIG = {
     "voice_name": "Charon",
     "voice_backend": "gemini_live",
-    "live_model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+    "live_model": "gemini-3.1-flash-live-preview",
     "live": {
         "enable_context_window_compression": True,
         "rotation_lead_seconds": 4.0,
         "idle_rotate_window_ms": 900,
         "rapid_reconnect_seconds": 0.75,
         "error_reconnect_seconds": 3.0,
+        "thinking_level": "low",
     },
     "audio": {
         "target_input_rms": 4200.0,
@@ -48,9 +49,9 @@ DEFAULT_RUNTIME_CONFIG = {
         },
     },
     "text_models": {
-        "default": "gemini-2.5-flash",
-        "fast": "gemini-2.5-flash-lite",
-        "reasoning": "gemini-2.5-pro",
+        "default": "gemini-3-flash-preview",
+        "fast": "gemini-3.1-flash-lite-preview",
+        "reasoning": "gemini-3.1-pro-preview",
     },
     "personaplex": {
         "enabled": False,
@@ -159,10 +160,20 @@ DEFAULT_RUNTIME_CONFIG = {
         "require_demo_account_for_live_orders": True,
         "max_order_volume": 0.10,
         "default_sl_tp_pips": 50,
+        "observe_screen_before_execution": False,
+        "require_screen_confirmation": False,
+        "require_symbol_match": False,
     },
     "computer_use": {
         "confirm_physical_actions": False,
         "default_verify_seconds": 1.2,
+    },
+    "vision": {
+        "model": "gemini-3-flash-preview",
+        "use_easyocr": True,
+        "use_tesseract": True,
+        "easyocr_languages": ["en"],
+        "ocr_prompt_char_limit": 1200,
     },
     "skill_library": {
         "enabled": True,
@@ -229,6 +240,7 @@ DEFAULT_RUNTIME_CONFIG = {
             "queue_plain_messages": True,
             "plain_message_mode": "operator",
             "startup_prompt_enabled": True,
+            "show_task_ids_in_messages": False,
             "speak_updates_enabled": True,
             "progress_updates_enabled": True,
             "speak_min_interval_seconds": 2.0,

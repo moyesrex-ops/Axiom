@@ -236,7 +236,7 @@ def _axiom_text_model_names() -> list[str]:
             unique.append(name)
     if unique:
         return unique
-    return ["gemini-2.5-flash", "gemini-2.5-pro"]
+    return ["gemini-3-flash-preview", "gemini-3.1-pro-preview"]
 
 
 def _render_managed_models_block() -> str:

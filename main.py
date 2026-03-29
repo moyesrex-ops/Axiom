@@ -89,7 +89,7 @@ def get_base_dir():
 BASE_DIR        = get_base_dir()
 API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
-DEFAULT_LIVE_MODEL  = "models/gemini-2.5-flash-native-audio-preview-12-2025"
+DEFAULT_LIVE_MODEL  = "gemini-3.1-flash-live-preview"
 FORMAT              = pyaudio.paInt16
 CHANNELS            = 1
 SEND_SAMPLE_RATE    = 16000
@@ -110,6 +110,13 @@ def _load_system_prompt() -> str:
             "Be concise, direct, and always use the provided tools to complete tasks. "
             "Never simulate or guess results - always call the appropriate tool."
         )
+
+
+def _normalize_live_model_name(model_name: str) -> str:
+    value = str(model_name or "").strip()
+    if value.startswith("models/"):
+        return value.split("/", 1)[1].strip()
+    return value
 
 _memory_turn_counter  = 0
 _memory_turn_lock     = threading.Lock()
@@ -188,9 +195,9 @@ def _update_memory_async(
     _last_memory_input = text
 
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
         check = model.generate_content(
             f"Does this message contain personal facts about the user "
@@ -715,6 +722,7 @@ TOOL_DECLARATIONS = [
     "name": "mt5_trading",
     "description": (
         "Natively executes ultra-low latency Buy/Sell orders on MetaTrader 5 via C++ socket bindings. "
+        "Can also inspect the visible MetaTrader screen state before execution. "
         "Supports stop-loss and take-profit levels. After each trade closes, Axiom automatically "
         "reflects on the result and stores the lesson in memory to continuously improve. "
         "Use this exclusively when the user says 'start trading', 'buy EURUSD', 'sell 0.5 lots', etc."
@@ -722,12 +730,13 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action":      {"type": "STRING", "description": "The action to perform: 'info', 'buy', or 'sell'."},
+            "action":      {"type": "STRING", "description": "The action to perform: 'info', 'buy', 'sell', or 'screen_state'."},
             "symbol":      {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
             "volume":      {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."},
             "stop_loss":   {"type": "NUMBER", "description": "Optional stop-loss price. Defaults to a 50-pip protective stop if omitted."},
             "take_profit": {"type": "NUMBER", "description": "Optional take-profit price. Defaults to a 50-pip target if omitted."},
-            "prompt":      {"type": "STRING", "description": "Natural language trade intent for AI extraction."}
+            "prompt":      {"type": "STRING", "description": "Natural language trade intent for AI extraction."},
+            "observe_screen": {"type": "BOOLEAN", "description": "Whether to capture the visible MetaTrader screen state before live execution."}
         },
         "required": ["action"]
     }
@@ -1497,8 +1506,9 @@ class AxiomLive:
         else:
             sys_prompt = prompt_prefix + capability_status + "\n\n" + sys_prompt
 
-        self.live_model = runtime.get("live_model") or DEFAULT_LIVE_MODEL
+        self.live_model = _normalize_live_model_name(runtime.get("live_model") or DEFAULT_LIVE_MODEL)
         voice_name = runtime.get("voice_name") or "Charon"
+        live_cfg = runtime.get("live", {}) or {}
         live_tools = []
         if gn.live_search_enabled():
             live_tools.append({"google_search": {}})
@@ -1517,6 +1527,23 @@ class AxiomLive:
                 )
             ),
         )
+        thinking_level = str(live_cfg.get("thinking_level", "") or "").strip().lower()
+        thinking_budget = live_cfg.get("thinking_budget")
+        include_thoughts = bool(live_cfg.get("include_thoughts", False))
+        thinking_kwargs = {}
+        normalized_live_model = self.live_model.lower()
+        if normalized_live_model.startswith("gemini-3"):
+            if thinking_level:
+                thinking_kwargs["thinking_level"] = thinking_level
+        elif thinking_budget not in (None, ""):
+            try:
+                thinking_kwargs["thinking_budget"] = int(thinking_budget)
+            except (TypeError, ValueError):
+                pass
+        if include_thoughts:
+            thinking_kwargs["include_thoughts"] = True
+        if thinking_kwargs:
+            config_kwargs["thinking_config"] = types.ThinkingConfig(**thinking_kwargs)
         if self._live_context_window_compression:
             config_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow()
@@ -1559,7 +1586,7 @@ class AxiomLive:
                     priority=priority,
                     speak=self.speak,
                 )
-                result = f"Task started (ID: {task_id}). I'll update you as I make progress."
+                result = "Working on that now. I'll keep you updated as it moves."
             else:
                 result = await loop.run_in_executor(
                     None,

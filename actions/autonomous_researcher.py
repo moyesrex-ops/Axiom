@@ -107,7 +107,7 @@ Raw Transcripts Dump:
     
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-pro',
+            model='gemini-3.1-pro-preview',
             contents=prompt
         )
         return response.text

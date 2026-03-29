@@ -944,9 +944,9 @@ def _detect_action(description: str) -> dict:
     Herhangi bir dilde çalışır.
     Döner: {"action": str, "value": optional}
     """
-    import google.generativeai as genai
+    from core import gemini_compat as genai
     genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
     available = ", ".join(sorted(ACTION_MAP.keys())) + ", volume_set, type_text, write_on_screen, reload_n, press_key, force_close"
 

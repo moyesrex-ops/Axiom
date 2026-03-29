@@ -2,6 +2,12 @@ import json
 import threading
 import time
 from typing import Optional
+
+from actions.mt5_screen_observer import (
+    format_mt5_screen_state,
+    log_mt5_screen_state,
+    observe_mt5_screen,
+)
 from memory.runtime_store import log_event
 from core.runtime_config import load_runtime_config
 
@@ -47,6 +53,28 @@ DEFAULT_SL_TP_PIPS = 50
 
 def _trading_config() -> dict:
     return load_runtime_config().get("trading", {}) or {}
+
+
+def _observe_mt5_screen_if_needed(symbol: str, params: dict, *, force: bool = False) -> dict:
+    cfg = _trading_config()
+    if not force and not bool(params.get("observe_screen", False)) and not bool(cfg.get("observe_screen_before_execution", False)):
+        return {}
+    snapshot = observe_mt5_screen(symbol_hint=symbol)
+    log_mt5_screen_state(snapshot, topic="mt5_screen_observation", symbol_hint=symbol)
+    return snapshot
+
+
+def _screen_observation_block_reason(snapshot: dict, symbol: str) -> str:
+    if not snapshot:
+        return ""
+    cfg = _trading_config()
+    expected_symbol = str(symbol or "").strip().upper()
+    observed_symbol = str(snapshot.get("symbol", "") or "").strip().upper()
+    if bool(cfg.get("require_screen_confirmation", False)) and not bool(snapshot.get("mt5_visible", False)):
+        return "Pre-trade MT5 screen check did not detect a visible MetaTrader 5 terminal."
+    if bool(cfg.get("require_symbol_match", False)) and expected_symbol and observed_symbol and observed_symbol != expected_symbol:
+        return f"Pre-trade MT5 screen check saw {observed_symbol}, not {expected_symbol}."
+    return ""
 
 
 def _account_is_demo(account_info) -> bool:
@@ -126,6 +154,16 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
     stop_loss = params.get("stop_loss")
     take_profit = params.get("take_profit")
 
+    if action in ("screen_state", "observe_screen", "screen"):
+        snapshot = _observe_mt5_screen_if_needed(symbol, params, force=True)
+        if not snapshot:
+            snapshot = observe_mt5_screen(symbol_hint=symbol)
+            log_mt5_screen_state(snapshot, topic="mt5_screen_observation", symbol_hint=symbol)
+        report = format_mt5_screen_state(snapshot)
+        if speak:
+            speak(report)
+        return report
+
     if mt5 is None:
         message = (
             "MetaTrader5 is not installed in the current Python environment. "
@@ -192,7 +230,7 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
 
     if prompt_raw and action not in ("buy", "sell"):
         try:
-            import google.generativeai as genai
+            from core import gemini_compat as genai
 
             genai.configure(api_key=_get_api_key())
 
@@ -210,7 +248,7 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
                 except Exception:
                     pass
 
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("gemini-3-flash-preview")
             prompt = f"""
             [MT5 EXECUTION ENGINE: MULTIMODAL EXTRACTION]
             Extract parameters for a trade from this intent: "{prompt_raw}"
@@ -290,6 +328,13 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
             message = f"Could not get tick data for {symbol}."
             log_event("trading", "mt5_tick_failed", message, metadata={"symbol": symbol})
             return message
+
+        screen_snapshot = _observe_mt5_screen_if_needed(symbol, params)
+        block_reason = _screen_observation_block_reason(screen_snapshot, symbol)
+        if block_reason:
+            mt5.shutdown()
+            log_event("trading", "mt5_screen_guard_blocked", block_reason, metadata={"symbol": symbol})
+            return block_reason
 
         price = tick.ask if action == "buy" else tick.bid
         point = symbol_info.point

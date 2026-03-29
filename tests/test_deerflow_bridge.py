@@ -72,9 +72,9 @@ class DeerFlowBridgeTests(unittest.TestCase):
         runtime = {
             "deerflow": {"repo_path": str(repo)},
             "text_models": {
-                "fast": "gemini-2.5-flash-lite",
-                "default": "gemini-2.5-flash",
-                "reasoning": "gemini-2.5-pro",
+                "fast": "gemini-3.1-flash-lite-preview",
+                "default": "gemini-3-flash-preview",
+                "reasoning": "gemini-3.1-pro-preview",
             },
         }
         with patch.object(df, "load_runtime_config", return_value=runtime):
@@ -85,8 +85,8 @@ class DeerFlowBridgeTests(unittest.TestCase):
         config_text = (repo / "config.yaml").read_text(encoding="utf-8")
         self.assertIn("AXIOM-managed DeerFlow config", config_text)
         self.assertIn("langchain_google_genai:ChatGoogleGenerativeAI", config_text)
-        self.assertIn("gemini-2.5-flash-lite", config_text)
-        self.assertIn("gemini-2.5-pro", config_text)
+        self.assertIn("gemini-3.1-flash-lite-preview", config_text)
+        self.assertIn("gemini-3.1-pro-preview", config_text)
 
     def test_process_env_uses_axiom_managed_cache_dirs(self):
         repo = self._workspace_dir("deerflow_env")

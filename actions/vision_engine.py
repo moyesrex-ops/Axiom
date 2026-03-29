@@ -10,8 +10,8 @@
 #   compare_screenshots() → Detect changes between two captures
 #   verify_action()       → Post-action visual verification
 #
-# Uses Gemini 2.5 Flash multimodal (text response, not audio) for reliable
-# structured output.  Falls back to local OCR via pytesseract when available.
+# Uses a runtime-configurable Gemini multimodal model for structured output
+# plus local OCR via EasyOCR / Tesseract when available.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import base64
@@ -28,6 +28,7 @@ from typing import Optional
 import cv2
 import mss
 import mss.tools
+import numpy as np
 
 try:
     import PIL.Image
@@ -36,11 +37,18 @@ except ImportError:
     _PIL_OK = False
 
 try:
+    import easyocr
+    _EASYOCR_OK = True
+except ImportError:
+    _EASYOCR_OK = False
+
+try:
     import pytesseract
     _TESSERACT_OK = True
 except ImportError:
     _TESSERACT_OK = False
 
+from core.runtime_config import load_runtime_config
 from core.secret_config import get_gemini_api_key
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -50,7 +58,105 @@ IMG_MAX_W = 1920
 IMG_MAX_H = 1080
 JPEG_QUALITY = 82  # Higher quality for text readability
 
-VISION_MODEL = "gemini-2.5-flash"
+DEFAULT_VISION_MODEL = "gemini-3-flash-preview"
+DEFAULT_OCR_PROMPT_CHAR_LIMIT = 1200
+_EASYOCR_READER = None
+_EASYOCR_INIT_FAILED = False
+
+
+def _vision_config() -> dict:
+    return load_runtime_config().get("vision", {}) or {}
+
+
+def _vision_model_name() -> str:
+    cfg = _vision_config()
+    model = str(cfg.get("model", "") or "").strip()
+    if model:
+        return model
+    text_models = load_runtime_config().get("text_models", {}) or {}
+    return str(text_models.get("default", "") or DEFAULT_VISION_MODEL).strip() or DEFAULT_VISION_MODEL
+
+
+def _ocr_prompt_char_limit() -> int:
+    cfg = _vision_config()
+    try:
+        return max(200, int(cfg.get("ocr_prompt_char_limit", DEFAULT_OCR_PROMPT_CHAR_LIMIT) or DEFAULT_OCR_PROMPT_CHAR_LIMIT))
+    except (TypeError, ValueError):
+        return DEFAULT_OCR_PROMPT_CHAR_LIMIT
+
+
+def _easyocr_languages() -> list[str]:
+    cfg = _vision_config()
+    raw = cfg.get("easyocr_languages", ["en"])
+    if isinstance(raw, str):
+        langs = [part.strip() for part in raw.replace(";", ",").split(",")]
+    else:
+        langs = [str(item).strip() for item in (raw or [])]
+    return [lang for lang in langs if lang] or ["en"]
+
+
+def _normalize_ocr_text(text: str) -> str:
+    lines = [line.strip() for line in re.split(r"[\r\n]+", str(text or "")) if line.strip()]
+    return "\n".join(lines).strip()
+
+
+def _merge_ocr_texts(parts: list[str]) -> str:
+    blocks: list[str] = []
+    seen: set[str] = set()
+    for part in parts:
+        normalized = _normalize_ocr_text(part)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        blocks.append(normalized)
+    return "\n\n".join(blocks).strip()
+
+
+def _decode_image_bytes(image_bytes: bytes):
+    try:
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        if arr.size == 0:
+            return None
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    except Exception:
+        return None
+
+
+def _get_easyocr_reader():
+    global _EASYOCR_READER, _EASYOCR_INIT_FAILED
+    if not _EASYOCR_OK or _EASYOCR_INIT_FAILED:
+        return None
+    if _EASYOCR_READER is not None:
+        return _EASYOCR_READER
+    try:
+        gpu = False
+        try:
+            import torch
+
+            gpu = bool(torch.cuda.is_available())
+        except Exception:
+            gpu = False
+        _EASYOCR_READER = easyocr.Reader(_easyocr_languages(), gpu=gpu, verbose=False)
+        return _EASYOCR_READER
+    except Exception as e:
+        _EASYOCR_INIT_FAILED = True
+        print(f"[Vision] WARNING EasyOCR init failed: {e}")
+        return None
+
+
+def _easyocr_text(image_bytes: bytes) -> str:
+    reader = _get_easyocr_reader()
+    if reader is None:
+        return ""
+    image = _decode_image_bytes(image_bytes)
+    if image is None:
+        return ""
+    try:
+        results = reader.readtext(image, detail=0, paragraph=True)
+        return "\n".join(str(item).strip() for item in (results or []) if str(item).strip())
+    except Exception as e:
+        print(f"[Vision] WARNING EasyOCR failed: {e}")
+        return ""
 
 
 # ── Data Classes ─────────────────────────────────────────────────────────────
@@ -150,19 +256,28 @@ def _image_to_base64(image_bytes: bytes) -> str:
     return base64.b64encode(image_bytes).decode("utf-8")
 
 
-# ── Local OCR (Tesseract fallback) ───────────────────────────────────────────
+# ── Local OCR (EasyOCR / Tesseract) ──────────────────────────────────────────
 
 def _local_ocr(image_bytes: bytes) -> str:
-    """Extract text using local Tesseract OCR if available."""
-    if not _TESSERACT_OK or not _PIL_OK:
-        return ""
-    try:
-        img = PIL.Image.open(io.BytesIO(image_bytes))
-        text = pytesseract.image_to_string(img)
-        return text.strip()
-    except Exception as e:
-        print(f"[Vision] ⚠️ Local OCR failed: {e}")
-        return ""
+    """Extract text using available local OCR engines and merge the results."""
+    cfg = _vision_config()
+    parts: list[str] = []
+
+    if bool(cfg.get("use_easyocr", True)):
+        easy_text = _easyocr_text(image_bytes)
+        if easy_text:
+            parts.append(easy_text)
+
+    if bool(cfg.get("use_tesseract", True)) and _TESSERACT_OK and _PIL_OK:
+        try:
+            img = PIL.Image.open(io.BytesIO(image_bytes))
+            tesseract_text = pytesseract.image_to_string(img)
+            if tesseract_text:
+                parts.append(tesseract_text)
+        except Exception as e:
+            print(f"[Vision] WARNING Tesseract OCR failed: {e}")
+
+    return _merge_ocr_texts(parts)
 
 
 # ── Gemini Vision API ────────────────────────────────────────────────────────
@@ -184,7 +299,7 @@ def _gemini_vision_call(image_bytes: bytes, prompt: str, json_mode: bool = False
         config["response_mime_type"] = "application/json"
 
     response = client.models.generate_content(
-        model=VISION_MODEL,
+        model=_vision_model_name(),
         contents=contents,
         config=config if config else None,
     )
@@ -221,13 +336,13 @@ def analyze_screen(
         else:
             image_bytes = _capture_screenshot(region=region)
 
-        print(f"[Vision] 📸 Captured {len(image_bytes)} bytes ({source})")
+        print(f"[Vision] Captured {len(image_bytes)} bytes ({source})")
 
         # Local OCR pass (fast, gives us raw text)
         ocr_text = _local_ocr(image_bytes)
         if ocr_text:
             result.text_content = ocr_text
-            print(f"[Vision] 📝 OCR extracted {len(ocr_text)} chars")
+            print(f"[Vision] OCR extracted {len(ocr_text)} chars")
 
         # Gemini Vision pass (deep understanding)
         prompt = f"""You are AXIOM's vision system. Analyze this screenshot with precision.
@@ -241,7 +356,7 @@ Provide a thorough analysis including:
 4. **UI State**: What state the UI is in (loading, idle, error, success)
 5. **Actionable Items**: What can be clicked, typed, or interacted with
 
-{f"OCR pre-scan found this text: {ocr_text[:500]}" if ocr_text else ""}
+{f"OCR pre-scan found this text: {ocr_text[:_ocr_prompt_char_limit()]}" if ocr_text else ""}
 
 Be specific and precise. Quote exact text. Don't guess — if you can't read something, say so."""
 
@@ -260,12 +375,12 @@ Be specific and precise. Quote exact text. Don't guess — if you can't read som
             matches = re.findall(pattern, raw, re.IGNORECASE)
             result.errors_found.extend(matches[:5])
 
-        print(f"[Vision] ✅ Analysis complete ({len(raw)} chars)")
+        print(f"[Vision] Analysis complete ({len(raw)} chars)")
 
     except Exception as e:
         result.success = False
         result.description = f"Vision analysis failed: {e}"
-        print(f"[Vision] ❌ {e}")
+        print(f"[Vision] ERROR {e}")
         traceback.print_exc()
 
     return result
@@ -280,6 +395,7 @@ def read_text_on_screen(
     """
     try:
         image_bytes = _capture_screenshot(region=region)
+        ocr_text = _local_ocr(image_bytes)
 
         prompt = """Extract ALL text visible on this screen, exactly as written.
 Include:
@@ -293,12 +409,14 @@ Include:
 
 Format: Return the raw text with line breaks preserved. Quote EXACTLY what you see.
 Do NOT paraphrase or interpret — only extract literal text."""
+        if ocr_text:
+            prompt += f"\n\nLocal OCR pre-scan:\n{ocr_text[:_ocr_prompt_char_limit()]}"
 
         return _gemini_vision_call(image_bytes, prompt)
 
     except Exception as e:
         # Fallback to local OCR
-        if _TESSERACT_OK:
+        if _TESSERACT_OK or _EASYOCR_OK:
             try:
                 image_bytes = _capture_screenshot(region=region)
                 return _local_ocr(image_bytes) or f"Text extraction failed: {e}"
@@ -317,6 +435,7 @@ def find_element(
     """
     try:
         image_bytes = _capture_screenshot() if source == "screen" else _capture_camera()
+        ocr_text = _local_ocr(image_bytes)
 
         prompt = f"""Find the UI element described as: "{description}"
 
@@ -331,6 +450,8 @@ Return a JSON object with:
 }}
 
 Be precise. If multiple matches exist, describe the most prominent one."""
+        if ocr_text:
+            prompt += f"\n\nOCR hints:\n{ocr_text[:_ocr_prompt_char_limit()]}"
 
         raw = _gemini_vision_call(image_bytes, prompt, json_mode=True)
         try:
@@ -349,6 +470,7 @@ def detect_errors(source: str = "screen") -> list[dict]:
     """
     try:
         image_bytes = _capture_screenshot() if source == "screen" else _capture_camera()
+        ocr_text = _local_ocr(image_bytes)
 
         prompt = """Scan this screen for ANY errors, warnings, exceptions, or failure states.
 
@@ -364,6 +486,8 @@ Return a JSON array where each item has:
 
 If NO errors are found, return an empty array [].
 Be thorough — check terminal output, browser console, dialog boxes, status bars."""
+        if ocr_text:
+            prompt += f"\n\nOCR hints:\n{ocr_text[:_ocr_prompt_char_limit()]}"
 
         raw = _gemini_vision_call(image_bytes, prompt, json_mode=True)
         try:
@@ -396,6 +520,7 @@ def verify_action(
 
     try:
         image_bytes = _capture_screenshot()
+        ocr_text = _local_ocr(image_bytes)
 
         prompt = f"""I just performed an action. Verify if the expected outcome is visible.
 
@@ -409,6 +534,8 @@ Analyze the screen and return a JSON object:
     "matches_expected": "how well it matches the expected outcome",
     "issues": "any problems or discrepancies noticed"
 }}"""
+        if ocr_text:
+            prompt += f"\n\nOCR hints:\n{ocr_text[:_ocr_prompt_char_limit()]}"
 
         raw = _gemini_vision_call(image_bytes, prompt, json_mode=True)
         try:
@@ -443,7 +570,7 @@ def compare_screenshots(
         ]
 
         response = client.models.generate_content(
-            model=VISION_MODEL,
+            model=_vision_model_name(),
             contents=contents,
             config={"response_mime_type": "application/json"},
         )

@@ -7,8 +7,8 @@
 #   → Speaks only when done (success or failure)
 #
 # Models:
-#   Planning : gemini-2.5-flash       (architecture, structure, debugging)
-#   Writing  : gemini-2.5-flash-lite  (fast file generation)
+#   Planning : gemini-3-flash-preview       (architecture, structure, debugging)
+#   Writing  : gemini-3.1-flash-lite-preview  (fast file generation)
 
 import subprocess
 import sys
@@ -26,8 +26,8 @@ BASE_DIR           = get_base_dir()
 API_CONFIG_PATH    = BASE_DIR / "config" / "api_keys.json"
 PROJECTS_DIR       = Path.home() / "Desktop" / "AXIOMProjects"
 MAX_FIX_ATTEMPTS   = 6
-MODEL_PLANNER      = "gemini-2.5-flash"
-MODEL_WRITER       = "gemini-2.5-flash-lite"
+MODEL_PLANNER      = "gemini-3-flash-preview"
+MODEL_WRITER       = "gemini-3.1-flash-lite-preview"
 
 
 def _get_api_key() -> str:
@@ -36,7 +36,7 @@ def _get_api_key() -> str:
 
 
 def _get_model(model_name: str):
-    import google.generativeai as genai
+    from core import gemini_compat as genai
     genai.configure(api_key=_get_api_key())
     return genai.GenerativeModel(model_name)
 

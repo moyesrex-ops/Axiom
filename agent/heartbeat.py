@@ -82,9 +82,9 @@ class HeartbeatDaemon:
             soul_context = await asyncio.to_thread(_load_soul_context)
 
             # ── DECIDE ───────────────────────────────────────────────────────
-            import google.generativeai as genai
+            from core import gemini_compat as genai
             genai.configure(api_key=_get_api_key())
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("gemini-3-flash-preview")
 
             prompt = f"""
 [AXIOM SOVEREIGN OODA LOOP — HEARTBEAT DAEMON]

@@ -168,9 +168,9 @@ def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "")
     return params
 
 def _detect_language(text: str) -> str:
-    import google.generativeai as genai
+    from core import gemini_compat as genai
     genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
     try:
         response = model.generate_content(
             f"What language is this text written in? "
@@ -186,9 +186,9 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
     if not goal:
         return content
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
 
         target_lang = _detect_language(goal)
         _safe_print(f"[Executor] Translating to: {target_lang}")

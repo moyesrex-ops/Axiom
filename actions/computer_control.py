@@ -336,7 +336,7 @@ def _analyze_screen_for_element(description: str) -> tuple[int, int] | None:
     of a described element on screen. Returns (x, y) or None.
     """
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         import io
 
         cfg_path = API_CONFIG_PATH
@@ -344,7 +344,7 @@ def _analyze_screen_for_element(description: str) -> tuple[int, int] | None:
             api_key = json.load(f)["gemini_api_key"]
 
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
 
         _ensure_pyautogui()

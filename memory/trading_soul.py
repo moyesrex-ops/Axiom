@@ -42,9 +42,9 @@ def reflect_on_trade(symbol: str, profit: float, reason: str):
     })
     
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
         
         prompt = f"""
         You are Axiom's internal Trading Soul.

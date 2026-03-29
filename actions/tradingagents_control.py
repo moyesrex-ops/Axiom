@@ -247,7 +247,7 @@ def tradingagents_control(parameters: dict = None, player=None, speak=None) -> s
         import threading
         t = threading.Thread(target=_bg_analyze, daemon=True, name=f"TradingAgents_{ticker}")
         t.start()
-        return f"TradingAgents analysis for {ticker} started in the background. I will optionally notify you when complete."
+        return f"Analyzing {ticker} now. I'll report back when the read is ready."
 
     if action == "execute_mt5":
         ticker = str(params.get("ticker", "") or params.get("asset", "") or "").strip().upper()
@@ -338,7 +338,7 @@ def tradingagents_control(parameters: dict = None, player=None, speak=None) -> s
         import threading
         t = threading.Thread(target=_bg_execute, daemon=True, name=f"MT5Handoff_{ticker}")
         t.start()
-        return f"TradingAgents MT5 handoff specifically for {ticker} has started in the background. I will notify you when it completes."
+        return f"Analyzing {ticker} and preparing the MT5 handoff now. I'll report back when it's complete."
 
 
     if action == "launch_instructions":

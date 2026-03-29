@@ -308,9 +308,9 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
                 speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
 
         try:
-            import google.generativeai as genai
+            from core import gemini_compat as genai
             genai.configure(api_key=get_api_key())
-            model = genai.GenerativeModel("gemini-2.5-pro")
+            model = genai.GenerativeModel("gemini-3.1-pro-preview")
 
             soul_lessons = _load_soul_lessons()
 

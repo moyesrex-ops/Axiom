@@ -434,14 +434,14 @@ def _fuse_market_intelligence(result: dict, context_block: str) -> dict:
         return {}
 
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
 
         runtime = load_runtime_config()
         text_models = runtime.get("text_models", {}) or {}
         model_name = (
             str(text_models.get("fast", "") or "").strip()
             or str(text_models.get("default", "") or "").strip()
-            or "gemini-2.5-flash"
+            or "gemini-3-flash-preview"
         )
         prompt = (
             "You are fusing TradingAgents output with live external market context.\n"
@@ -492,14 +492,14 @@ def run_tradingagents_analysis(parameters: dict | None = None) -> dict:
     deep_model = str(
         params.get("deep_model", "")
         or cfg.get("deep_think_llm", "")
-        or text_models.get("reasoning", "gemini-2.5-pro")
-        or "gemini-2.5-pro"
+        or text_models.get("reasoning", "gemini-3.1-pro-preview")
+        or "gemini-3.1-pro-preview"
     ).strip()
     quick_model = str(
         params.get("quick_model", "")
         or cfg.get("quick_think_llm", "")
-        or text_models.get("fast", "gemini-2.5-flash-lite")
-        or "gemini-2.5-flash-lite"
+        or text_models.get("fast", "gemini-3.1-flash-lite-preview")
+        or "gemini-3.1-flash-lite-preview"
     ).strip()
     analysts = _normalize_analysts(params.get("analysts", cfg.get("default_analysts", DEFAULT_ANALYSTS)))
     max_debate_rounds = int(params.get("max_debate_rounds", cfg.get("max_debate_rounds", 1)) or 1)

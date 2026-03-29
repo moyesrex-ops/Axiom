@@ -190,9 +190,9 @@ def generate_action_with_ai(
         speak(f"Generating new capability: {tool_name}. Writing code now.")
 
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
 
         existing_example = read_source("actions/weather_report.py")
         prompt = f"""

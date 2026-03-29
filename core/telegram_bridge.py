@@ -232,6 +232,10 @@ def _plain_message_mode() -> str:
     return mode if mode in _PLAIN_MESSAGE_MODES else "operator"
 
 
+def _show_task_ids_in_messages() -> bool:
+    return bool(_telegram_config().get("show_task_ids_in_messages", False))
+
+
 def _telegram_feedback_settings() -> dict:
     cfg = _telegram_config()
     return {
@@ -429,7 +433,7 @@ def _text_model_name() -> str:
     return (
         str(text_models.get("fast") or "").strip()
         or str(text_models.get("default") or "").strip()
-        or "gemini-2.5-flash-lite"
+        or "gemini-3.1-flash-lite-preview"
     )
 
 
@@ -549,7 +553,9 @@ def _render_task_completion_message(result: str) -> str:
 def _task_ack_message(goal: str, task_id: str, explicit: bool = False) -> str:
     normalized = _normalize_text(goal)
     if explicit:
-        return f"Queued it.\n\nTask ID: {task_id}\nGoal: {goal[:300]}".strip()
+        if _show_task_ids_in_messages():
+            return f"Queued it.\n\nTask ID: {task_id}\nGoal: {goal[:300]}".strip()
+        return f"Queued it.\n\nGoal: {goal[:300]}\n\nI'll report back here.".strip()
     if any(term in normalized for term in ("keyboard", "lighting", "backlight", "rgb", "lights")):
         base = "Changing that now."
     elif normalized.startswith(("open ", "launch ", "start ")):
@@ -562,7 +568,9 @@ def _task_ack_message(goal: str, task_id: str, explicit: bool = False) -> str:
         base = "Working on that now."
     else:
         base = "On it."
-    return f"{base}\n\nTask ID: {task_id}\nLive updates will appear here.".strip()
+    if _show_task_ids_in_messages():
+        return f"{base}\n\nTask ID: {task_id}\nI'll keep you posted here.".strip()
+    return f"{base}\n\nI'll keep you posted here.".strip()
 
 
 def _format_progress_feedback(event: dict | None) -> str:
@@ -589,16 +597,14 @@ def _format_progress_feedback(event: dict | None) -> str:
             except Exception:
                 pass
 
-    if topic == "executor_started":
-        return "Execution started."
-    if topic == "direct_route_selected":
-        if tool:
-            return f"Direct route selected: [{tool}]."
-        if message:
-            return message[:320]
+    if topic in {"executor_started", "direct_route_selected"}:
+        return ""
     if step_prefix and tool and description:
-        return f"{step_prefix}: [{tool}] {description[:220]}".strip()
+        return f"{step_prefix}: {description[:220]}".strip()
     if step_prefix and message:
+        lowered = message.lower()
+        if lowered in {"step execution started.", "execution started."}:
+            return ""
         return f"{step_prefix}: {message[:300]}".strip()
     if topic in {"task_failed", "task_cancelled"} and message:
         return message[:320]
@@ -986,7 +992,7 @@ def _generate_chat_reply(user_text: str, chat_id: str = "") -> str:
         return "Gemini is not configured yet, so Telegram chat replies are offline right now."
 
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
 
         genai.configure(api_key=api_key)
 
@@ -1161,7 +1167,7 @@ def _queue_task(
     _send_message(chat_id, ack, reply_to_message_id=reply_to_message_id)
     log_event("telegram", "task_queued", f"[{task_id}] {goal[:200]}")
     if log_func:
-        log_func(f"Telegram executing task [{task_id}]")
+        log_func(f"Telegram task queued: {goal[:120]}")
 
 
 def _handle_message(message: dict, log_func: Callable | None = None) -> None:
@@ -1244,7 +1250,7 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
             _send_message(
                 chat_id,
                 (
-                    f"Task [{active_task['task_id']}] is already running for this chat.\n"
+                    "There is already an active task running for this chat.\n"
                     f"Goal: {str(active_task.get('goal', ''))[:260]}\n\n"
                     "Wait for that result before queueing another execution request."
                 ),
@@ -1291,7 +1297,7 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
                 _send_message(
                     chat_id,
                     (
-                        f"Task [{active_task['task_id']}] is already running for this chat.\n"
+                        "There is already an active task running for this chat.\n"
                         f"Goal: {str(active_task.get('goal', ''))[:260]}\n\n"
                         "I am not queueing a second execution on top of it. Wait for the current result first."
                     ),

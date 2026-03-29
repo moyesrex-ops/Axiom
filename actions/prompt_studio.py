@@ -32,10 +32,10 @@ def prompt_studio(parameters: dict = None, player=None, speak=None) -> str:
     if speak:
         speak(f"Building {medium} prompts now.")
 
-    import google.generativeai as genai
+    from core import gemini_compat as genai
 
     genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel("gemini-2.5-pro")
+    model = genai.GenerativeModel("gemini-3.1-pro-preview")
 
     prompt = f"""You are AXIOM Prompt Studio.
 Create elite prompts for {medium} generation.

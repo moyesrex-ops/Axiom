@@ -224,11 +224,12 @@ class TelegramBridgeTests(unittest.TestCase):
             "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green.",
         )
 
-    def test_task_ack_message_includes_task_id_and_live_updates(self):
-        message = tb._task_ack_message("open calculator", "abc12345")
+    def test_task_ack_message_hides_task_id_by_default(self):
+        with patch.object(tb, "_show_task_ids_in_messages", return_value=False):
+            message = tb._task_ack_message("open calculator", "abc12345")
 
-        self.assertIn("Task ID: abc12345", message)
-        self.assertIn("Live updates will appear here.", message)
+        self.assertNotIn("Task ID: abc12345", message)
+        self.assertIn("I'll keep you posted here.", message)
 
     def test_format_progress_feedback_prefers_step_tool_description(self):
         message = tb._format_progress_feedback(
@@ -242,7 +243,7 @@ class TelegramBridgeTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(message, "Step 2/4: [computer_use] Click the launch button on screen")
+        self.assertEqual(message, "Step 2/4: Click the launch button on screen")
 
     def test_queue_task_wires_live_feedback_callbacks(self):
         with patch.object(tb, "submit_channel_task", return_value="abc12345") as submit_mock, patch.object(
@@ -279,9 +280,9 @@ class TelegramBridgeTests(unittest.TestCase):
         self.assertGreaterEqual(send_mock.call_count, 2)
         first_message = send_mock.call_args_list[0].args[1]
         feedback_messages = [call.args[1] for call in send_mock.call_args_list[1:]]
-        self.assertIn("Task ID: abc12345", first_message)
+        self.assertNotIn("Task ID: abc12345", first_message)
         self.assertIn("Opening Calculator now.", feedback_messages)
-        self.assertIn("Step 1/1: [open_app] Open calculator", feedback_messages)
+        self.assertIn("Step 1/1: Open calculator", feedback_messages)
 
     def test_emit_task_feedback_does_not_raise_when_telegram_send_fails(self):
         state = tb._task_feedback_state()

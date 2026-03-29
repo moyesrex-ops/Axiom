@@ -56,7 +56,7 @@ def _reasoning_model_name() -> str:
     return (
         str(models.get("reasoning") or "").strip()
         or str(models.get("default") or "").strip()
-        or "gemini-2.5-flash"
+        or "gemini-3-flash-preview"
     )
 
 
@@ -65,7 +65,7 @@ def _fast_model_name() -> str:
     return (
         str(models.get("fast") or "").strip()
         or str(models.get("default") or "").strip()
-        or "gemini-2.5-flash-lite"
+        or "gemini-3.1-flash-lite-preview"
     )
 
 
@@ -104,9 +104,9 @@ def _smart_query_expansion(query: str) -> str:
         except Exception:
             pass
 
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
         prompt = f"""Expand this search query into a more specific, effective search query.
 Keep it concise (under 15 words). Return ONLY the expanded query, nothing else.
@@ -417,7 +417,7 @@ def deep_search(
             _safe_print(f"[DeepSearch] WARNING Vane backend failed: {e}")
 
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
         model = genai.GenerativeModel(_reasoning_model_name())
 
@@ -590,9 +590,9 @@ def analyze_social_page(url: str, query: str, speak=None) -> str:
         raw_content = _fetch_page_content(url)
 
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-3-flash-preview")
 
         prompt = f"""
 You are an expert analyst. Analyse the following scraped content from {url}.

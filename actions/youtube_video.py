@@ -203,9 +203,9 @@ def _refine_play_query(query: str) -> str:
     # Vague query — try Gemini intelligent expansion
     user_prefs = _get_user_media_preferences()
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
         prompt = f"""Convert this vague YouTube search into a SPECIFIC, high-quality search query.
 
@@ -286,11 +286,11 @@ def _get_transcript(video_id: str) -> str | None:
         return None
 
 def _summarize_with_gemini(transcript: str, video_url: str) -> str:
-    import google.generativeai as genai
+    from core import gemini_compat as genai
 
     genai.configure(api_key=_get_api_key())
     model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash-lite",
+        model_name="gemini-3.1-flash-lite-preview",
         system_instruction=(
             "You are AXIOM, Tony Stark's AI assistant. "
             "Summarize YouTube video transcripts clearly and concisely. "

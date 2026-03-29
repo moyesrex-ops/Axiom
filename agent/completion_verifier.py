@@ -146,9 +146,9 @@ def verify_goal_completion(
 
     # Use Gemini for deeper verification
     try:
-        import google.generativeai as genai
+        from core import gemini_compat as genai
         genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        model = genai.GenerativeModel("gemini-3.1-flash-lite-preview")
 
         results_summary = []
         for step in completed_steps[:6]:
