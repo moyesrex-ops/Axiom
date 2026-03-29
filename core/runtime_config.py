@@ -231,6 +231,24 @@ DEFAULT_RUNTIME_CONFIG = {
             "startup_prompt_enabled": True,
         }
     },
+    "communications": {
+        "desktop_apps": {
+            "enabled": True,
+        },
+        "email": {
+            "enabled": False,
+            "smtp_host": "",
+            "smtp_port": 587,
+            "from_address": "",
+            "use_tls": True,
+        },
+        "telephony": {
+            "enabled": False,
+            "provider": "twilio",
+            "from_number": "",
+            "default_to_number": "",
+        },
+    },
 }
 
 

@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from core.tool_catalog import canonical_tool_name
 from memory.runtime_store import log_event, log_failure, record_tool_trace
 
 
@@ -62,6 +63,7 @@ _TOOL_BINDINGS: dict[str, ToolBinding] = {
     "lead_researcher": ToolBinding("actions.lead_researcher", "lead_researcher"),
     "swarm_orchestrator": ToolBinding("actions.swarm_orchestrator", "swarm_orchestrator"),
     "crucix_control": ToolBinding("actions.crucix_control", "crucix_control"),
+    "comms_control": ToolBinding("actions.comms_control", "comms_control"),
 }
 
 
@@ -70,7 +72,7 @@ def list_registered_tools() -> list[str]:
 
 
 def has_tool_binding(name: str) -> bool:
-    tool_name = str(name or "").strip()
+    tool_name = canonical_tool_name(name)
     if tool_name in _TOOL_BINDINGS:
         return True
     try:
@@ -82,7 +84,7 @@ def has_tool_binding(name: str) -> bool:
 
 
 def _resolve_callable(name: str) -> tuple[Callable[..., Any], str]:
-    tool_name = str(name or "").strip()
+    tool_name = canonical_tool_name(name)
     binding = _TOOL_BINDINGS.get(tool_name)
     if binding is not None:
         module = importlib.import_module(binding.module_path)
@@ -157,7 +159,7 @@ def execute_tool(
     source: str = "",
     metadata: dict | None = None,
 ) -> str:
-    tool_name = str(name or "").strip()
+    tool_name = canonical_tool_name(name)
     if not tool_name:
         raise ValueError("Tool name is required.")
 

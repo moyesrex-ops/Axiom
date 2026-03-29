@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from core.agent_library import collect_agent_library_status
 from core.autoresearch_bridge import collect_autoresearch_status
 from core.automaton_bridge import collect_automaton_status
+from core.comms_surface import collect_comms_status
 from core.crucix_bridge import collect_crucix_status
 from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
@@ -23,6 +24,7 @@ from core.runtime_config import load_runtime_config
 from core.secret_config import get_gemini_api_key, get_secret
 from core.skill_library import collect_skill_library_status
 from core.symphony_bridge import collect_symphony_status
+from core.tool_catalog import tool_alias_count, tool_catalog_rows
 from core.tradingagents_bridge import collect_tradingagents_status
 
 
@@ -159,6 +161,8 @@ def collect_capabilities() -> dict:
     vane_url = str(research_cfg.get("vane_url", "") or "").strip()
     autonomy_cfg = runtime.get("autonomy", {}) or {}
     crucix = collect_crucix_status()
+    comms = collect_comms_status()
+    tool_rows = tool_catalog_rows()
 
     return {
         "startup_mode": "gemini_first",
@@ -206,6 +210,8 @@ def collect_capabilities() -> dict:
         "telegram_bridge_enabled": bool(telegram_cfg.get("enabled", False)),
         "telegram_bot_configured": _telegram_token_configured(),
         "telegram_allowed_chat_count": len(telegram_cfg.get("allowed_chat_ids", []) or []),
+        "tool_catalog_total": len(tool_rows),
+        "tool_alias_total": tool_alias_count(),
         "skill_library_enabled": bool(skill_library.get("enabled", False)),
         "skill_library_sources_count": int(skill_library.get("sources_count", 0) or 0),
         "skill_library_total_skills": int(skill_library.get("total_skills", 0) or 0),
@@ -288,6 +294,14 @@ def collect_capabilities() -> dict:
         "crucix_api_url": str(crucix.get("server_url", "") or ""),
         "crucix_reachable": bool(crucix.get("reachable", False)),
         "crucix_idea_count": int(crucix.get("idea_count", 0) or 0),
+        "desktop_messaging_ready": bool(comms.get("desktop_messaging_ready", False)),
+        "email_channel_ready": bool((comms.get("email", {}) or {}).get("ready", False)),
+        "email_channel_enabled": bool((comms.get("email", {}) or {}).get("enabled", False)),
+        "email_from_address": str((comms.get("email", {}) or {}).get("from_address", "") or ""),
+        "telephony_provider": str((comms.get("telephony", {}) or {}).get("provider", "") or ""),
+        "sms_channel_ready": bool((comms.get("telephony", {}) or {}).get("sms_ready", False)),
+        "call_channel_ready": bool((comms.get("telephony", {}) or {}).get("call_ready", False)),
+        "telephony_from_number": str((comms.get("telephony", {}) or {}).get("from_number", "") or ""),
     }
 
 
@@ -302,6 +316,7 @@ def format_operator_surface(limit: int = 4) -> str:
         "Deferred work now runs through a shared mission journal with persisted phases, plan revisions, step checkpoints, and event history.",
         "Use cmd_control for real PowerShell, CMD, Bash, or VS Code integrated-terminal work.",
         "Use system_capabilities as the source of truth when there is any doubt about live integrations.",
+        f"Canonical tool catalog: {caps.get('tool_catalog_total', 0)} tools with {caps.get('tool_alias_total', 0)} aliases.",
     ]
 
     if caps["telegram_bridge_enabled"] and caps["telegram_bot_configured"]:
@@ -351,6 +366,12 @@ def format_operator_surface(limit: int = 4) -> str:
         lines.append(
             f"Crucix intelligence engine is {'reachable' if caps.get('crucix_reachable') else 'configured but offline'} at {caps.get('crucix_api_url', 'unknown')}."
         )
+    lines.append(
+        "Communications hub routes Telegram/desktop messaging, SMTP email, and Twilio-style SMS/calls through one control surface."
+    )
+    lines.append(
+        f"Email channel is {'ready' if caps.get('email_channel_ready') else 'not ready'} and telephony is {'ready' if caps.get('call_channel_ready') else 'not ready'}."
+    )
 
     lines.append(
         f"Learning daemon is {'enabled' if caps.get('learning_enabled') and caps.get('learning_auto_run') else 'available but not auto-running'}."
@@ -583,6 +604,15 @@ def format_capability_report() -> str:
             if caps["telegram_bot_configured"]
             else "Telegram bot token: missing"
         ),
+        f"Tool catalog: {caps['tool_catalog_total']} canonical tools | aliases={caps['tool_alias_total']}",
+        f"Desktop messaging automation: {'ready' if caps['desktop_messaging_ready'] else 'not ready'}",
+        f"Email channel enabled: {'yes' if caps['email_channel_enabled'] else 'no'}",
+        f"Email channel ready: {'yes' if caps['email_channel_ready'] else 'no'}",
+        f"Email from address: {caps['email_from_address'] or 'not configured'}",
+        f"Telephony provider: {caps['telephony_provider'] or 'not configured'}",
+        f"SMS channel ready: {'yes' if caps['sms_channel_ready'] else 'no'}",
+        f"Call channel ready: {'yes' if caps['call_channel_ready'] else 'no'}",
+        f"Telephony from number: {caps['telephony_from_number'] or 'not configured'}",
         (
             f"Skill library: {caps['skill_library_total_skills']} indexed skills across {caps['skill_library_sources_count']} sources"
             if caps["skill_library_enabled"] and caps["skill_library_sources_count"]

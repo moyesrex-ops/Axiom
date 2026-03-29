@@ -1,5 +1,7 @@
 from core.capabilities import collect_capabilities, format_capability_report, format_operator_surface
+from core.comms_surface import format_comms_status
 from core.system_context import format_system_context
+from core.tool_catalog import format_brain_surface, format_tool_catalog
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import (
     log_capability,
@@ -53,6 +55,21 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
     if action in ("operator", "routing"):
         report = format_operator_surface(limit=limit)
         log_event("capabilities", "operator_surface", report[:2000])
+        return report
+
+    if action == "brain":
+        report = f"{format_operator_surface(limit=limit)}\n\n{format_brain_surface(limit=limit)}"
+        log_event("capabilities", "brain_surface", report[:2000])
+        return report
+
+    if action == "tools":
+        report = format_tool_catalog(limit=limit * 4 if limit > 0 else 0)
+        log_event("capabilities", "tool_catalog", report[:2000])
+        return report
+
+    if action in ("communications", "comms"):
+        report = format_comms_status()
+        log_event("capabilities", "communications_status", report[:2000])
         return report
 
     if action == "hardware":

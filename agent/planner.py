@@ -46,6 +46,7 @@ ABSOLUTE RULES:
 - Use skill_library when you need an external workflow, coding pattern, debugging checklist, testing playbook, planning-with-files workflow, or last30days-style recent research workflow.
 - Use agent_library when the task needs specialist roles, delegated review, OpenManus-style orchestration guidance, or supervisor-style multi-agent execution.
 - Use self_modifier when the user asks AXIOM to change its own voice, add/edit tools, or modify its own behavior.
+- Use comms_control when the user wants messaging, email, SMS, phone calls, or a unified communications status check.
 - Use persona_control when the task is specifically about PersonaPlex status or configuration.
 - Use lightpanda_control when the task depends on an optional Lightpanda browser backend.
 - Use autoresearch_control when the task depends on the local autoresearch repo, program.md, or experiment log.
@@ -143,6 +144,16 @@ youtube_video
 weather_report
   city: string (required)
 
+comms_control
+  action: "status" | "send" | "message" | "email" | "sms" | "call" | "launch_instructions" (required)
+  channel: string (optional)
+  platform: string (optional)
+  to: string (optional)
+  receiver: string (optional)
+  subject: string (optional)
+  message: string (optional)
+  message_text: string (optional)
+
 flight_finder
   origin: string (required)
   destination: string (required)
@@ -178,7 +189,7 @@ self_modifier
   voice_name: string (optional)
 
 system_capabilities
-  action: "summary" | "status" | "doctor" | "context" | "operator" | "routing" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "crucix" | "learning" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "operator" | "routing" | "brain" | "tools" | "communications" | "comms" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "crucix" | "learning" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 memory_archive
