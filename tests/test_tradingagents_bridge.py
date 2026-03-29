@@ -58,6 +58,12 @@ version = "0.2.2"
         self.assertEqual(status["role_count"], 1)
         self.assertEqual(status["provider"], "google")
 
+    def test_normalize_confidence_converts_fraction_to_percent(self):
+        self.assertEqual(tb._normalize_confidence(0.8), 80.0)
+        self.assertEqual(tb._normalize_confidence(80), 80.0)
+        self.assertEqual(tb._normalize_confidence(180), 100.0)
+        self.assertEqual(tb._normalize_confidence(-2), 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

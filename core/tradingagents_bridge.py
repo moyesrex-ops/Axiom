@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -367,6 +368,108 @@ def _extract_json_line(output: str) -> dict | None:
     return None
 
 
+def _extract_json_object(text: str) -> dict:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        pass
+
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if not match:
+        return {}
+    try:
+        payload = json.loads(match.group(0))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _normalize_confidence(value) -> float:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if 0.0 <= numeric <= 1.0:
+        numeric *= 100.0
+    return max(0.0, min(numeric, 100.0))
+
+
+def _external_market_context_block(ticker: str) -> tuple[str, dict]:
+    sections = []
+    meta = {"crucix_used": False, "mirofish_used": False}
+
+    try:
+        from core.crucix_bridge import format_crucix_market_context
+
+        crucix_block = format_crucix_market_context(ticker, limit=4)
+        if "unavailable" not in crucix_block.lower():
+            sections.append("[Crucix Live Context]\n" + crucix_block)
+            meta["crucix_used"] = True
+    except Exception as error:
+        meta["crucix_error"] = str(error)[:240]
+
+    try:
+        from core.mirofish_bridge import format_mirofish_market_context
+
+        mirofish_block = format_mirofish_market_context(ticker, limit=4)
+        if "unavailable" not in mirofish_block.lower():
+            sections.append("[MiroFish Context]\n" + mirofish_block)
+            meta["mirofish_used"] = True
+    except Exception as error:
+        meta["mirofish_error"] = str(error)[:240]
+
+    return "\n\n".join(section for section in sections if section).strip(), meta
+
+
+def _fuse_market_intelligence(result: dict, context_block: str) -> dict:
+    if not context_block.strip():
+        return {}
+
+    api_key = get_secret("gemini_api_key", ["GOOGLE_API_KEY", "GEMINI_API_KEY"])
+    if not api_key:
+        return {}
+
+    try:
+        import google.generativeai as genai
+
+        runtime = load_runtime_config()
+        text_models = runtime.get("text_models", {}) or {}
+        model_name = (
+            str(text_models.get("fast", "") or "").strip()
+            or str(text_models.get("default", "") or "").strip()
+            or "gemini-2.5-flash"
+        )
+        prompt = (
+            "You are fusing TradingAgents output with live external market context.\n"
+            "Return strict JSON only.\n"
+            '{"action":"buy|sell|hold|avoid","confidence":0,"reason":"short rationale","stop_loss":null,"take_profit":null,"summary":"short fused summary"}\n'
+            "Use BUY or SELL only when the combined evidence is coherent. If the signals conflict, use HOLD or AVOID.\n"
+            "Only include stop_loss and take_profit when they are explicitly justified by the analysis; otherwise use null.\n\n"
+            f"[TRADINGAGENTS RESULT]\n{json.dumps(result, ensure_ascii=False)}\n\n"
+            f"{context_block}"
+        )
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        payload = _extract_json_object(getattr(response, "text", "") or "")
+        if not payload:
+            return {}
+        return {
+            "fusion_action": str(payload.get("action", "") or "").strip().lower(),
+            "fusion_confidence": _normalize_confidence(payload.get("confidence", 0.0) or 0.0),
+            "fusion_reason": str(payload.get("reason", "") or "").strip(),
+            "fusion_stop_loss": payload.get("stop_loss"),
+            "fusion_take_profit": payload.get("take_profit"),
+            "fusion_summary": str(payload.get("summary", "") or "").strip(),
+        }
+    except Exception:
+        return {}
+
+
 def run_tradingagents_analysis(parameters: dict | None = None) -> dict:
     params = parameters or {}
     repo_path = resolve_tradingagents_repo_path()
@@ -487,7 +590,7 @@ print(json.dumps(result, ensure_ascii=False))
     if matching:
         run_file = matching[0].get("path", "")
 
-    return {
+    final_result = {
         "ok": True,
         "ticker": ticker,
         "trade_date": trade_date,
@@ -506,6 +609,11 @@ print(json.dumps(result, ensure_ascii=False))
         "run_file": run_file,
         "output_excerpt": result["output"][:1200],
     }
+    external_context, external_meta = _external_market_context_block(ticker)
+    final_result["external_context"] = external_context
+    final_result["external_context_meta"] = external_meta
+    final_result.update(_fuse_market_intelligence(final_result, external_context))
+    return final_result
 
 
 def format_tradingagents_analysis(result: dict) -> str:
@@ -526,6 +634,17 @@ def format_tradingagents_analysis(result: dict) -> str:
         lines.append(f"Investment plan: {result['investment_plan'][:500]}")
     if result.get("trader_investment_plan"):
         lines.append(f"Trader plan: {result['trader_investment_plan'][:500]}")
+    if result.get("fusion_summary"):
+        lines.append(f"Live context fusion: {result['fusion_summary'][:500]}")
+    if result.get("fusion_action"):
+        lines.append(
+            f"Fused action: {result['fusion_action']}"
+            + (
+                f" | confidence={result['fusion_confidence']:.1f}%"
+                if result.get("fusion_confidence") not in (None, "")
+                else ""
+            )
+        )
     if result.get("run_file"):
         lines.append(f"Run log: {result['run_file']}")
     return "\n".join(lines)

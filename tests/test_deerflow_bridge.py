@@ -88,6 +88,25 @@ class DeerFlowBridgeTests(unittest.TestCase):
         self.assertIn("gemini-2.5-flash-lite", config_text)
         self.assertIn("gemini-2.5-pro", config_text)
 
+    def test_process_env_uses_axiom_managed_cache_dirs(self):
+        repo = self._workspace_dir("deerflow_env")
+        cache_root = self._workspace_dir("deerflow_cache")
+
+        with patch.object(df, "get_gemini_api_key", return_value="secret"), patch.object(
+            df, "_cache_dir", return_value=cache_root
+        ):
+            env = df._deerflow_process_env(repo)
+
+        self.assertEqual(env["GOOGLE_API_KEY"], "secret")
+        self.assertEqual(env["GEMINI_API_KEY"], "secret")
+        self.assertEqual(env["UV_CACHE_DIR"], str(cache_root / "uv"))
+        self.assertEqual(env["XDG_CACHE_HOME"], str(cache_root / "xdg"))
+        self.assertEqual(env["TMP"], str(cache_root / "tmp"))
+        self.assertEqual(env["TEMP"], str(cache_root / "tmp"))
+        self.assertTrue((cache_root / "uv").exists())
+        self.assertTrue((cache_root / "xdg").exists())
+        self.assertTrue((cache_root / "tmp").exists())
+
     def test_run_query_parses_values_stream(self):
         status = {
             "repo_path": "C:\\Users\\moyes\\deer-flow_upstream",

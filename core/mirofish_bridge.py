@@ -438,15 +438,15 @@ def _read_seed_profiles(repo_path: Path | None) -> tuple[list[dict], list[dict]]
 def _market_keywords(asset: str) -> set[str]:
     value = str(asset or "").lower()
     tokens = set(re.findall(r"[a-z0-9]+", value))
-    if "bitcoin" in value or "btc" in tokens:
+    if "bitcoin" in value or "btc" in tokens or "btc" in value:
         tokens.update({"bitcoin", "btc", "crypto", "ethereum", "defi", "memecoins"})
-    if "gold" in value or "xau" in tokens:
+    if "gold" in value or "xau" in tokens or "xau" in value:
         tokens.update({"gold", "inflation", "rates", "fed", "safe havens", "commodities"})
     if "eurusd" in value or ("eur" in tokens and "usd" in tokens):
         tokens.update({"forex", "eur", "usd", "currency", "central banks", "geopolitics"})
     if "usd" in tokens:
         tokens.update({"fed", "rates", "inflation"})
-    if "spy" in tokens or "qqq" in tokens or "stocks" in tokens or "equity" in tokens:
+    if "spy" in tokens or "qqq" in tokens or "spy" in value or "qqq" in value or "stocks" in tokens or "equity" in tokens:
         tokens.update({"tech", "growth", "value", "earnings", "fed", "market"})
     return {token for token in tokens if token}
 

@@ -8,6 +8,8 @@ class TelegramBridgeTests(unittest.TestCase):
     def test_capability_question_detects_optional_integration_query(self):
         self.assertTrue(tb._looks_like_capability_question("can u access your own browser with lightpanda?"))
         self.assertTrue(tb._looks_like_capability_question("do you have access to tradingagents right now?"))
+        self.assertTrue(tb._looks_like_capability_question("do u know how to use the crucix?"))
+        self.assertFalse(tb._looks_like_capability_question("use crucix to scan the market"))
 
     def test_followup_reports_active_task_instead_of_queueing_new_one(self):
         queue = Mock()
@@ -185,6 +187,13 @@ class TelegramBridgeTests(unittest.TestCase):
 
         self.assertEqual(decision["kind"], "chat")
         self.assertEqual(decision["goal"], "how are you")
+
+    def test_operator_mode_keeps_crucix_capability_question_as_chat(self):
+        with patch.object(tb, "_plain_message_mode", return_value="operator"):
+            decision = tb._decide_plain_message_action("Do u know how to use the crucix?", chat_id="42")
+
+        self.assertEqual(decision["kind"], "chat")
+        self.assertEqual(decision["source"], "operator_chat_guard")
 
     def test_operator_mode_keeps_gratitude_as_chat(self):
         with patch.object(tb, "_plain_message_mode", return_value="operator"):

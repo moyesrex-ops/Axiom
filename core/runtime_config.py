@@ -151,6 +151,14 @@ DEFAULT_RUNTIME_CONFIG = {
         "repo_path": "",
         "api_url": "http://127.0.0.1:3117",
         "auto_start": False,
+        "inherit_axiom_gemini": True,
+        "llm_provider": "gemini",
+        "llm_model": "",
+    },
+    "trading": {
+        "require_demo_account_for_live_orders": True,
+        "max_order_volume": 0.10,
+        "default_sl_tp_pips": 50,
     },
     "computer_use": {
         "confirm_physical_actions": False,

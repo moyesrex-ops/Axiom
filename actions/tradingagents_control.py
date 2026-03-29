@@ -50,12 +50,25 @@ def _classify_trade_action(text: str) -> str:
 def _build_mt5_handoff(result: dict, params: dict) -> dict:
     signal_text = "\n".join(
         str(result.get(key, "") or "")
-        for key in ("final_trade_decision", "decision", "trader_investment_plan", "investment_plan")
+        for key in (
+            "fusion_summary",
+            "fusion_reason",
+            "final_trade_decision",
+            "decision",
+            "trader_investment_plan",
+            "investment_plan",
+        )
     )
-    action = _classify_trade_action(signal_text)
-    confidence = _extract_first_number(r"confidence[^0-9]{0,12}(\d{1,3}(?:\.\d+)?)", signal_text)
-    stop_loss = _extract_first_number(r"(?:stop[- ]?loss|sl)[^0-9]{0,12}(-?\d+(?:\.\d+)?)", signal_text)
-    take_profit = _extract_first_number(r"(?:take[- ]?profit|tp)[^0-9]{0,12}(-?\d+(?:\.\d+)?)", signal_text)
+    action = str(result.get("fusion_action", "") or "").strip().lower() or _classify_trade_action(signal_text)
+    confidence = result.get("fusion_confidence")
+    if confidence in (None, ""):
+        confidence = _extract_first_number(r"confidence[^0-9]{0,12}(\d{1,3}(?:\.\d+)?)", signal_text)
+    stop_loss = result.get("fusion_stop_loss")
+    if stop_loss in (None, ""):
+        stop_loss = _extract_first_number(r"(?:stop[- ]?loss|sl)[^0-9]{0,12}(-?\d+(?:\.\d+)?)", signal_text)
+    take_profit = result.get("fusion_take_profit")
+    if take_profit in (None, ""):
+        take_profit = _extract_first_number(r"(?:take[- ]?profit|tp)[^0-9]{0,12}(-?\d+(?:\.\d+)?)", signal_text)
 
     symbol = str(params.get("symbol", "") or result.get("ticker", "") or "").strip().upper()
     volume = float(params.get("volume", 0.01) or 0.01)
@@ -122,6 +135,8 @@ def _format_mt5_handoff(result: dict, handoff: dict, execution_result: str = "")
         lines.append("Execution mode: live MT5 order requested.")
     if execution_result:
         lines.append(f"MT5 result: {execution_result}")
+    if result.get("fusion_summary"):
+        lines.append(f"Live context fusion: {result['fusion_summary'][:500]}")
     if result.get("run_file"):
         lines.append(f"TradingAgents run log: {result['run_file']}")
     return "\n".join(lines)

@@ -88,6 +88,53 @@ def _mirofish_context_block(asset: str, source_mode: str = "auto") -> tuple[str,
     }
 
 
+def _crucix_context_block(asset: str, source_mode: str = "auto") -> tuple[str, dict]:
+    mode = str(source_mode or "auto").strip().lower()
+    if mode != "auto":
+        return "", {"used": False, "reason": f"source_mode={mode}"}
+
+    try:
+        from core.crucix_bridge import get_crucix_market_context
+    except Exception as error:
+        return "", {"used": False, "reason": f"bridge_unavailable: {error}"}
+
+    context = get_crucix_market_context(asset=asset, limit=6)
+    if not context.get("available"):
+        return "", {"used": False, "reason": "repo_or_api_unavailable"}
+
+    lines = [
+        f"Crucix API reachable: {'yes' if context.get('reachable') else 'no'}",
+        f"Crucix last sweep: {context.get('last_sweep') or 'unknown'}",
+        (
+            f"Crucix LLM layer: {'enabled' if context.get('llm_enabled') else 'disabled'}"
+            + (f" ({context.get('llm_provider')})" if context.get("llm_provider") else "")
+        ),
+    ]
+    for row in context.get("market_snapshot", [])[:4]:
+        lines.append(f"- Snapshot: {row}")
+    if context.get("relevant_headlines"):
+        lines.append("Relevant Crucix headlines:")
+        for row in context["relevant_headlines"][:4]:
+            lines.append(f"- {row.get('headline', '')}")
+    if context.get("urgent_posts"):
+        lines.append("Relevant Crucix urgent posts:")
+        for row in context["urgent_posts"][:2]:
+            lines.append(f"- {row.get('text', '')}")
+    if context.get("ideas"):
+        lines.append("Relevant Crucix live ideas:")
+        for row in context["ideas"][:2]:
+            title = str(row.get("title", "") or row.get("summary", "")).strip()
+            if title:
+                lines.append(f"- {title}")
+
+    return "\n".join(line for line in lines if str(line).strip()), {
+        "used": True,
+        "reachable": bool(context.get("reachable")),
+        "headline_count": len(context.get("relevant_headlines", []) or []),
+        "idea_count": len(context.get("ideas", []) or []),
+    }
+
+
 def _run_swarm_agent(model, role: str, asset: str, soul_lessons: str, context: str) -> str:
     """
     Run a single swarm agent with a specific role and return its analysis.
@@ -235,6 +282,7 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
                 return
 
         mirofish_context, mirofish_meta = _mirofish_context_block(asset, source_mode=source_mode)
+        crucix_context, crucix_meta = _crucix_context_block(asset, source_mode=source_mode)
         combined_context = str(context or "").strip()
         if mirofish_context:
             combined_context = (
@@ -242,10 +290,20 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
                 if combined_context
                 else f"[MiroFish External Context]\n{mirofish_context}"
             )
+        if crucix_context:
+            combined_context = (
+                f"{combined_context}\n\n[Crucix Live Context]\n{crucix_context}"
+                if combined_context
+                else f"[Crucix Live Context]\n{crucix_context}"
+            )
 
         if speak:
-            if mirofish_meta.get("used"):
+            if mirofish_meta.get("used") and crucix_meta.get("used"):
+                speak(f"Initiating swarm prediction sequence for {asset}. I'm layering live Crucix and MiroFish context into the debate.")
+            elif mirofish_meta.get("used"):
                 speak(f"Initiating swarm prediction sequence for {asset}. I'm layering MiroFish context into the debate.")
+            elif crucix_meta.get("used"):
+                speak(f"Initiating swarm prediction sequence for {asset}. I'm layering Crucix live context into the debate.")
             else:
                 speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
 
@@ -270,6 +328,7 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
 
             full_report = (
                 f"═══ AXIOM SWARM PREDICTION: {asset} ═══\n\n"
+                f"{'── CRUCIX LIVE CONTEXT ──\\n' + crucix_context + '\\n\\n' if crucix_context else ''}"
                 f"{'── EXTERNAL MIROFISH CONTEXT ──\\n' + mirofish_context + '\\n\\n' if mirofish_context else ''}"
                 f"── MACRO-ECONOMIST ──\n{macro_report}\n\n"
                 f"── TECHNICAL ANALYST ──\n{technical_report}\n\n"
@@ -290,7 +349,7 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
                     consensus[:2000],
                     kind="research",
                     source="axiom.predict_market",
-                    metadata={"asset": asset, "source_mode": source_mode, **mirofish_meta},
+                    metadata={"asset": asset, "source_mode": source_mode, **mirofish_meta, **crucix_meta},
                 )
                 save_to_nexus(f"Macro Report: {asset}", macro_report[:1000], kind="research", source="axiom.predict_market")
                 save_to_nexus(f"Technical Report: {asset}", technical_report[:1000], kind="research", source="axiom.predict_market")
@@ -302,6 +361,14 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
                         kind="research",
                         source="mirofish.seed",
                         metadata={"asset": asset, **mirofish_meta},
+                    )
+                if crucix_context:
+                    save_to_nexus(
+                        f"Crucix Context: {asset}",
+                        crucix_context[:2500],
+                        kind="research",
+                        source="crucix.market_context",
+                        metadata={"asset": asset, **crucix_meta},
                     )
             except Exception:
                 pass

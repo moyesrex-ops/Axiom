@@ -14,3 +14,4 @@ memory/axiom_state.db
 .vscode/
 .idea/
 tests/_tmp/
+.axiom_cache/

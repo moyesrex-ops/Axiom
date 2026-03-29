@@ -79,6 +79,20 @@ def _bridge_logs_dir(name: str) -> Path:
     raise PermissionError("AXIOM could not create an integration log directory.")
 
 
+def _cache_dir(name: str) -> Path:
+    candidates = [
+        BASE_DIR / ".axiom_cache" / name,
+        Path.home() / ".cache" / name,
+    ]
+    for candidate in candidates:
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+        except Exception:
+            continue
+    raise PermissionError("AXIOM could not create an integration cache directory.")
+
+
 def _windows_creationflags() -> list[int]:
     if os.name != "nt":
         return [0]
@@ -349,6 +363,19 @@ def _deerflow_process_env(repo: Path) -> dict:
     config_path = _deerflow_config_path(repo)
     if config_path and config_path.exists():
         env["DEER_FLOW_CONFIG_PATH"] = str(config_path)
+    try:
+        cache_root = _cache_dir("deerflow")
+        uv_cache_dir = cache_root / "uv"
+        xdg_cache_home = cache_root / "xdg"
+        temp_dir = cache_root / "tmp"
+        for path in (uv_cache_dir, xdg_cache_home, temp_dir):
+            path.mkdir(parents=True, exist_ok=True)
+        env["UV_CACHE_DIR"] = str(uv_cache_dir)
+        env.setdefault("XDG_CACHE_HOME", str(xdg_cache_home))
+        env["TMP"] = str(temp_dir)
+        env["TEMP"] = str(temp_dir)
+    except Exception:
+        pass
     env.setdefault("PYTHONIOENCODING", "utf-8")
     env.setdefault("PYTHONUTF8", "1")
     env.setdefault("NO_COLOR", "1")

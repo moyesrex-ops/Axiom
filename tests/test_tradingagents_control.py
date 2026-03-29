@@ -55,6 +55,39 @@ class TradingAgentsControlTests(unittest.TestCase):
         self.assertEqual(call["volume"], 0.02)
         self.assertIn("MT5 result: Order placed! Ticket: 123", report)
 
+    @patch.object(tac, "save_to_nexus")
+    @patch.object(tac, "log_event")
+    @patch.object(tac, "mt5_trading", return_value="Order placed! Ticket: 321")
+    @patch.object(tac, "run_tradingagents_analysis")
+    def test_execute_mt5_prefers_fused_live_context_fields(self, run_mock, mt5_mock, _log_mock, _save_mock):
+        result = self._analysis_result()
+        result.update(
+            {
+                "fusion_action": "sell",
+                "fusion_confidence": 81.0,
+                "fusion_stop_loss": 1.101,
+                "fusion_take_profit": 1.077,
+                "fusion_summary": "Crucix and MiroFish context support a bearish handoff.",
+            }
+        )
+        run_mock.return_value = result
+
+        report = tac.tradingagents_control(
+            {
+                "action": "execute_mt5",
+                "ticker": "EURUSD",
+                "confirm": True,
+                "volume": 0.02,
+            }
+        )
+
+        mt5_mock.assert_called_once()
+        call = mt5_mock.call_args.args[0]
+        self.assertEqual(call["action"], "sell")
+        self.assertEqual(call["stop_loss"], 1.101)
+        self.assertEqual(call["take_profit"], 1.077)
+        self.assertIn("Live context fusion: Crucix and MiroFish context support a bearish handoff.", report)
+
 
 if __name__ == "__main__":
     unittest.main()

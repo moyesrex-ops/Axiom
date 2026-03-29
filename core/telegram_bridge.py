@@ -142,6 +142,47 @@ _EXPLICIT_TOOL_NAMES = {
     "autoresearch_control",
 }
 _PLAIN_MESSAGE_MODES = {"operator", "smart", "legacy", "chat_only"}
+_CAPABILITY_TOKENS = (
+    "lightpanda",
+    "tradingagents",
+    "mt5",
+    "telegram",
+    "mirofish",
+    "automaton",
+    "skill",
+    "skills",
+    "agent",
+    "agents",
+    "paperclip",
+    "openfang",
+    "symphony",
+    "lossless",
+    "deerflow",
+    "crucix",
+    "dexter",
+    "pentagi",
+    "autoresearch",
+    "codex",
+    "gemini",
+)
+_CAPABILITY_FRAMES = (
+    "can you",
+    "can u",
+    "do you",
+    "do u",
+    "are you",
+    "have you",
+    "how do you",
+    "what is",
+    "what's",
+    "whats",
+    "know how to",
+    "able to",
+    "access",
+    "have access",
+    "work with",
+    "familiar with",
+)
 
 
 def _telegram_config() -> dict:
@@ -227,6 +268,8 @@ def _normalize_text(text: str) -> str:
 
 def _looks_like_capability_question(text: str) -> bool:
     normalized = _normalize_text(text)
+    if not normalized:
+        return False
     return any(
         phrase in normalized
         for phrase in (
@@ -242,29 +285,20 @@ def _looks_like_capability_question(text: str) -> bool:
             "can u deploy",
             "do you have access",
             "do u have access",
+            "do you know how to use",
+            "do u know how to use",
+            "do you know how to work with",
+            "do u know how to work with",
+            "are you familiar with",
+            "have you used",
         )
     ) or (
-        any(
-            token in normalized
-            for token in (
-                "lightpanda",
-                "tradingagents",
-                "mt5",
-                "telegram",
-                "mirofish",
-                "automaton",
-                "skill",
-                "skills",
-                "agent",
-                "agents",
-                "paperclip",
-                "openfang",
-                "symphony",
-                "lossless",
-                "deerflow",
-            )
+        any(token in normalized for token in _CAPABILITY_TOKENS)
+        and any(frame in normalized for frame in _CAPABILITY_FRAMES)
+        and (
+            normalized.endswith("?")
+            or normalized.startswith(("can ", "do ", "are ", "have ", "how ", "what "))
         )
-        and any(token in normalized for token in ("can you", "can u", "do you", "do u", "able to", "access", "deploy", "use"))
     )
 
 

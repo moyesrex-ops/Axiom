@@ -3,6 +3,7 @@ import threading
 import time
 from typing import Optional
 from memory.runtime_store import log_event
+from core.runtime_config import load_runtime_config
 
 try:
     import MetaTrader5 as mt5
@@ -42,6 +43,19 @@ _monitor_thread: Optional[threading.Thread] = None
 POSITION_MONITOR_POLL_INTERVAL = 15
 MAX_SOUL_LESSONS_IN_PROMPT = 5
 DEFAULT_SL_TP_PIPS = 50
+
+
+def _trading_config() -> dict:
+    return load_runtime_config().get("trading", {}) or {}
+
+
+def _account_is_demo(account_info) -> bool:
+    if account_info is None or mt5 is None:
+        return False
+    server = str(getattr(account_info, "server", "") or "").lower()
+    trade_mode = int(getattr(account_info, "trade_mode", -1) or -1)
+    demo_mode = int(getattr(mt5, "ACCOUNT_TRADE_MODE_DEMO", 0))
+    return "demo" in server or trade_mode == demo_mode
 
 
 def _position_monitor_loop():
@@ -144,7 +158,8 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
                 f"MT5 Connected. Balance: {account_info.balance:.2f}, "
                 f"Equity: {account_info.equity:.2f}, Margin: {account_info.margin:.2f}, "
                 f"Open positions: {len(positions)}, Floating P/L: {floating_pl:.2f}"
-            )
+            ),
+            f"Server: {account_info.server} | Demo account: {'yes' if _account_is_demo(account_info) else 'no'}",
         ]
 
         if positions:
@@ -224,6 +239,35 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         if speak:
             speak(f"Executing {action} order for {volume} lots on {symbol}.")
 
+        account_info = mt5.account_info()
+        if account_info is None:
+            mt5.shutdown()
+            message = f"Failed to get MT5 account info: {mt5.last_error()}"
+            log_event("trading", "mt5_account_info_failed", message)
+            return message
+
+        trading_cfg = _trading_config()
+        max_volume = float(trading_cfg.get("max_order_volume", 0.10) or 0.10)
+        require_demo = bool(trading_cfg.get("require_demo_account_for_live_orders", True))
+        if require_demo and not _account_is_demo(account_info):
+            mt5.shutdown()
+            message = (
+                f"Live MT5 execution is restricted to demo accounts. "
+                f"Current server: {account_info.server or 'unknown'}"
+            )
+            log_event("trading", "mt5_demo_guard_blocked", message, metadata={"server": str(account_info.server or "")})
+            return message
+        if max_volume > 0 and volume > max_volume:
+            mt5.shutdown()
+            message = f"Requested MT5 volume {volume:.2f} exceeds configured max_order_volume {max_volume:.2f}."
+            log_event(
+                "trading",
+                "mt5_volume_guard_blocked",
+                message,
+                metadata={"volume": float(volume), "max_volume": max_volume, "symbol": symbol},
+            )
+            return message
+
         symbol_info = mt5.symbol_info(symbol)
         if symbol_info is None:
             mt5.shutdown()
@@ -250,7 +294,8 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         price = tick.ask if action == "buy" else tick.bid
         point = symbol_info.point
 
-        pip_distance = DEFAULT_SL_TP_PIPS * 10 * point
+        default_sl_tp_pips = int(trading_cfg.get("default_sl_tp_pips", DEFAULT_SL_TP_PIPS) or DEFAULT_SL_TP_PIPS)
+        pip_distance = default_sl_tp_pips * 10 * point
         if stop_loss is None:
             stop_loss = round(
                 price - pip_distance if action == "buy" else price + pip_distance,
