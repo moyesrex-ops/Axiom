@@ -1,0 +1,76 @@
+<svg width="1200" height="760" viewBox="0 0 1200 760" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">AXIOM Gemini Native Runtime</title>
+  <desc id="desc">Diagram showing AXIOM channels feeding the executor, the shared Gemini native layer, and local plus Gemini-native tool paths.</desc>
+  <style>
+    .bg { fill: #f5f2ea; }
+    .card { fill: #fffdfa; stroke: #231f20; stroke-width: 2; rx: 18; }
+    .core { fill: #d7eadf; }
+    .native { fill: #d8e7f7; }
+    .local { fill: #f0e0c8; }
+    .warn { fill: #f8d8c8; }
+    .title { font: 700 28px "Segoe UI", Arial, sans-serif; fill: #231f20; }
+    .sub { font: 600 18px "Segoe UI", Arial, sans-serif; fill: #231f20; }
+    .txt { font: 15px "Segoe UI", Arial, sans-serif; fill: #231f20; }
+    .mono { font: 14px Consolas, "Courier New", monospace; fill: #231f20; }
+    .line { stroke: #231f20; stroke-width: 2.5; fill: none; marker-end: url(#arrow); }
+    .dash { stroke-dasharray: 10 8; }
+  </style>
+  <defs>
+    <marker id="arrow" viewBox="0 0 12 12" refX="10" refY="6" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M1 1L11 6L1 11V1Z" fill="#231f20"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1200" height="760"/>
+
+  <text class="title" x="56" y="58">AXIOM Gemini Native Runtime</text>
+  <text class="txt" x="56" y="88">One shared path for planner JSON contracts, live grounded search, and Gemini-native built-in tools.</text>
+
+  <rect class="card core" x="56" y="126" width="248" height="152"/>
+  <text class="sub" x="84" y="164">Channels</text>
+  <text class="txt" x="84" y="198">Voice Live session</text>
+  <text class="txt" x="84" y="226">Telegram operator chat</text>
+  <text class="txt" x="84" y="254">Deferred mission queue</text>
+
+  <rect class="card core" x="360" y="126" width="290" height="152"/>
+  <text class="sub" x="388" y="164">Core Runtime</text>
+  <text class="txt" x="388" y="198">Planner with structured JSON output</text>
+  <text class="txt" x="388" y="226">Executor + mission journal</text>
+  <text class="txt" x="388" y="254">Unified tool runtime</text>
+
+  <rect class="card native" x="706" y="102" width="438" height="210"/>
+  <text class="sub" x="734" y="140">Shared Gemini Native Layer</text>
+  <text class="mono" x="734" y="172">core/gemini_native.py</text>
+  <text class="txt" x="734" y="206">Grounded Google Search</text>
+  <text class="txt" x="734" y="234">URL Context</text>
+  <text class="txt" x="734" y="262">Code Execution</text>
+  <text class="txt" x="734" y="290">Google Maps grounding</text>
+
+  <rect class="card warn" x="706" y="340" width="438" height="122"/>
+  <text class="sub" x="734" y="378">Gated File Search</text>
+  <text class="txt" x="734" y="410">Local files can be uploaded to Gemini File Search only when</text>
+  <text class="txt" x="734" y="436">explicitly confirmed or enabled in runtime config.</text>
+
+  <rect class="card local" x="56" y="402" width="594" height="248"/>
+  <text class="sub" x="84" y="440">Local Execution Layer</text>
+  <text class="txt" x="84" y="474">Browser / desktop / terminal / files</text>
+  <text class="txt" x="84" y="502">Local computer_use observe-act-verify loop</text>
+  <text class="txt" x="84" y="530">Imported sidecars: DeerFlow, TradingAgents, Crucix, MiroFish, more</text>
+  <text class="txt" x="84" y="558">SQLite memory, task events, task steps, trace learning</text>
+  <text class="txt" x="84" y="600">AXIOM can now choose between:</text>
+  <text class="txt" x="108" y="628">1. local tool path</text>
+  <text class="txt" x="108" y="652">2. Gemini-native tool path</text>
+  <text class="txt" x="108" y="676">3. hybrid local + Gemini path</text>
+
+  <rect class="card native" x="706" y="506" width="438" height="144"/>
+  <text class="sub" x="734" y="544">Live Voice Path</text>
+  <text class="txt" x="734" y="578">Gemini Live keeps AXIOM's function declarations</text>
+  <text class="txt" x="734" y="606">and now also exposes built-in Google Search directly.</text>
+
+  <path class="line" d="M304 202H360"/>
+  <path class="line" d="M650 202H706"/>
+  <path class="line" d="M506 278V354"/>
+  <path class="line" d="M706 576H650"/>
+  <path class="line dash" d="M876 312V340"/>
+  <path class="line dash" d="M876 462V506"/>
+</svg>

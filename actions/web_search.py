@@ -11,6 +11,7 @@ from pathlib import Path
 
 import requests
 
+from core import gemini_native as gn
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_gemini_api_key
 
@@ -54,18 +55,8 @@ def _fast_model_name() -> str:
 
 
 def _gemini_search(query: str) -> str:
-    from google import genai
-
-    client = genai.Client(api_key=_get_api_key())
-    response = client.models.generate_content(
-        model=_fast_model_name(),
-        contents=query,
-        config={"tools": [{"google_search": {}}]}
-    )
-    text = ""
-    for part in response.candidates[0].content.parts:
-        if hasattr(part, "text") and part.text:
-            text += part.text
+    result = gn.google_search(query, model=_fast_model_name())
+    text = gn.format_google_search_result(result)
     if not text.strip():
         raise ValueError("Empty response")
     return text.strip()

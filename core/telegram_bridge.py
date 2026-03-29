@@ -7,6 +7,7 @@ from typing import Callable
 
 import requests
 
+from core import gemini_native as gn
 from actions.system_capabilities import system_capabilities
 from agent.task_queue import TaskPriority, get_queue
 from core.capabilities import format_capability_status
@@ -584,14 +585,10 @@ def _heuristic_plain_message_decision(text: str, chat_id: str = "") -> dict:
 
 
 def _llm_plain_message_decision(text: str, chat_id: str = "") -> dict:
-    api_key = get_secret("gemini_api_key", ["GEMINI_API_KEY"])
-    if not api_key:
+    if not get_secret("gemini_api_key", ["GEMINI_API_KEY"]):
         return {}
 
     try:
-        import google.generativeai as genai
-
-        genai.configure(api_key=api_key)
         active_task = _active_task_snapshot(chat_id)
         last_result = _last_task_result(chat_id)
 
@@ -614,8 +611,6 @@ def _llm_plain_message_decision(text: str, chat_id: str = "") -> dict:
         prompt = (
             "You are routing one Telegram message for AXIOM.\n"
             "Decide whether AXIOM should reply conversationally or execute work through its full task system.\n"
-            "Return strict JSON only with this schema:\n"
-            "{\"kind\":\"chat|task\",\"goal\":\"rewritten explicit task or original message\",\"confidence\":0.0,\"reason\":\"short reason\"}\n\n"
             "Choose \"task\" when the user wants AXIOM to do real work: run commands, control apps, operate browser, "
             "change settings, use hardware, research, build, fix, create files, use skills/agents, or continue a prior artifact/action.\n"
             "Choose \"chat\" for normal conversation, small talk, capability questions, status questions, clarification, or discussion.\n"
@@ -625,9 +620,20 @@ def _llm_plain_message_decision(text: str, chat_id: str = "") -> dict:
             + f"[MESSAGE]\n{text.strip()}"
         )
 
-        model = genai.GenerativeModel(_text_model_name())
-        response = model.generate_content(prompt)
-        payload = _extract_json_object(getattr(response, "text", "") or "")
+        payload = gn.generate_json(
+            prompt,
+            model=gn.router_model_name(),
+            schema={
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["chat", "task"]},
+                    "goal": {"type": "string"},
+                    "confidence": {"type": "number"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["kind", "goal", "confidence", "reason"],
+            },
+        )
         if not payload:
             return {}
         kind = str(payload.get("kind", "") or "").strip().lower()

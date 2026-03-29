@@ -43,6 +43,10 @@ Core ideas:
 - Deferred work now runs through one shared mission journal with persisted phases, plan revisions, step checkpoints, and event history.
 - Every tool call is written into SQLite tool traces so AXIOM can mine recurring success and failure patterns.
 - A background learning daemon converts recent traces into routing insights stored in durable memory.
+- Gemini-native capability calls now go through one shared backend layer in `core/gemini_native.py` instead of being scattered across unrelated modules.
+- Voice Live now exposes Gemini's built-in Google Search directly alongside AXIOM's custom function tools.
+- Planner and Telegram task-vs-chat routing now use structured JSON generation instead of prompt-for-JSON plus loose parsing.
+- AXIOM now has a first-class `gemini_native` tool for grounded Search, URL Context, Code Execution, Maps grounding, and gated File Search.
 - `computer_use` is now a higher-level desktop operator that can observe the screen, find targets by description, click or type into them, and verify outcomes.
 - Crucix is wired in as a first-class intelligence sidecar for live status, briefs, ideas, and boot management.
 - Telegram plain-message routing can now use a local-first classifier path through Ollama when available before escalating to Gemini.
@@ -99,6 +103,30 @@ The repo is organized around a stable core path and controlled optional expansio
 
 ---
 
+## Gemini Native Runtime
+
+AXIOM now has a clearer split between:
+
+- local tools that act on the machine directly
+- Gemini-native tools that use Google-provided capabilities through the GenAI SDK
+- hybrid flows where AXIOM uses Gemini for grounding or reasoning and local tools for actual execution
+
+<p align="center">
+  <img src="assets/gemini-native-runtime.svg" alt="AXIOM Gemini native runtime diagram" width="100%">
+</p>
+
+What this means in practice:
+
+- `web_search` now routes its grounded search path through Gemini's native Google Search tool and surfaces citations more cleanly.
+- `gemini_native` is a first-class runtime tool for `search`, `url_context`, `code_execution`, `maps`, and `file_search`.
+- File Search is intentionally gated behind `confirm_upload=true` unless you opt into default uploads in runtime config, because it can upload local files to Google's File Search service.
+- The live voice session stays on the current Gemini Live audio model for stability, but now also exposes built-in Google Search directly in the live tool list.
+- URL Context, Code Execution, Maps grounding, and File Search run through the shared backend layer rather than the Live API because that keeps the architecture stable across voice, Telegram, and deferred execution.
+
+This is a better fit for AXIOM than stuffing every Google feature directly into `main.py`. The shared runtime keeps those capabilities visible to the planner, executor, and operator docs without tying them only to voice.
+
+---
+
 ## What Works Today
 
 | Tier | Included | What to Expect |
@@ -150,6 +178,7 @@ Public repo files:
 - `config/api_keys.json` is ignored by git.
 - `config/runtime.json` is the tracked shared config.
 - `config/runtime.local.json` is ignored by git and is the right place for machine-specific paths and local boot preferences.
+- `config/runtime.local.json` is also the right place to override Gemini-native models or opt into default File Search uploads for trusted local workflows.
 
 ---
 

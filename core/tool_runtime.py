@@ -18,6 +18,7 @@ _TOOL_BINDINGS: dict[str, ToolBinding] = {
     "open_app": ToolBinding("actions.open_app", "open_app"),
     "web_search": ToolBinding("actions.web_search", "web_search", "Search completed."),
     "browser_control": ToolBinding("actions.browser_control", "browser_control", "Browser action completed."),
+    "gemini_native": ToolBinding("actions.gemini_native", "gemini_native"),
     "file_controller": ToolBinding("actions.file_controller", "file_controller", "File operation completed."),
     "cmd_control": ToolBinding("actions.cmd_control", "cmd_control", "Command executed."),
     "code_helper": ToolBinding("actions.code_helper", "code_helper"),

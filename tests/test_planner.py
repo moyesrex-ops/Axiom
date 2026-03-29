@@ -13,6 +13,7 @@ class PlannerPromptTests(unittest.TestCase):
         self.assertIn("lossless_claw_control", PLANNER_PROMPT)
         self.assertIn("computer_use", PLANNER_PROMPT)
         self.assertIn("crucix_control", PLANNER_PROMPT)
+        self.assertIn("gemini_native", PLANNER_PROMPT)
         self.assertIn("planning-with-files workflow", PLANNER_PROMPT)
         self.assertIn("OpenManus-style orchestration guidance", PLANNER_PROMPT)
 

@@ -3,7 +3,7 @@ import re
 import sys
 from pathlib import Path
 
-from core.secret_config import get_gemini_api_key
+from core import gemini_native as gn
 from memory.runtime_store import log_event, search_knowledge_items
 
 def get_base_dir() -> Path:
@@ -25,6 +25,7 @@ ABSOLUTE RULES:
 - Use deerflow_control when DeerFlow is live and the task benefits from a deeper super-agent harness with planning/subagents.
 - NEVER reference previous step results in parameters. Every step is independent.
 - Use web_search for ANY information retrieval, research, or current data.
+- Use gemini_native when Gemini's built-in tools are the best fit: grounded Google Search with citations, URL Context over specific URLs/docs/repos, Code Execution for reasoning/calculation, Google Maps grounding, or File Search over explicitly approved local files.
 - Use system_capabilities if the task depends on installed integrations or current environment status.
 - Use memory_archive when the task depends on saved preferences, archived instructions, or earlier durable knowledge.
 - Use skill_library when you need an external workflow, coding pattern, debugging checklist, testing playbook, planning-with-files workflow, or last30days-style recent research workflow.
@@ -54,6 +55,20 @@ web_search
   aspect: string (optional, for compare mode)
   context: string (optional, extra guidance for deep/social search)
   sources: list of strings (optional, for deep search: web | discussions | academic)
+
+gemini_native
+  action: "status" | "search" | "url_context" | "code_execution" | "maps" | "file_search" (required)
+  query: string (for search/maps/file_search)
+  prompt: string (for url_context/code_execution/maps/file_search)
+  urls: list[string] (for url_context)
+  model: string (optional model override)
+  latitude: number (optional for maps)
+  longitude: number (optional for maps)
+  enable_widget: boolean (optional for maps)
+  files: list[string] (for file_search; only use when the user explicitly wants Gemini to reason over specific local files)
+  confirm_upload: boolean (required for file_search unless runtime config already allows uploads)
+  persist_store: boolean (optional for file_search)
+  timeout: integer (optional for file_search)
 
 browser_control
   action: "go_to" | "search" | "click" | "type" | "scroll" | "fill_form" | "smart_click" | "smart_type" | "get_text" | "press" | "current_state" | "close_tab" | "youtube_play" | "close" (required)
@@ -119,7 +134,7 @@ flight_finder
   date: string (required)
 
 code_helper
-  action: "write" | "edit" | "run" | "explain" (required)
+  action: "write" | "edit" | "run" | "explain" | "build" | "optimize" (required)
   description: string (required)
   language: string (optional)
   output_path: string (optional)
@@ -386,12 +401,6 @@ OUTPUT — return ONLY valid JSON, no markdown, no explanation, no code blocks:
   ]
 }
 """
-
-
-def _get_api_key() -> str:
-    return get_gemini_api_key()
-
-
 _VAGUE_WORDS = {
     "a", "an", "the", "some", "something", "nice", "good", "cool",
     "interesting", "random", "any", "stuff", "thing", "things",
@@ -400,6 +409,66 @@ _VAGUE_WORDS = {
     "for", "on", "youtube", "video", "videos", "watch", "open",
     "look", "up", "about", "please", "can", "you", "would",
 }
+
+PLAN_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "goal": {"type": "string"},
+        "steps": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "step": {"type": "integer", "minimum": 1},
+                    "tool": {"type": "string"},
+                    "description": {"type": "string"},
+                    "parameters": {"type": "object"},
+                    "critical": {"type": "boolean"},
+                },
+                "required": ["step", "tool", "description", "parameters", "critical"],
+            },
+        },
+    },
+    "required": ["goal", "steps"],
+}
+
+
+def _normalize_plan(plan: dict, goal: str) -> dict:
+    raw_steps = list(plan.get("steps", []) or [])[:5]
+    normalized_steps = []
+
+    for index, step in enumerate(raw_steps, start=1):
+        tool = str(step.get("tool", "") or "").strip() or "web_search"
+        description = str(step.get("description", "") or goal).strip() or goal
+        parameters = step.get("parameters", {})
+        if not isinstance(parameters, dict):
+            parameters = {}
+        critical = bool(step.get("critical", False))
+
+        if tool == "generated_code":
+            print(f"[Planner] WARNING generated_code detected in step {index} - replacing with code_helper")
+            tool = "code_helper"
+            parameters = {
+                "action": "build",
+                "description": description[:400],
+                "language": "python",
+            }
+
+        normalized_steps.append(
+            {
+                "step": index,
+                "tool": tool,
+                "description": description,
+                "parameters": parameters,
+                "critical": critical,
+            }
+        )
+
+    return {
+        "goal": str(plan.get("goal", "") or goal).strip() or goal,
+        "steps": normalized_steps,
+    }
 
 
 def _goal_is_vague(goal: str) -> bool:
@@ -456,10 +525,6 @@ def _reformulate_goal(goal: str, memory_context: str = "") -> str:
         return goal
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=_get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-flash-lite")
-
         prompt = f"""You are a query reformulator for an AI assistant.
 The user gave a VAGUE or GENERIC request. Your job is to make it SPECIFIC and ACTIONABLE.
 
@@ -482,8 +547,10 @@ Examples:
 Original goal: {goal}
 Reformulated goal:"""
 
-        response = model.generate_content(prompt)
-        reformulated = response.text.strip().strip('"').strip("'").strip()
+        reformulated = gn.generate_text(
+            prompt,
+            model=gn.router_model_name(),
+        ).strip().strip('"').strip("'").strip()
 
         if reformulated and len(reformulated) > 3 and reformulated.lower() != goal.lower():
             print(f"[Planner] 🔄 Reformulated: {goal!r} → {reformulated!r}")
@@ -497,19 +564,11 @@ Reformulated goal:"""
 
 
 def create_plan(goal: str, context: str = "") -> dict:
-    import google.generativeai as genai
-
     # Phase 1: Recall user preferences and relevant memory
     memory_context = _recall_user_preferences(goal)
 
     # Phase 1: Reformulate vague goals into specific ones
     enriched_goal = _reformulate_goal(goal, memory_context=memory_context)
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash-lite",
-        system_instruction=PLANNER_PROMPT
-    )
 
     user_input = f"Goal: {enriched_goal}"
     if memory_context:
@@ -518,21 +577,13 @@ def create_plan(goal: str, context: str = "") -> dict:
         user_input += f"\n\nExecution Context: {context}"
 
     try:
-        response = model.generate_content(user_input)
-        text     = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-
-        plan = json.loads(text)
-
-        if "steps" not in plan or not isinstance(plan["steps"], list):
-            raise ValueError("Invalid plan structure")
-
-        for step in plan["steps"]:
-            if step.get("tool") in ("generated_code",):
-                print(f"[Planner] ⚠️ generated_code detected in step {step.get('step')} — replacing with code_helper")
-                desc = step.get("description", goal)
-                step["tool"] = "code_helper"
-                step["parameters"] = {"action": "build", "description": desc[:400], "language": "python"}
+        plan = gn.generate_json(
+            user_input,
+            model=gn.planning_model_name(),
+            schema=PLAN_RESPONSE_SCHEMA,
+            system_instruction=PLANNER_PROMPT,
+        )
+        plan = _normalize_plan(plan, goal)
 
         print(f"[Planner] ✅ Draft Plan: {len(plan['steps'])} steps")
         for s in plan["steps"]:
@@ -540,23 +591,12 @@ def create_plan(goal: str, context: str = "") -> dict:
 
         return plan
 
-    except json.JSONDecodeError as e:
-        print(f"[Planner] ⚠️ JSON parse failed: {e}")
-        return _fallback_plan(goal)
     except Exception as e:
         print(f"[Planner] ⚠️ Planning failed: {e}")
         return _fallback_plan(goal)
 
 
 def reflect_and_improve(goal: str, plan: dict, context: str = "") -> dict:
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=PLANNER_PROMPT
-    )
-    
     print(f"[Planner] 🧠 Reflecting on draft plan for: {goal[:50]}...")
     
     prompt = f"""Goal: {goal}
@@ -575,21 +615,14 @@ CRITIQUE AND IMPROVE the draft plan.
 Return the final improved plan in JSON format ONLY, adhering strictly to the response rules."""
 
     try:
-        response = model.generate_content(prompt)
-        text     = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-        
-        improved_plan = json.loads(text)
-        
-        for step in improved_plan.get("steps", []):
-            if step.get("tool") in ("generated_code",):
-                step["tool"] = "code_helper"
-                step["parameters"] = {
-                    "action": "build",
-                    "description": step.get("description", goal)[:400],
-                    "language": "python",
-                }
-                
+        improved_plan = gn.generate_json(
+            prompt,
+            model=gn.reflection_model_name(),
+            schema=PLAN_RESPONSE_SCHEMA,
+            system_instruction=PLANNER_PROMPT,
+        )
+        improved_plan = _normalize_plan(improved_plan, goal)
+
         print(f"[Planner] ✨ Improved Plan: {len(improved_plan['steps'])} steps")
         return improved_plan
         
@@ -615,14 +648,6 @@ def _fallback_plan(goal: str) -> dict:
 
 
 def replan(goal: str, completed_steps: list, failed_step: dict, error: str, context: str = "") -> dict:
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash",
-        system_instruction=PLANNER_PROMPT
-    )
-
     completed_summary = "\n".join(
         f"  - Step {s['step']} ({s['tool']}): DONE" for s in completed_steps
     )
@@ -641,19 +666,13 @@ Error: {error}
 Create a REVISED plan for the remaining work only. Do not repeat completed steps."""
 
     try:
-        response = model.generate_content(prompt)
-        text     = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-        plan     = json.loads(text)
-
-        for step in plan.get("steps", []):
-            if step.get("tool") == "generated_code":
-                step["tool"] = "code_helper"
-                step["parameters"] = {
-                    "action": "build",
-                    "description": step.get("description", goal)[:400],
-                    "language": "python",
-                }
+        plan = gn.generate_json(
+            prompt,
+            model=gn.reflection_model_name(),
+            schema=PLAN_RESPONSE_SCHEMA,
+            system_instruction=PLANNER_PROMPT,
+        )
+        plan = _normalize_plan(plan, goal)
 
         print(f"[Planner] 🔄 Revised plan: {len(plan['steps'])} steps")
         return plan

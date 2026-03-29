@@ -153,6 +153,7 @@ def collect_capabilities() -> dict:
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
     research_cfg = runtime.get("research", {}) or {}
+    gemini_native_cfg = runtime.get("gemini_native", {}) or {}
     routing_cfg = runtime.get("routing", {}) or {}
     learning_cfg = runtime.get("learning", {}) or {}
     vane_url = str(research_cfg.get("vane_url", "") or "").strip()
@@ -269,6 +270,11 @@ def collect_capabilities() -> dict:
         "lossless_claw_plugin_manifest_present": bool(lossless_claw.get("plugin_manifest_present", False)),
         "lossless_claw_database_path": str(lossless_claw.get("database_path", "") or ""),
         "research_backend": str(research_cfg.get("backend", "axiom") or "axiom"),
+        "gemini_native_enabled": bool(gemini_native_cfg.get("enabled", True)),
+        "gemini_native_live_search_enabled": bool(gemini_native_cfg.get("enable_live_google_search", True)),
+        "gemini_native_url_context_model": str(gemini_native_cfg.get("url_context_model", "") or ""),
+        "gemini_native_code_execution_model": str(gemini_native_cfg.get("code_execution_model", "") or ""),
+        "gemini_native_file_search_uploads_allowed": bool(gemini_native_cfg.get("allow_file_search_uploads", False)),
         "vane_url": vane_url,
         "vane_reachable": bool(vane_url) and _is_tcp_reachable(vane_url),
         "routing_local_provider": str(routing_cfg.get("local_provider", "ollama") or "ollama"),
@@ -332,6 +338,10 @@ def format_operator_surface(limit: int = 4) -> str:
     if caps.get("deerflow_repo_path"):
         lines.append(
             f"DeerFlow sidecar is detected and its gateway is {'reachable' if caps.get('deerflow_proxy_reachable') else 'offline'}."
+        )
+    if caps.get("gemini_native_enabled"):
+        lines.append(
+            "Gemini native tools are enabled for grounded Search, URL Context, Code Execution, Maps grounding, and gated File Search."
         )
     if caps.get("lightpanda_repo_path"):
         lines.append(
@@ -483,6 +493,25 @@ def format_capability_status() -> str:
             else f"Deep research backend: {caps['research_backend']}"
         ),
         (
+            "Gemini native tools: enabled"
+            if caps["gemini_native_enabled"]
+            else "Gemini native tools: disabled"
+        ),
+        (
+            f"Gemini native live search: {'enabled' if caps['gemini_native_live_search_enabled'] else 'disabled'}"
+        ),
+        (
+            f"Gemini native URL Context model: {caps['gemini_native_url_context_model'] or 'default'}"
+        ),
+        (
+            f"Gemini native Code Execution model: {caps['gemini_native_code_execution_model'] or 'default'}"
+        ),
+        (
+            "Gemini native File Search uploads: allowed by default"
+            if caps["gemini_native_file_search_uploads_allowed"]
+            else "Gemini native File Search uploads: gated behind confirm_upload"
+        ),
+        (
             f"Crucix: API {'up' if caps['crucix_reachable'] else 'down'} at {caps['crucix_api_url']} | ideas={caps['crucix_idea_count']}"
             if caps["crucix_repo_path"]
             else "Crucix: repo not found"
@@ -623,6 +652,15 @@ def format_capability_report() -> str:
         f"lossless-claw openclaw command: {'ready' if caps['lossless_claw_openclaw_available'] else 'missing'}",
         f"lossless-claw plugin manifest: {'yes' if caps['lossless_claw_plugin_manifest_present'] else 'no'}",
         f"Research backend: {caps['research_backend']}",
+        f"Gemini native tools enabled: {'yes' if caps['gemini_native_enabled'] else 'no'}",
+        f"Gemini native live search: {'enabled' if caps['gemini_native_live_search_enabled'] else 'disabled'}",
+        f"Gemini native URL Context model: {caps['gemini_native_url_context_model'] or 'default'}",
+        f"Gemini native Code Execution model: {caps['gemini_native_code_execution_model'] or 'default'}",
+        (
+            "Gemini native File Search uploads: allowed by default"
+            if caps["gemini_native_file_search_uploads_allowed"]
+            else "Gemini native File Search uploads: gated behind confirm_upload"
+        ),
         (
             f"Vane endpoint: reachable at {caps['vane_url']}"
             if caps["vane_reachable"]

@@ -13,6 +13,7 @@ from google import genai
 from google.genai import types
 import time
 from ui import AxiomUI
+from core import gemini_native as gn
 from memory.memory_manager import (
     load_memory,
     update_memory,
@@ -38,6 +39,7 @@ from actions.code_helper      import code_helper
 from actions.codex_builder    import codex_builder
 from actions.dev_agent        import dev_agent
 from actions.web_search       import web_search as web_search_action
+from actions.gemini_native    import gemini_native
 from actions.computer_control import computer_control
 from actions.nexus_memory     import memory_archive
 from actions.deep_analyzer    import deep_analyzer
@@ -259,6 +261,33 @@ TOOL_DECLARATIONS = [
             "sources": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional source filters for deep/Vane research: web | discussions | academic"}
         },
         "required": ["query"]
+    }
+},
+{
+    "name": "gemini_native",
+    "description": (
+        "Uses Gemini's native built-in tools directly through AXIOM's shared runtime. "
+        "Use this when grounded Google Search with citations, URL Context over specific URLs or GitHub docs, "
+        "Code Execution for calculations or data reasoning, Google Maps grounding, or Gemini File Search over "
+        "explicitly approved local files is a better fit than a local wrapper."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | search | url_context | code_execution | maps | file_search"},
+            "query": {"type": "STRING", "description": "Query for search/maps/file_search"},
+            "prompt": {"type": "STRING", "description": "Prompt for url_context/code_execution/maps/file_search"},
+            "urls": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Specific URLs for URL Context"},
+            "model": {"type": "STRING", "description": "Optional Gemini model override"},
+            "latitude": {"type": "NUMBER", "description": "Optional latitude for Google Maps grounding"},
+            "longitude": {"type": "NUMBER", "description": "Optional longitude for Google Maps grounding"},
+            "enable_widget": {"type": "BOOLEAN", "description": "Optional Google Maps widget token request"},
+            "files": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Explicit local file paths for Gemini File Search"},
+            "confirm_upload": {"type": "BOOLEAN", "description": "Required to allow local file uploads for Gemini File Search unless runtime config already permits it"},
+            "persist_store": {"type": "BOOLEAN", "description": "Whether to keep the Gemini File Search store after the query"},
+            "timeout": {"type": "INTEGER", "description": "Optional file-search indexing timeout in seconds"},
+        },
+        "required": ["action"]
     }
 },
     {
@@ -1466,12 +1495,16 @@ class AxiomLive:
 
         self.live_model = runtime.get("live_model") or DEFAULT_LIVE_MODEL
         voice_name = runtime.get("voice_name") or "Charon"
+        live_tools = []
+        if gn.live_search_enabled():
+            live_tools.append({"google_search": {}})
+        live_tools.append({"function_declarations": TOOL_DECLARATIONS})
         config_kwargs = dict(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction=sys_prompt,
-            tools=[{"function_declarations": TOOL_DECLARATIONS}],
+            tools=live_tools,
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
