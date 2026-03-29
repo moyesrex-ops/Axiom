@@ -1,6 +1,8 @@
+import io
+import sys
 import unittest
 
-from agent.planner import PLANNER_PROMPT
+from agent.planner import PLANNER_PROMPT, _safe_print
 
 
 class PlannerPromptTests(unittest.TestCase):
@@ -16,6 +18,20 @@ class PlannerPromptTests(unittest.TestCase):
         self.assertIn("gemini_native", PLANNER_PROMPT)
         self.assertIn("planning-with-files workflow", PLANNER_PROMPT)
         self.assertIn("OpenManus-style orchestration guidance", PLANNER_PROMPT)
+
+    def test_safe_print_handles_cp1252_streams(self):
+        buffer = io.BytesIO()
+        stdout = io.TextIOWrapper(buffer, encoding="cp1252")
+        original_stdout = sys.stdout
+        try:
+            sys.stdout = stdout
+            _safe_print("[Planner] unicode fallback \U0001f9e0")
+            stdout.flush()
+        finally:
+            sys.stdout = original_stdout
+
+        rendered = buffer.getvalue().decode("cp1252")
+        self.assertIn("[Planner] unicode fallback", rendered)
 
 
 if __name__ == "__main__":

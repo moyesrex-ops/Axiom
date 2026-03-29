@@ -198,7 +198,8 @@ def generate_text(
     tools: list[Any] | None = None,
     tool_config: Any = None,
 ) -> str:
-    response = get_client().models.generate_content(
+    client = get_client()
+    response = client.models.generate_content(
         model=model,
         contents=_non_empty_string(prompt),
         config=_build_config(
@@ -219,7 +220,8 @@ def generate_json(
     tools: list[Any] | None = None,
     tool_config: Any = None,
 ) -> dict:
-    response = get_client().models.generate_content(
+    client = get_client()
+    response = client.models.generate_content(
         model=model,
         contents=_non_empty_string(prompt),
         config=_build_config(
@@ -299,7 +301,8 @@ def _format_citations(citations: list[dict], *, label: str = "Sources") -> str:
 
 def google_search(prompt: str, *, model: str = "") -> dict:
     resolved_model = _non_empty_string(model) or search_model_name()
-    response = get_client().models.generate_content(
+    client = get_client()
+    response = client.models.generate_content(
         model=resolved_model,
         contents=_non_empty_string(prompt),
         config=_build_config(
@@ -355,7 +358,8 @@ def url_context(prompt: str, urls: list[str] | tuple[str, ...] | str, *, model: 
         raise GeminiNativeError("URL Context needs at least one URL.")
     resolved_model = _non_empty_string(model) or url_context_model_name()
     joined_urls = "\n".join(f"- {url}" for url in url_list)
-    response = get_client().models.generate_content(
+    client = get_client()
+    response = client.models.generate_content(
         model=resolved_model,
         contents=f"{_non_empty_string(prompt)}\n\nURLs:\n{joined_urls}",
         config=_build_config(
@@ -397,7 +401,8 @@ def format_url_context_result(result: dict) -> str:
 
 def code_execution(prompt: str, *, model: str = "") -> dict:
     resolved_model = _non_empty_string(model) or code_execution_model_name()
-    response = get_client().models.generate_content(
+    client = get_client()
+    response = client.models.generate_content(
         model=resolved_model,
         contents=_non_empty_string(prompt),
         config=_build_config(
@@ -457,7 +462,8 @@ def google_maps(prompt: str, *, latitude: float | None = None, longitude: float 
                 lat_lng=types.LatLng(latitude=float(latitude), longitude=float(longitude))
             )
         )
-    response = get_client().models.generate_content(
+    client = get_client()
+    response = client.models.generate_content(
         model=resolved_model,
         contents=_non_empty_string(prompt),
         config=_build_config(

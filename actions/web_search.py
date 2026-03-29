@@ -22,6 +22,21 @@ def get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 BASE_DIR        = get_base_dir()
+
+
+def _safe_print(message: str) -> None:
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        stream = getattr(sys, "stdout", None)
+        if stream is None:
+            return
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        safe = text.encode(encoding, errors="backslashreplace").decode(encoding, errors="replace")
+        stream.write(safe + "\n")
+
+
 def _get_api_key() -> str:
     return get_gemini_api_key()
 
@@ -104,10 +119,10 @@ Expanded query:"""
         response = model.generate_content(prompt)
         expanded = response.text.strip().strip('"').strip("'").strip()
         if expanded and len(expanded) > len(query) and len(expanded) < 200:
-            print(f"[WebSearch] 🔄 Query expanded: {query!r} → {expanded!r}")
+            _safe_print(f"[WebSearch] Query expanded: {query!r} -> {expanded!r}")
             return expanded
     except Exception as e:
-        print(f"[WebSearch] ⚠️ Query expansion failed: {e}")
+        _safe_print(f"[WebSearch] WARNING query expansion failed: {e}")
 
     return query
 
@@ -322,7 +337,7 @@ def _compare(items: list, aspect: str) -> str:
     try:
         return _gemini_search(query)
     except Exception as e:
-        print(f"[WebSearch] ⚠️ Gemini compare failed: {e}")
+        _safe_print(f"[WebSearch] WARNING Gemini compare failed: {e}")
         all_results = {}
         for item in items:
             try:
@@ -399,7 +414,7 @@ def deep_search(
                 ),
             )
         except Exception as e:
-            print(f"[DeepSearch] ⚠️ Vane backend failed: {e}")
+            _safe_print(f"[DeepSearch] WARNING Vane backend failed: {e}")
 
     try:
         import google.generativeai as genai
@@ -430,7 +445,7 @@ Question: {query}
                 else:
                     sub_queries.append(repo_query)
 
-        print(f"[DeepSearch] 🔍 Sub-queries: {sub_queries}")
+        _safe_print(f"[DeepSearch] Sub-queries: {sub_queries}")
 
         # Step 2: Search each sub-query
         all_content = []
@@ -451,7 +466,7 @@ Question: {query}
                     else:
                         all_content.append(f"[Source {i}] {title}\n{snippet}")
             except Exception as e:
-                print(f"[DeepSearch] Sub-query {i} failed: {e}")
+                _safe_print(f"[DeepSearch] Sub-query {i} failed: {e}")
 
         if not all_content:
             # Fall back to basic Gemini search
@@ -495,8 +510,8 @@ INSTRUCTIONS:
         return f"[DEEP SEARCH] {query}\n\n{result}"
 
     except Exception as e:
-        print(f"[DeepSearch] ❌ Failed: {e}")
-        print("[DeepSearch] ⚠️ Falling back to basic Gemini search.")
+        _safe_print(f"[DeepSearch] FAILED: {e}")
+        _safe_print("[DeepSearch] WARNING falling back to basic Gemini search.")
         return _gemini_search(query)
 
 
@@ -565,7 +580,7 @@ def analyze_social_page(url: str, query: str, speak=None) -> str:
     if speak:
         speak(f"Analysing social page for: {query}")
 
-    print(f"[SocialAnalyzer] 🌐 Scraping: {url}")
+    _safe_print(f"[SocialAnalyzer] Scraping: {url}")
 
     if _is_reddit_url(url):
         raw_content = _scrape_reddit_page(url)
@@ -635,7 +650,7 @@ def web_search(
     if player:
         player.write_log(f"[Search] {query or ', '.join(items)}")
 
-    print(f"[WebSearch] 🔍 Query: {query!r}  Mode: {mode}")
+    _safe_print(f"[WebSearch] Query: {query!r}  Mode: {mode}")
 
     # Deep Perplexity-style search
     if mode == "deep":
@@ -651,9 +666,9 @@ def web_search(
 
     try:
         if mode == "compare" and items:
-            print(f"[WebSearch] 📊 Comparing: {items}")
+            _safe_print(f"[WebSearch] Comparing: {items}")
             result = _compare(items, aspect)
-            print("[WebSearch] ✅ Compare done.")
+            _safe_print("[WebSearch] Compare done.")
             return result
 
         research_cfg = _research_config()
@@ -667,12 +682,12 @@ def web_search(
                     system_instructions=str(params.get("context", "") or "").strip(),
                 )
             except Exception as e:
-                print(f"[WebSearch] ⚠️ Vane backend failed ({e}), falling back to local search.")
+                _safe_print(f"[WebSearch] WARNING Vane backend failed ({e}), falling back to local search.")
 
-        print("[WebSearch] 🌐 Gemini search...")
+        _safe_print("[WebSearch] Gemini search...")
         try:
             result = _gemini_search(query)
-            print("[WebSearch] ✅ Gemini OK.")
+            _safe_print("[WebSearch] Gemini OK.")
             # Auto-save important searches to Nexus Brain
             try:
                 from memory.memory_manager import save_to_nexus
@@ -686,12 +701,12 @@ def web_search(
                 pass
             return result
         except Exception as e:
-            print(f"[WebSearch] ⚠️ Gemini failed ({e}), trying DDG...")
+            _safe_print(f"[WebSearch] WARNING Gemini failed ({e}), trying DDG...")
             results = _ddg_search(query)
             result  = _format_ddg(query, results)
-            print(f"[WebSearch] ✅ DDG: {len(results)} results.")
+            _safe_print(f"[WebSearch] DDG: {len(results)} results.")
             return result
 
     except Exception as e:
-        print(f"[WebSearch] ❌ Failed: {e}")
+        _safe_print(f"[WebSearch] FAILED: {e}")
         return f"Search failed, sir: {e}"

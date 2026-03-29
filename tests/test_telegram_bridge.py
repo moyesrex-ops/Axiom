@@ -193,6 +193,18 @@ class TelegramBridgeTests(unittest.TestCase):
         self.assertEqual(decision["kind"], "chat")
         self.assertEqual(decision["goal"], "smooth thanks")
 
+    def test_operator_mode_routes_explicit_tool_instruction_to_task(self):
+        with patch.object(tb, "_llm_plain_message_decision", return_value={"kind": "chat", "goal": "use gemini_native status"}), patch.object(
+            tb, "_plain_message_mode", return_value="operator"
+        ):
+            decision = tb._decide_plain_message_action(
+                "use gemini_native status and tell me whether live google search is enabled",
+                chat_id="42",
+            )
+
+        self.assertEqual(decision["kind"], "task")
+        self.assertEqual(decision["source"], "operator_explicit_tool")
+
     def test_render_task_completion_message_drops_robotic_prefix(self):
         message = tb._render_task_completion_message(
             "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green."

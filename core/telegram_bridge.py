@@ -120,6 +120,27 @@ _TASK_HINTS = (
     "sell ",
     "find ",
 )
+_EXPLICIT_TOOL_NAMES = {
+    "gemini_native",
+    "web_search",
+    "browser_control",
+    "file_controller",
+    "cmd_control",
+    "computer_use",
+    "computer_control",
+    "computer_settings",
+    "code_helper",
+    "codex_builder",
+    "system_capabilities",
+    "memory_archive",
+    "skill_library",
+    "agent_library",
+    "tradingagents_control",
+    "crucix_control",
+    "lightpanda_control",
+    "deerflow_control",
+    "autoresearch_control",
+}
 _PLAIN_MESSAGE_MODES = {"operator", "smart", "legacy", "chat_only"}
 
 
@@ -315,9 +336,19 @@ def _looks_like_task_request(text: str) -> bool:
     normalized = _normalize_text(text)
     if not normalized or normalized.startswith("/"):
         return False
+    if _looks_like_explicit_tool_instruction(normalized):
+        return True
     if any(normalized.startswith(hint) for hint in _TASK_HINTS):
         return True
     return any(f" {hint}" in f" {normalized}" for hint in _TASK_HINTS)
+
+
+def _looks_like_explicit_tool_instruction(text: str) -> bool:
+    normalized = _normalize_text(text)
+    if not normalized.startswith("use "):
+        return False
+    target = normalized[4:].split(" ", 1)[0].strip(".,:;!?")
+    return target in _EXPLICIT_TOOL_NAMES or "_" in target
 
 
 def _load_prompt_text() -> str:
@@ -680,6 +711,13 @@ def _decide_plain_message_action(text: str, chat_id: str = "") -> dict:
             }
         return _heuristic_plain_message_decision(original, chat_id=chat_id)
     if mode == "operator":
+        if _looks_like_explicit_tool_instruction(original):
+            return {
+                "kind": "task",
+                "goal": _contextualize_task_goal(chat_id, original),
+                "source": "operator_explicit_tool",
+            }
+
         if (
             _looks_like_chat_message(original)
             or _looks_like_capability_question(original)

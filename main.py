@@ -247,10 +247,14 @@ TOOL_DECLARATIONS = [
             "required": ["app_name"]
         }
     },
-{
-    "name": "web_search",
-    "description": "Searches the web for any information. Use mode='deep' for Perplexity-style multi-source research. If a Vane backend is configured it may be used automatically for cited deep answers. Use mode='social' with query=URL to analyze a Reddit/Twitter/X page and extract strategies.",
-    "parameters": {
+    {
+        "name": "web_search",
+        "description": (
+            "Searches the web through AXIOM's richer search path. Use this for deep research, compare mode, social-page analysis, "
+            "or when AXIOM should persist/search through its own research workflow. In live voice sessions, prefer Gemini's built-in "
+            "Google Search for lightweight current factual lookups when that is sufficient."
+        ),
+        "parameters": {
         "type": "OBJECT",
         "properties": {
             "query":   {"type": "STRING", "description": "Search query or URL (for social mode)"},

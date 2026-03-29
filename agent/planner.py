@@ -13,6 +13,21 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
+
+
+def _safe_print(message: str) -> None:
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        stream = getattr(sys, "stdout", None)
+        if stream is None:
+            return
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        safe = text.encode(encoding, errors="backslashreplace").decode(encoding, errors="replace")
+        stream.write(safe + "\n")
+
+
 PLANNER_PROMPT = """You are the planning module of AXIOM, a personal AI assistant.
 Your job: break any user goal into a sequence of steps using ONLY the tools listed below.
 
@@ -511,7 +526,7 @@ def _recall_user_preferences(goal: str) -> str:
             sections.append("Relevant prior knowledge:\n" + "\n".join(archive_lines))
         return "\n".join(sections)
     except Exception as e:
-        print(f"[Planner] ⚠️ Memory recall failed: {e}")
+        _safe_print(f"[Planner] WARNING memory recall failed: {e}")
         return ""
 
 
@@ -553,12 +568,12 @@ Reformulated goal:"""
         ).strip().strip('"').strip("'").strip()
 
         if reformulated and len(reformulated) > 3 and reformulated.lower() != goal.lower():
-            print(f"[Planner] 🔄 Reformulated: {goal!r} → {reformulated!r}")
+            _safe_print(f"[Planner] Reformulated: {goal!r} -> {reformulated!r}")
             log_event("planner", "goal_reformulated", f"{goal} → {reformulated}")
             return reformulated
 
     except Exception as e:
-        print(f"[Planner] ⚠️ Reformulation failed: {e}")
+        _safe_print(f"[Planner] WARNING reformulation failed: {e}")
 
     return goal
 
@@ -585,19 +600,19 @@ def create_plan(goal: str, context: str = "") -> dict:
         )
         plan = _normalize_plan(plan, goal)
 
-        print(f"[Planner] ✅ Draft Plan: {len(plan['steps'])} steps")
+        _safe_print(f"[Planner] Draft plan: {len(plan['steps'])} steps")
         for s in plan["steps"]:
-            print(f"  Step {s['step']}: [{s['tool']}] {s['description']}")
+            _safe_print(f"  Step {s['step']}: [{s['tool']}] {s['description']}")
 
         return plan
 
     except Exception as e:
-        print(f"[Planner] ⚠️ Planning failed: {e}")
+        _safe_print(f"[Planner] WARNING planning failed: {e}")
         return _fallback_plan(goal)
 
 
 def reflect_and_improve(goal: str, plan: dict, context: str = "") -> dict:
-    print(f"[Planner] 🧠 Reflecting on draft plan for: {goal[:50]}...")
+    _safe_print(f"[Planner] Reflecting on draft plan for: {goal[:50]}...")
     
     prompt = f"""Goal: {goal}
     
@@ -623,16 +638,16 @@ Return the final improved plan in JSON format ONLY, adhering strictly to the res
         )
         improved_plan = _normalize_plan(improved_plan, goal)
 
-        print(f"[Planner] ✨ Improved Plan: {len(improved_plan['steps'])} steps")
+        _safe_print(f"[Planner] Improved plan: {len(improved_plan['steps'])} steps")
         return improved_plan
         
     except Exception as e:
-        print(f"[Planner] ⚠️ Reflection failed (using draft): {e}")
+        _safe_print(f"[Planner] WARNING reflection failed (using draft): {e}")
         return plan
 
 
 def _fallback_plan(goal: str) -> dict:
-    print("[Planner] 🔄 Fallback plan")
+    _safe_print("[Planner] Fallback plan")
     return {
         "goal": goal,
         "steps": [
@@ -674,8 +689,8 @@ Create a REVISED plan for the remaining work only. Do not repeat completed steps
         )
         plan = _normalize_plan(plan, goal)
 
-        print(f"[Planner] 🔄 Revised plan: {len(plan['steps'])} steps")
+        _safe_print(f"[Planner] Revised plan: {len(plan['steps'])} steps")
         return plan
     except Exception as e:
-        print(f"[Planner] ⚠️ Replan failed: {e}")
+        _safe_print(f"[Planner] WARNING replan failed: {e}")
         return _fallback_plan(goal)

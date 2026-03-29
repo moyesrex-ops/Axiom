@@ -32,6 +32,21 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
+
+
+def _safe_print(message: str) -> None:
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        stream = getattr(sys, "stdout", None)
+        if stream is None:
+            return
+        encoding = getattr(stream, "encoding", None) or "utf-8"
+        safe = text.encode(encoding, errors="backslashreplace").decode(encoding, errors="replace")
+        stream.write(safe + "\n")
+
+
 _TRIVIAL_TOOL_RESULTS = {
     "",
     "done.",
@@ -144,7 +159,7 @@ def _inject_context(params: dict, tool: str, step_results: dict, goal: str = "")
                 combined = "\n\n---\n\n".join(all_results)
                 translated = _translate_to_goal_language(combined, goal)
                 params["content"] = translated
-                print("[Executor] Injected translated content")
+                _safe_print("[Executor] Injected translated content")
 
     return params
 
@@ -172,7 +187,7 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
         model = genai.GenerativeModel("gemini-2.5-flash")
 
         target_lang = _detect_language(goal)
-        print(f"[Executor] Translating to: {target_lang}")
+        _safe_print(f"[Executor] Translating to: {target_lang}")
 
         prompt = (
             f"You are a professional translator. "
@@ -186,10 +201,10 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
         )
         response = model.generate_content(prompt)
         translated = response.text.strip()
-        print(f"[Executor] Translation done ({target_lang})")
+        _safe_print(f"[Executor] Translation done ({target_lang})")
         return translated
     except Exception as e:
-        print(f"[Executor] Translation failed: {e}")
+        _safe_print(f"[Executor] Translation failed: {e}")
         return content
 
 def _call_tool(
@@ -489,7 +504,7 @@ class AgentExecutor:
             if speak: speak("High task volume detected. Pacing myself.")
             import time; time.sleep(3)
 
-        print(f"\n[Executor] Goal: {goal}")
+        _safe_print(f"\n[Executor] Goal: {goal}")
         base_task_metadata = dict(task_metadata or {})
         plan_revision = 0
 
@@ -603,7 +618,7 @@ class AgentExecutor:
         direct = _direct_tool_for_goal(goal, specialist_context=specialist_context)
         if direct:
             tool, params = direct
-            print(f"[Executor] Direct route: [{tool}] {params}")
+            _safe_print(f"[Executor] Direct route: [{tool}] {params}")
             try:
                 _publish_plan(
                     {
@@ -677,7 +692,7 @@ class AgentExecutor:
                 )
                 return summary
             except Exception as error:
-                print(f"[Executor] Direct route failed, falling back to planner: {error}")
+                _safe_print(f"[Executor] Direct route failed, falling back to planner: {error}")
                 _notify(
                     "direct_route_failed",
                     f"Direct route failed: {str(error)[:300]}",
@@ -769,7 +784,7 @@ class AgentExecutor:
 
                 params = _inject_context(params, tool, step_results, goal=goal)
 
-                print(f"\n[Executor] Step {step_num}: [{tool}] {desc}")
+                _safe_print(f"\n[Executor] Step {step_num}: [{tool}] {desc}")
 
                 attempt = 1
                 step_ok = False
@@ -809,7 +824,7 @@ class AgentExecutor:
                         end_task_tracking(success=True)
                         step_results[step_num] = result
                         completed_steps.append(step)
-                        print(f"[Executor] Step {step_num} done: {str(result)[:100]}")
+                        _safe_print(f"[Executor] Step {step_num} done: {str(result)[:100]}")
                         _notify(
                             "step_completed",
                             f"Step {step_num} completed with {tool}.",
@@ -833,7 +848,7 @@ class AgentExecutor:
                         except Exception:
                             pass
                         error_msg = str(e)
-                        print(f"[Executor] Step {step_num} attempt {attempt} failed: {error_msg}")
+                        _safe_print(f"[Executor] Step {step_num} attempt {attempt} failed: {error_msg}")
                         recovery = analyze_error(step, error_msg, attempt=attempt, max_attempts=3)
                         decision = recovery.get("decision", ErrorDecision.REPLAN)
                         if isinstance(decision, str):
@@ -886,7 +901,7 @@ class AgentExecutor:
                             continue
 
                         elif decision == ErrorDecision.SKIP:
-                            print(f"[Executor] Skipping step {step_num}")
+                            _safe_print(f"[Executor] Skipping step {step_num}")
                             step_results[step_num] = "Skipped by recovery policy."
                             completed_steps.append(step)
                             _notify(
@@ -959,7 +974,7 @@ class AgentExecutor:
                                     step_ok = True
                                     break
                                 except Exception as fix_err:
-                                    print(f"[Executor] Fix failed: {fix_err}")
+                                    _safe_print(f"[Executor] Fix failed: {fix_err}")
                                     _notify(
                                         "recovery_step_failed",
                                         f"Recovery step failed: {str(fix_err)[:300]}",
@@ -1017,7 +1032,7 @@ class AgentExecutor:
 
                     if not report.is_complete and report.confidence < 0.6 and replan_attempts < self.MAX_REPLAN_ATTEMPTS:
                         # Verification says incomplete; try to fix
-                        print(f"[Executor] WARNING verifier flagged incomplete ({report.confidence:.0%}): {report.missing_items}")
+                        _safe_print(f"[Executor] WARNING verifier flagged incomplete ({report.confidence:.0%}): {report.missing_items}")
                         _notify(
                             "verification_incomplete",
                             f"Verification flagged missing items: {', '.join(report.missing_items[:3])}",
@@ -1057,7 +1072,7 @@ class AgentExecutor:
                     )
 
                 except Exception as verify_error:
-                    print(f"[Executor] WARNING verification error (non-blocking): {verify_error}")
+                    _safe_print(f"[Executor] WARNING verification error (non-blocking): {verify_error}")
                     _notify(
                         "verification_error",
                         f"Verification raised a non-blocking error: {str(verify_error)[:300]}",

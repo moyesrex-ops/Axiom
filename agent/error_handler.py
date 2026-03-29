@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from enum import Enum
 
+from core import gemini_native as gn
+
 
 def get_base_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -12,9 +14,6 @@ def get_base_dir() -> Path:
 
 
 BASE_DIR        = get_base_dir()
-API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
-
-
 class ErrorDecision(Enum):
     RETRY       = "retry"
     SKIP        = "skip"
@@ -47,11 +46,17 @@ Return ONLY valid JSON:
   "user_message": "Short message to tell the user (max 15 words)"
 }
 """
-
-
-def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+ERROR_ANALYST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "decision": {"type": "string", "enum": ["retry", "skip", "replan", "abort"]},
+        "reason": {"type": "string"},
+        "fix_suggestion": {"type": "string"},
+        "max_retries": {"type": "integer"},
+        "user_message": {"type": "string"},
+    },
+    "required": ["decision", "reason", "fix_suggestion", "max_retries", "user_message"],
+}
 
 
 def analyze_error(
@@ -60,8 +65,6 @@ def analyze_error(
     attempt: int = 1,
     max_attempts: int = 2
 ) -> dict:
-    import google.generativeai as genai
-
     # If we've already retried enough, escalate to replan
     if attempt >= max_attempts:
         print(f"[ErrorHandler] Max attempts reached for step {step.get('step')} - forcing replan")
@@ -85,12 +88,6 @@ def analyze_error(
             "user_message":  "Trying a different approach."
         }
 
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(
-        model_name="gemini-2.5-flash-lite",
-        system_instruction=ERROR_ANALYST_PROMPT
-    )
-
     prompt = f"""Failed step:
 Tool: {step.get('tool')}
 Description: {step.get('description')}
@@ -103,11 +100,12 @@ Error:
 Attempt number: {attempt}"""
 
     try:
-        response = model.generate_content(prompt)
-        text     = response.text.strip()
-        text     = re.sub(r"```(?:json)?", "", text).strip().rstrip("`").strip()
-
-        result = json.loads(text)
+        result = gn.generate_json(
+            prompt,
+            model=gn.router_model_name(),
+            schema=ERROR_ANALYST_SCHEMA,
+            system_instruction=ERROR_ANALYST_PROMPT,
+        )
         decision_str = result.get("decision", "replan").lower()
         decision_map = {
             "retry":  ErrorDecision.RETRY,
@@ -149,11 +147,6 @@ Attempt number: {attempt}"""
 
 
 def generate_fix(step: dict, error: str, fix_suggestion: str) -> dict:
-    import google.generativeai as genai
-
-    genai.configure(api_key=_get_api_key())
-    model = genai.GenerativeModel(model_name="gemini-2.0-flash")
-
     prompt = f"""A task step failed. Generate replacement Python code that can be run through AXIOM's code_helper tool.
 
 Original step:
@@ -168,8 +161,10 @@ Write a Python script that accomplishes the same goal differently.
 Return ONLY the Python code, no explanation."""
 
     try:
-        response = model.generate_content(prompt)
-        code = response.text.strip()
+        code = gn.generate_text(
+            prompt,
+            model=gn.reflection_model_name(),
+        ).strip()
         code = re.sub(r"```(?:python)?", "", code).strip().rstrip("`").strip()
 
         return {

@@ -1,7 +1,9 @@
+import io
+import sys
 import unittest
 from unittest.mock import patch
 
-from agent.executor import AgentExecutor, _direct_tool_for_goal, _specialist_context
+from agent.executor import AgentExecutor, _direct_tool_for_goal, _safe_print as executor_safe_print, _specialist_context
 from agent.completion_verifier import CompletionReport
 from agent.error_handler import ErrorDecision
 
@@ -22,6 +24,20 @@ class ExecutorDirectRouteTests(unittest.TestCase):
         call_tool_mock.assert_called_once()
         self.assertEqual(call_tool_mock.call_args.args[0], "computer_settings")
         self.assertIn("color=green", result)
+
+    def test_safe_print_handles_cp1252_streams(self):
+        buffer = io.BytesIO()
+        stdout = io.TextIOWrapper(buffer, encoding="cp1252")
+        original_stdout = sys.stdout
+        try:
+            sys.stdout = stdout
+            executor_safe_print("[Executor] unicode fallback \U0001f680")
+            stdout.flush()
+        finally:
+            sys.stdout = original_stdout
+
+        rendered = buffer.getvalue().decode("cp1252")
+        self.assertIn("[Executor] unicode fallback", rendered)
 
     def test_direct_route_uses_codex_builder_for_playable_game_requests(self):
         executor = AgentExecutor()
