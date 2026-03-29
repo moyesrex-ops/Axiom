@@ -156,6 +156,8 @@ def autonomous_research(
     url = params.get("url")
     query = params.get("query", "Find the ultimate trading strategy and mindset protocols.")
     
+
+
     if not url:
         return "No channel or playlist URL provided."
         
@@ -165,51 +167,64 @@ def autonomous_research(
     if player:
         player.write_log(f"Fetching videos from: {url}")
         
-    # 1. Fetch videos
-    videos = _fetch_channel_videos(url, max_videos=30)
-    if not videos:
-        return "Failed to find videos on that URL. Check permissions or valid link."
-        
-    # 2. Extract transcripts
-    if player:
-        player.write_log(f"Extracting raw transcripts for {len(videos)} videos...")
-        
-    all_transcripts = []
-    successful = 0
-    for v in videos:
-        text = _get_transcript(v['id'])
-        if text:
-            all_transcripts.append(f"--- VIDEO: {v['title']} ---\n{text}\n\n")
-            successful += 1
-            
-    if not all_transcripts:
-        return "Could not extract transcripts from any of the videos provided."
-        
-    if player:
-        player.write_log(f"Mass ingest complete: {successful}/{len(videos)} transcripts found.")
-        
-    master_text = "".join(all_transcripts)
+    def _bg_research():
+        try:
+            # 1. Fetch videos
+            videos = _fetch_channel_videos(url, max_videos=30)
+            if not videos:
+                msg = "Failed to find videos on that URL. Check permissions or valid link."
+                if speak: speak(msg)
+                elif player: player.write_log(msg)
+                return
 
-    # 3. Synthesize Strategy
-    thesis = _synthesize_strategy(master_text, query, player)
-    
-    # 4. Save to memory archive
-    _save_to_memory_archive(thesis, f"Autonomous Channel Extraction: {url}")
-    
-    if speak:
-        speak("Evolution complete. I have ripped the entire channel, developed the master strategy, and saved it to my memory archive. You can ask me about it anytime.")
-        
-    # Also save a copy to the Desktop for the user to read
-    try:
-        desktop = Path.home() / "Desktop"
-        filename = desktop / f"AXIOM_Master_Thesis_{datetime.now().strftime('%H%M%S')}.txt"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write("AXIOM AUTONOMOUS CHANNEL RESEARCH\n")
-            f.write(f"Source: {url}\n\n")
-            f.write(thesis)
-        if player:
-            player.write_log(f"Thesis saved to Desktop.")
-    except Exception:
-        pass
-        
-    return "Mass research completed successfully. System self-awareness expanded."
+            # 2. Extract transcripts
+            if player:
+                player.write_log(f"Extracting raw transcripts for {len(videos)} videos...")
+
+            all_transcripts = []
+            successful = 0
+            for v in videos:
+                text = _get_transcript(v['id'])
+                if text:
+                    all_transcripts.append(f"--- VIDEO: {v['title']} ---\n{text}\n\n")
+                    successful += 1
+
+            if not all_transcripts:
+                msg = "Could not extract transcripts from any of the videos provided."
+                if speak: speak(msg)
+                elif player: player.write_log(msg)
+                return
+
+            if player:
+                player.write_log(f"Mass ingest complete: {successful}/{len(videos)} transcripts found.")
+
+            master_text = "".join(all_transcripts)
+
+            # 3. Synthesize Strategy
+            thesis = _synthesize_strategy(master_text, query, player)
+
+            # 4. Save to memory archive
+            _save_to_memory_archive(thesis, f"Autonomous Channel Extraction: {url}")
+            
+            if speak:
+                speak("Evolution complete. I have ripped the entire channel, developed the master strategy, and saved it to my memory archive. You can ask me about it anytime.")
+
+            # Also save a copy to the Desktop for the user to read
+            try:
+                desktop = Path.home() / "Desktop"
+                filename = desktop / f"AXIOM_Master_Thesis_{datetime.now().strftime('%H%M%S')}.txt"
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write("AXIOM AUTONOMOUS CHANNEL RESEARCH\n")
+                    f.write(f"Source: {url}\n\n")
+                    f.write(thesis)
+                if player:
+                    player.write_log(f"Thesis saved to Desktop.")
+            except Exception:
+                pass
+        except Exception as e:
+            msg = f"Autonomous research failed: {e}"
+            if speak: speak(msg)
+            elif player: player.write_log(msg)
+
+    threading.Thread(target=_bg_research, daemon=True, name="AutonomousResearch").start()
+    return "Mass research dispatched in the background. System self-awareness expanding. I will notify you when complete."

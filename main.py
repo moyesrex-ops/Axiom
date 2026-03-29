@@ -53,7 +53,7 @@ from actions.lightpanda_control    import lightpanda_control
 from actions.lossless_claw_control import lossless_claw_control
 from actions.openfang_control      import openfang_control
 from actions.paperclip_control     import paperclip_control
-from actions.self_modifier         import self_modifier, get_dynamic_tool
+from actions.self_modifier         import self_modifier
 from actions.skill_library         import skill_library
 from actions.agent_library         import agent_library
 from actions.system_capabilities   import system_capabilities
@@ -69,11 +69,13 @@ from core.audio_barge_in           import BargeInDetector, tuning_from_runtime
 from core.capabilities             import format_capability_status, format_operator_surface
 from core.doctor                   import boot_doctor_lines
 from core.integration_manager      import boot_integrations
+from core.learning_orchestrator    import start_learning_daemon, stop_learning_daemon
 from core.live_session_policy      import compute_rotation_deadline, should_rotate_now
 from core.runtime_config           import load_runtime_config
 from core.secret_config            import get_gemini_api_key, get_secret
 from core.system_context           import format_prompt_system_context
 from core.telegram_bridge          import start_telegram_bridge, stop_telegram_bridge
+from core.tool_runtime             import execute_tool
 from memory.runtime_store          import init_runtime_store, log_event
 
 def get_base_dir():
@@ -541,7 +543,7 @@ TOOL_DECLARATIONS = [
         "required": ["goal"]
     }
 },
-    {
+{
     "name": "computer_control",
     "description": (
         "Direct computer control: type text, click buttons, use keyboard shortcuts, "
@@ -567,6 +569,32 @@ TOOL_DECLARATIONS = [
             "field":       {"type": "STRING", "description": "Field for user_data: name|email|city"},
             "clear_first": {"type": "BOOLEAN", "description": "Clear field before typing (default: true)"},
             "path":        {"type": "STRING", "description": "Save path for screenshot"},
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "computer_use",
+    "description": (
+        "High-level desktop vision and computer-use tool. Use this when AXIOM should first observe the desktop, "
+        "find an element by description, click it, type into it, or verify a UI outcome instead of relying only on raw coordinates."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "observe | analyze | read_text | find | find_and_click | find_and_type | verify | screenshot | move | click | type | hotkey | info"},
+            "description": {"type": "STRING", "description": "What to inspect, find, click, type into, or verify"},
+            "question": {"type": "STRING", "description": "Optional inspection question for observe/find"},
+            "expected": {"type": "STRING", "description": "Expected outcome for verify"},
+            "source": {"type": "STRING", "description": "screen | camera"},
+            "text": {"type": "STRING", "description": "Text to type for type or find_and_type"},
+            "clear_first": {"type": "BOOLEAN", "description": "Clear target field before typing"},
+            "x": {"type": "INTEGER", "description": "X coordinate for move"},
+            "y": {"type": "INTEGER", "description": "Y coordinate for move"},
+            "button": {"type": "STRING", "description": "left | right | middle"},
+            "clicks": {"type": "INTEGER", "description": "Click count"},
+            "keys": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Hotkey keys"},
+            "confirm": {"type": "BOOLEAN", "description": "Explicit confirmation when physical-control confirmation is enabled"}
         },
         "required": ["action"]
     }
@@ -841,7 +869,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | doctor | context | operator | routing | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | operator | routing | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | crucix | learning | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -1026,6 +1054,24 @@ TOOL_DECLARATIONS = [
             "action": {"type": "STRING", "description": "status | configure | launch_instructions"},
             "repo_path": {"type": "STRING", "description": "Optional local lossless-claw repo path"},
             "database_path": {"type": "STRING", "description": "Optional lossless-claw database path"}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "crucix_control",
+    "description": (
+        "Inspects and controls the Crucix intelligence engine. Use this for live OSINT/market briefing status, "
+        "surfacing current ideas, configuring the repo/API path, or launching the backend."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | configure | brief | ideas | start | launch_instructions"},
+            "repo_path": {"type": "STRING", "description": "Optional local Crucix repo path"},
+            "api_url": {"type": "STRING", "description": "Optional Crucix API URL"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether AXIOM should auto-start Crucix during boot when possible"},
+            "timeout": {"type": "NUMBER", "description": "Optional startup timeout in seconds"}
         },
         "required": ["action"]
     }
@@ -1455,112 +1501,7 @@ class AxiomLive:
         result = "Done."
 
         try:
-            if name == "open_app":
-                r = await loop.run_in_executor(
-                    None, lambda: open_app(parameters=args, response=None, player=self.ui)
-                )
-                result = r or f"Opened {args.get('app_name')} successfully."
-
-            elif name == "weather_report":
-                r = await loop.run_in_executor(
-                    None, lambda: weather_action(parameters=args, player=self.ui)
-                )
-                result = r or f"Weather report for {args.get('city')} delivered."
-
-            elif name == "browser_control":
-                r = await loop.run_in_executor(
-                    None, lambda: browser_control(parameters=args, player=self.ui)
-                )
-                result = r or "Browser action completed."
-
-            elif name == "file_controller":
-                r = await loop.run_in_executor(
-                    None, lambda: file_controller(parameters=args, player=self.ui)
-                )
-                result = r or "File operation completed."
-
-            elif name == "send_message":
-                r = await loop.run_in_executor(
-                    None, lambda: send_message(
-                        parameters=args, response=None,
-                        player=self.ui, session_memory=None
-                    )
-                )
-                result = r or f"Message sent to {args.get('receiver')}."
-
-            elif name == "reminder":
-                r = await loop.run_in_executor(
-                    None, lambda: reminder(parameters=args, response=None, player=self.ui)
-                )
-                result = r or f"Reminder set for {args.get('date')} at {args.get('time')}."
-
-            elif name == "youtube_video":
-                r = await loop.run_in_executor(
-                    None, lambda: youtube_video(parameters=args, response=None, player=self.ui)
-                )
-                result = r or "Done."
-
-            elif name == "screen_process":
-                threading.Thread(
-                    target=screen_process,
-                    kwargs={"parameters": args, "response": None,
-                            "player": self.ui, "session_memory": None},
-                    daemon=True
-                ).start()
-                result = (
-                    "Vision module activated. "
-                    "Stay completely silent - vision module will speak directly."
-                )
-
-            elif name == "computer_settings":
-                r = await loop.run_in_executor(
-                    None, lambda: computer_settings(
-                        parameters=args, response=None, player=self.ui
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "cmd_control":
-                r = await loop.run_in_executor(
-                    None, lambda: cmd_control(parameters=args, player=self.ui)
-                )
-                result = r or "Command executed."
-
-            elif name == "desktop_control":
-                r = await loop.run_in_executor(
-                    None, lambda: desktop_control(parameters=args, player=self.ui)
-                )
-                result = r or "Desktop action completed."
-            elif name == "code_helper":
-                r = await loop.run_in_executor(
-                    None, lambda: code_helper(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "codex_builder":
-                r = await loop.run_in_executor(
-                    None, lambda: codex_builder(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "dev_agent":
-                r = await loop.run_in_executor(
-                    None, lambda: dev_agent(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-            elif name == "agent_task":
+            if name == "agent_task":
                 goal         = args.get("goal", "")
                 priority_str = args.get("priority", "normal").lower()
 
@@ -1584,283 +1525,20 @@ class AxiomLive:
                     },
                 )
                 result = f"Task started (ID: {task_id}). I'll update you as I make progress."
-
-            elif name == "web_search":
-                r = await loop.run_in_executor(
-                    None, lambda: web_search_action(parameters=args, player=self.ui)
-                    )
-                result = r or "Search completed."
-            elif name == "computer_control":
-                r = await loop.run_in_executor(
-                    None, lambda: computer_control(parameters=args, player=self.ui)
-                )
-                result = r or "Done."
-
-            elif name == "flight_finder":
-                r = await loop.run_in_executor(
-                    None, lambda: flight_finder(parameters=args, player=self.ui)
-                )
-                result = r or "Done."
-                
-            elif name in ("memory_archive", "nexus_memory"):
-                r = await loop.run_in_executor(
-                    None, lambda: memory_archive(parameters=args, player=self.ui)
-                )
-                result = r or "Done."
-
-            elif name == "deep_analyzer":
-                r = await loop.run_in_executor(
-                    None, lambda: deep_analyzer(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "autonomous_researcher":
-                r = await loop.run_in_executor(
-                    None, lambda: autonomous_research(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "mt5_trading":
-                r = await loop.run_in_executor(
-                    None, lambda: mt5_trading(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "predict_market":
-                r = await loop.run_in_executor(
-                    None, lambda: predict_market(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "mirofish_control":
-                r = await loop.run_in_executor(
-                    None, lambda: mirofish_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "tradingagents_control":
-                r = await loop.run_in_executor(
-                    None, lambda: tradingagents_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "self_modifier":
-                r = await loop.run_in_executor(
-                    None, lambda: self_modifier(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "skill_library":
-                r = await loop.run_in_executor(
-                    None, lambda: skill_library(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "agent_library":
-                r = await loop.run_in_executor(
-                    None, lambda: agent_library(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "system_capabilities":
-                r = await loop.run_in_executor(
-                    None, lambda: system_capabilities(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "deerflow_control":
-                r = await loop.run_in_executor(
-                    None, lambda: deerflow_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "paperclip_control":
-                r = await loop.run_in_executor(
-                    None, lambda: paperclip_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "openfang_control":
-                r = await loop.run_in_executor(
-                    None, lambda: openfang_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "symphony_control":
-                r = await loop.run_in_executor(
-                    None, lambda: symphony_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "lossless_claw_control":
-                r = await loop.run_in_executor(
-                    None, lambda: lossless_claw_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "automaton_control":
-                r = await loop.run_in_executor(
-                    None, lambda: automaton_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "dexter_control":
-                r = await loop.run_in_executor(
-                    None, lambda: dexter_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "pentagi_control":
-                r = await loop.run_in_executor(
-                    None, lambda: pentagi_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "lightpanda_control":
-                r = await loop.run_in_executor(
-                    None, lambda: lightpanda_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "autoresearch_control":
-                r = await loop.run_in_executor(
-                    None, lambda: autoresearch_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "persona_control":
-                r = await loop.run_in_executor(
-                    None, lambda: persona_control(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "prompt_studio":
-                r = await loop.run_in_executor(
-                    None, lambda: prompt_studio(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "lead_researcher":
-                r = await loop.run_in_executor(
-                    None, lambda: lead_researcher(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
-            elif name == "swarm_orchestrator":
-                r = await loop.run_in_executor(
-                    None, lambda: swarm_orchestrator(
-                        parameters=args,
-                        player=self.ui,
-                        speak=self.speak
-                    )
-                )
-                result = r or "Done."
-
             else:
-                dynamic_tool = get_dynamic_tool(name)
-                if dynamic_tool is not None:
-                    r = await loop.run_in_executor(
-                        None, lambda: dynamic_tool(
-                            parameters=args,
-                            player=self.ui,
-                            speak=self.speak
-                        )
-                    )
-                    result = r or "Done."
-                else:
-                    result = f"Unknown tool: {name}"
+                result = await loop.run_in_executor(
+                    None,
+                    lambda: execute_tool(
+                        name,
+                        args,
+                        player=self.ui,
+                        speak=self.speak,
+                        channel="voice",
+                        scope="local",
+                        source="live_session",
+                        metadata={"interface": "voice_live"},
+                    ),
+                )
 
         except Exception as e:
             result = f"Tool '{name}' failed: {e}"
@@ -2173,6 +1851,11 @@ def main():
             pass
 
         try:
+            stop_learning_daemon(timeout=2.5)
+        except Exception:
+            pass
+
+        try:
             shutdown_browser_control(timeout=10)
         except Exception:
             pass
@@ -2192,6 +1875,7 @@ def main():
     def runner():
         ui.wait_for_api_key()
         start_telegram_bridge(log_func=ui.write_log)
+        start_learning_daemon(log_func=ui.write_log)
         boot_integrations(log_func=ui.write_log)
         for line in boot_doctor_lines(limit=6):
             ui.write_log(f"SYS: {line}")

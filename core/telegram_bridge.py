@@ -10,6 +10,7 @@ import requests
 from actions.system_capabilities import system_capabilities
 from agent.task_queue import TaskPriority, get_queue
 from core.capabilities import format_capability_status
+from core.intelligence_router import route_message_kind
 from core.runtime_config import load_runtime_config
 from core.secret_config import BASE_DIR, get_secret
 from memory.memory_manager import (
@@ -646,10 +647,30 @@ def _llm_plain_message_decision(text: str, chat_id: str = "") -> dict:
 
 def _decide_plain_message_action(text: str, chat_id: str = "") -> dict:
     original = str(text or "").strip()
+    context_blocks = []
+    active_task = _active_task_snapshot(chat_id)
+    last_result = _last_task_result(chat_id)
+    if active_task:
+        context_blocks.append(
+            f"Active task: {active_task.get('goal', '')} | status={active_task.get('status', '')}"
+        )
+    if last_result:
+        context_blocks.append(
+            f"Last task: {last_result.get('goal', '')} | result={str(last_result.get('result', ''))[:220]}"
+        )
+    router_decision = route_message_kind(original, context_blocks=context_blocks)
     mode = _plain_message_mode()
     if mode == "chat_only":
         return {"kind": "chat", "goal": original, "source": "chat_only"}
     if mode == "legacy":
+        if router_decision.confidence >= 0.74:
+            return {
+                "kind": router_decision.kind,
+                "goal": _contextualize_task_goal(chat_id, router_decision.rewritten_goal or original)
+                if router_decision.kind == "task"
+                else original,
+                "source": router_decision.source,
+            }
         return _heuristic_plain_message_decision(original, chat_id=chat_id)
     if mode == "operator":
         if (
@@ -658,6 +679,15 @@ def _decide_plain_message_action(text: str, chat_id: str = "") -> dict:
             or _looks_like_runtime_status_question(original)
         ):
             return {"kind": "chat", "goal": original, "source": "operator_chat_guard"}
+
+        if router_decision.kind == "task" and router_decision.confidence >= 0.82:
+            return {
+                "kind": "task",
+                "goal": _contextualize_task_goal(chat_id, router_decision.rewritten_goal or original),
+                "source": router_decision.source,
+            }
+        if router_decision.kind == "chat" and router_decision.confidence >= 0.9:
+            return {"kind": "chat", "goal": original, "source": router_decision.source}
 
         decision = _llm_plain_message_decision(original, chat_id=chat_id)
         if not decision:
@@ -677,7 +707,14 @@ def _decide_plain_message_action(text: str, chat_id: str = "") -> dict:
         decision["goal"] = original
         return decision
 
-    decision = _llm_plain_message_decision(original, chat_id=chat_id)
+    if router_decision.confidence >= 0.82:
+        decision = {
+            "kind": router_decision.kind,
+            "goal": router_decision.rewritten_goal or original,
+            "source": router_decision.source,
+        }
+    else:
+        decision = _llm_plain_message_decision(original, chat_id=chat_id)
     if not decision:
         decision = _heuristic_plain_message_decision(original, chat_id=chat_id)
 

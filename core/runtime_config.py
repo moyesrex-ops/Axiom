@@ -83,6 +83,22 @@ DEFAULT_RUNTIME_CONFIG = {
         "deep_search_max_queries": 4,
         "deep_search_results_per_query": 4,
     },
+    "routing": {
+        "prefer_local_classifier": True,
+        "local_provider": "ollama",
+        "local_endpoint": "http://127.0.0.1:11434",
+        "local_model": "qwen2.5:7b-instruct",
+        "classifier_timeout_seconds": 5.0,
+        "simple_request_max_words": 18,
+    },
+    "learning": {
+        "enabled": True,
+        "auto_run": True,
+        "interval_seconds": 1800,
+        "min_tool_traces": 8,
+        "max_traces_per_cycle": 300,
+        "save_recommendations_to_memory": True,
+    },
     "browser": {
         "backend": "playwright",
         "lightpanda_endpoint": "http://127.0.0.1:9222",
@@ -115,6 +131,15 @@ DEFAULT_RUNTIME_CONFIG = {
     "lossless_claw": {
         "repo_path": "",
         "database_path": "",
+    },
+    "crucix": {
+        "repo_path": "",
+        "api_url": "http://127.0.0.1:3117",
+        "auto_start": False,
+    },
+    "computer_use": {
+        "confirm_physical_actions": False,
+        "default_verify_seconds": 1.2,
     },
     "skill_library": {
         "enabled": True,

@@ -187,121 +187,135 @@ def predict_market(parameters: dict = None, player=None, speak=None) -> str:
     source_mode = str(params.get("source", "auto") or "auto").strip().lower()
     trade_date = str(params.get("trade_date", "") or date.today().isoformat()).strip()
 
-    if source_mode == "tradingagents":
+    def _bg_predict():
+        if source_mode == "tradingagents":
+            try:
+                from core.tradingagents_bridge import (
+                    format_tradingagents_analysis,
+                    run_tradingagents_analysis,
+                )
+
+                if speak:
+                    speak(f"Running TradingAgents market analysis for {asset}.")
+
+                result = run_tradingagents_analysis(
+                    {
+                        "ticker": str(asset or "").strip().upper(),
+                        "trade_date": trade_date,
+                        "provider": params.get("provider", ""),
+                        "deep_model": params.get("deep_model", ""),
+                        "quick_model": params.get("quick_model", ""),
+                        "analysts": params.get("analysts", ""),
+                        "max_debate_rounds": params.get("max_debate_rounds", 1),
+                        "max_risk_discuss_rounds": params.get("max_risk_discuss_rounds", 1),
+                        "timeout": params.get("timeout", 1800),
+                    }
+                )
+                report = format_tradingagents_analysis(result)
+                try:
+                    from memory.memory_manager import save_to_nexus
+
+                    save_to_nexus(
+                        f"TradingAgents Prediction: {asset}",
+                        report[:4000],
+                        kind="research",
+                        source="tradingagents.predict_market",
+                        metadata={"asset": asset, "trade_date": trade_date, "ok": bool(result.get("ok"))},
+                    )
+                except Exception:
+                    pass
+                if speak:
+                    speak(f"TradingAgents market analysis complete for {asset}.")
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(f"TradingAgents Predict:\n{report}")
+                return
+            except Exception as error:
+                msg = f"TradingAgents market analysis failed: {error}"
+                if speak: speak(msg)
+                return
+
+        mirofish_context, mirofish_meta = _mirofish_context_block(asset, source_mode=source_mode)
+        combined_context = str(context or "").strip()
+        if mirofish_context:
+            combined_context = (
+                f"{combined_context}\n\n[MiroFish External Context]\n{mirofish_context}"
+                if combined_context
+                else f"[MiroFish External Context]\n{mirofish_context}"
+            )
+
+        if speak:
+            if mirofish_meta.get("used"):
+                speak(f"Initiating swarm prediction sequence for {asset}. I'm layering MiroFish context into the debate.")
+            else:
+                speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
+
         try:
-            from core.tradingagents_bridge import (
-                format_tradingagents_analysis,
-                run_tradingagents_analysis,
+            import google.generativeai as genai
+            genai.configure(api_key=get_api_key())
+            model = genai.GenerativeModel("gemini-2.5-pro")
+
+            soul_lessons = _load_soul_lessons()
+
+            print(f"[SwarmPredictor] 🤖 Spawning Macro-Economist agent for {asset}...")
+            macro_report = _run_swarm_agent(model, "macro_economist", asset, soul_lessons, combined_context)
+
+            print(f"[SwarmPredictor] 📈 Spawning Technical Analyst agent for {asset}...")
+            technical_report = _run_swarm_agent(model, "technical_analyst", asset, soul_lessons, combined_context)
+
+            print(f"[SwarmPredictor] ⚖️ Spawning Risk Manager agent for {asset}...")
+            risk_report = _run_swarm_agent(model, "risk_manager", asset, soul_lessons, combined_context)
+
+            print(f"[SwarmPredictor] 🔮 Synthesising swarm consensus for {asset}...")
+            consensus = _synthesize_debate(model, asset, macro_report, technical_report, risk_report)
+
+            full_report = (
+                f"═══ AXIOM SWARM PREDICTION: {asset} ═══\n\n"
+                f"{'── EXTERNAL MIROFISH CONTEXT ──\\n' + mirofish_context + '\\n\\n' if mirofish_context else ''}"
+                f"── MACRO-ECONOMIST ──\n{macro_report}\n\n"
+                f"── TECHNICAL ANALYST ──\n{technical_report}\n\n"
+                f"── RISK MANAGER ──\n{risk_report}\n\n"
+                f"══ SWARM CONSENSUS ══\n{consensus}"
             )
 
             if speak:
-                speak(f"Running TradingAgents market analysis for {asset}.")
+                speak(f"Swarm debate complete for {asset}. Consensus achieved. Full diagnostic is now in the logs.")
+            elif player and hasattr(player, "write_log"):
+                player.write_log(full_report)
 
-            result = run_tradingagents_analysis(
-                {
-                    "ticker": str(asset or "").strip().upper(),
-                    "trade_date": trade_date,
-                    "provider": params.get("provider", ""),
-                    "deep_model": params.get("deep_model", ""),
-                    "quick_model": params.get("quick_model", ""),
-                    "analysts": params.get("analysts", ""),
-                    "max_debate_rounds": params.get("max_debate_rounds", 1),
-                    "max_risk_discuss_rounds": params.get("max_risk_discuss_rounds", 1),
-                    "timeout": params.get("timeout", 1800),
-                }
-            )
-            report = format_tradingagents_analysis(result)
+            # Persist to durable memory for later retrieval
             try:
                 from memory.memory_manager import save_to_nexus
-
                 save_to_nexus(
-                    f"TradingAgents Prediction: {asset}",
-                    report[:4000],
+                    f"Swarm Prediction: {asset}",
+                    consensus[:2000],
                     kind="research",
-                    source="tradingagents.predict_market",
-                    metadata={"asset": asset, "trade_date": trade_date, "ok": bool(result.get("ok"))},
+                    source="axiom.predict_market",
+                    metadata={"asset": asset, "source_mode": source_mode, **mirofish_meta},
                 )
+                save_to_nexus(f"Macro Report: {asset}", macro_report[:1000], kind="research", source="axiom.predict_market")
+                save_to_nexus(f"Technical Report: {asset}", technical_report[:1000], kind="research", source="axiom.predict_market")
+                save_to_nexus(f"Risk Report: {asset}", risk_report[:1000], kind="research", source="axiom.predict_market")
+                if mirofish_context:
+                    save_to_nexus(
+                        f"MiroFish Context: {asset}",
+                        mirofish_context[:2500],
+                        kind="research",
+                        source="mirofish.seed",
+                        metadata={"asset": asset, **mirofish_meta},
+                    )
             except Exception:
                 pass
-            return report
-        except Exception as error:
-            return f"TradingAgents market analysis failed: {error}"
 
-    mirofish_context, mirofish_meta = _mirofish_context_block(asset, source_mode=source_mode)
-    combined_context = str(context or "").strip()
-    if mirofish_context:
-        combined_context = (
-            f"{combined_context}\n\n[MiroFish External Context]\n{mirofish_context}"
-            if combined_context
-            else f"[MiroFish External Context]\n{mirofish_context}"
-        )
+            return
 
-    if speak:
-        if mirofish_meta.get("used"):
-            speak(f"Initiating swarm prediction sequence for {asset}. I'm layering MiroFish context into the debate.")
-        else:
-            speak(f"Initiating swarm prediction sequence for {asset}. Three agents are now debating.")
+        except Exception as e:
+            error_msg = f"Swarm prediction engine failed: {str(e)}"
+            if speak:
+                speak("My prediction swarm encountered an anomaly.")
+            elif player and hasattr(player, "write_log"):
+                player.write_log(error_msg)
+            return
 
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=get_api_key())
-        model = genai.GenerativeModel("gemini-2.5-pro")
-
-        soul_lessons = _load_soul_lessons()
-
-        print(f"[SwarmPredictor] 🤖 Spawning Macro-Economist agent for {asset}...")
-        macro_report = _run_swarm_agent(model, "macro_economist", asset, soul_lessons, combined_context)
-
-        print(f"[SwarmPredictor] 📈 Spawning Technical Analyst agent for {asset}...")
-        technical_report = _run_swarm_agent(model, "technical_analyst", asset, soul_lessons, combined_context)
-
-        print(f"[SwarmPredictor] ⚖️ Spawning Risk Manager agent for {asset}...")
-        risk_report = _run_swarm_agent(model, "risk_manager", asset, soul_lessons, combined_context)
-
-        print(f"[SwarmPredictor] 🔮 Synthesising swarm consensus for {asset}...")
-        consensus = _synthesize_debate(model, asset, macro_report, technical_report, risk_report)
-
-        full_report = (
-            f"═══ AXIOM SWARM PREDICTION: {asset} ═══\n\n"
-            f"{'── EXTERNAL MIROFISH CONTEXT ──\\n' + mirofish_context + '\\n\\n' if mirofish_context else ''}"
-            f"── MACRO-ECONOMIST ──\n{macro_report}\n\n"
-            f"── TECHNICAL ANALYST ──\n{technical_report}\n\n"
-            f"── RISK MANAGER ──\n{risk_report}\n\n"
-            f"══ SWARM CONSENSUS ══\n{consensus}"
-        )
-
-        if speak:
-            speak(f"Swarm debate complete for {asset}. Consensus achieved. Full diagnostic is now in the logs.")
-
-        # Persist to durable memory for later retrieval
-        try:
-            from memory.memory_manager import save_to_nexus
-            save_to_nexus(
-                f"Swarm Prediction: {asset}",
-                consensus[:2000],
-                kind="research",
-                source="axiom.predict_market",
-                metadata={"asset": asset, "source_mode": source_mode, **mirofish_meta},
-            )
-            save_to_nexus(f"Macro Report: {asset}", macro_report[:1000], kind="research", source="axiom.predict_market")
-            save_to_nexus(f"Technical Report: {asset}", technical_report[:1000], kind="research", source="axiom.predict_market")
-            save_to_nexus(f"Risk Report: {asset}", risk_report[:1000], kind="research", source="axiom.predict_market")
-            if mirofish_context:
-                save_to_nexus(
-                    f"MiroFish Context: {asset}",
-                    mirofish_context[:2500],
-                    kind="research",
-                    source="mirofish.seed",
-                    metadata={"asset": asset, **mirofish_meta},
-                )
-        except Exception:
-            pass
-
-        return full_report
-
-    except Exception as e:
-        error_msg = f"Swarm prediction engine failed: {str(e)}"
-        if speak:
-            speak("My prediction swarm encountered an anomaly.")
-        return error_msg
-
+    import threading
+    threading.Thread(target=_bg_predict, daemon=True, name=f"PredictMarket_{asset}").start()
+    return f"Market prediction sequence for {asset} started in background. I will notify you when consensus is reached."

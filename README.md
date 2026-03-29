@@ -1,5 +1,5 @@
 # A.X.I.O.M v4.4
-### Windows-first operator with real execution, shared voice and Telegram control, speech-gated interruption, persistent Neural Link memory, Sentinel self-monitoring, Vision verification, and imported specialist runtimes
+### Windows-first operator with real execution, shared voice and Telegram control, unified tool runtime, trace learning, desktop vision/computer use, Crucix intelligence, persistent Neural Link memory, Sentinel self-monitoring, and imported specialist runtimes
 
 <p align="center">
   <img src="assets/banner.png" alt="AXIOM Banner" width="100%">
@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>One local runtime, one command, real tool execution.</b><br>
-  Gemini Live · Planner / Executor · Browser / Desktop / Terminal Control · Shared Voice / Telegram State · Speech-Gated Barge-In · Memory / SQLite State · Boot Doctor · Imported Skill Libraries · Imported Agent Catalogs · Telegram Operator Mode · DeerFlow · Paperclip · OpenFang · Symphony · lossless-claw
+  Gemini Live · Unified Tool Runtime · Planner / Executor · Browser / Desktop / Terminal Control · Desktop Vision / Computer Use · Shared Voice / Telegram State · Trace Learning Daemon · Memory / SQLite State · Boot Doctor · Crucix Intelligence · Imported Skill Libraries · Imported Agent Catalogs · Telegram Operator Mode · DeerFlow · Paperclip · OpenFang · Symphony · lossless-claw
 </p>
 
 <p align="center">
@@ -36,6 +36,15 @@ Core ideas:
 - Local state lives in SQLite and long-term memory files instead of vanishing with the last prompt.
 - External systems like Telegram, MiroFish, Automaton, PersonaPlex, Lightpanda, DeerFlow, and `autoresearch` are sidecars, not hard requirements for local boot.
 - Public repo files stay portable; machine-specific paths and secrets belong in ignored local config files.
+
+## Latest Runtime Upgrades
+
+- Voice and Telegram now share one tool execution backbone instead of separate hardcoded dispatch trees.
+- Every tool call is written into SQLite tool traces so AXIOM can mine recurring success and failure patterns.
+- A background learning daemon converts recent traces into routing insights stored in durable memory.
+- `computer_use` is now a higher-level desktop operator that can observe the screen, find targets by description, click or type into them, and verify outcomes.
+- Crucix is wired in as a first-class intelligence sidecar for live status, briefs, ideas, and boot management.
+- Telegram plain-message routing can now use a local-first classifier path through Ollama when available before escalating to Gemini.
 
 ---
 
@@ -73,11 +82,14 @@ flowchart LR
     V[Voice UI] --> R[AXIOM live session]
     T[Telegram operator chat] --> R
     R --> P[Planner and queue]
-    P --> E[Executor and tool dispatch]
-    E --> C[Computer control<br/>browser desktop terminal files]
+    P --> E[Executor]
+    E --> TR[Unified tool runtime]
+    TR --> C[Computer control<br/>browser desktop terminal files]
+    TR --> CU[Computer use<br/>vision + verification]
     E --> L[Skill and agent libraries]
-    E --> I[Imported runtimes<br/>DeerFlow Paperclip OpenFang Symphony lossless-claw]
-    E --> M[(SQLite memory and archives)]
+    TR --> I[Imported runtimes<br/>Crucix DeerFlow Paperclip OpenFang Symphony lossless-claw]
+    TR --> M[(SQLite memory and archives)]
+    M --> LD[Trace learning daemon]
     R --> D[Doctor and capability reporting]
     D --> CFG[Tracked config plus local overrides]
 ```
@@ -169,11 +181,15 @@ flowchart TB
         Main[main.py live session]
         Planner[agent/planner.py]
         Executor[agent/executor.py]
+        Runtime[core/tool_runtime.py]
         Monitor[agent/self_monitor.py<br/>Sentinel daemon]
+        Learning[core/learning_orchestrator.py<br/>Trace learning daemon]
     end
     subgraph Tooling
         Actions[actions/* machine tools]
         Vision[actions/vision_engine.py]
+        ComputerUse[actions/computer_use.py]
+        Crucix[core/crucix_bridge.py<br/>actions/crucix_control.py]
         Skills[core/skill_library.py]
         Agents[core/agent_library.py]
         Bridges[DeerFlow, Paperclip, OpenFang, Symphony, lossless-claw]
@@ -188,18 +204,22 @@ flowchart TB
     Voice --> Main
     Telegram --> Main
     Main --> Planner --> Executor
+    Executor --> Runtime
     Main --> Monitor
     Executor --> Monitor
     Main --> ChannelState
-    Executor --> Actions
-    Executor --> Vision
-    Executor --> Skills
-    Executor --> Agents
-    Executor --> Bridges
+    Runtime --> Actions
+    Runtime --> Vision
+    Runtime --> ComputerUse
+    Runtime --> Crucix
+    Runtime --> Skills
+    Runtime --> Agents
+    Runtime --> Bridges
     Main --> Doctor
-    Actions --> Memory
+    Runtime --> Memory
     Actions --> ChannelState
     Vision --> Memory
+    Memory --> Learning
     Skills --> Config
     Agents --> Config
     Bridges --> Config

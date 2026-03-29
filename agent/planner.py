@@ -37,6 +37,7 @@ ABSOLUTE RULES:
 - Use pentagi_control for the imported PentAGI security runtime status and limitations.
 - Use tradingagents_control when the task depends on the imported TradingAgents runtime, trading runs, or multi-agent market analysis.
 - Use paperclip_control, openfang_control, symphony_control, or lossless_claw_control when the task is specifically about those imported repos or their runtime readiness.
+- Use crucix_control for the Crucix intelligence engine, live OSINT/market sweeps, or briefing-style world intelligence.
 - Use file_controller to save content to disk.
 - Use cmd_control to open files or run system commands.
 - Max 5 steps. Use the minimum steps needed.
@@ -147,7 +148,7 @@ self_modifier
   voice_name: string (optional)
 
 system_capabilities
-  action: "summary" | "status" | "doctor" | "context" | "operator" | "routing" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
+  action: "summary" | "status" | "doctor" | "context" | "operator" | "routing" | "hardware" | "integrations" | "mirofish" | "automaton" | "dexter" | "pentagi" | "tradingagents" | "lightpanda" | "autoresearch" | "deerflow" | "crucix" | "learning" | "paperclip" | "openfang" | "symphony" | "lossless_claw" | "skills" | "agents" | "failures" | "events" | "tasks" (optional)
   limit: integer (optional)
 
 memory_archive
@@ -179,6 +180,21 @@ mt5_trading
   stop_loss: number (optional)
   take_profit: number (optional)
   note: string (optional)
+
+computer_use
+  action: "observe" | "analyze" | "read_text" | "find" | "find_and_click" | "find_and_type" | "verify" | "screenshot" | "move" | "click" | "type" | "hotkey" | "info" (required)
+  description: string (for find/find_and_click/find_and_type/verify/observe)
+  question: string (optional question for observe/find)
+  expected: string (for verify)
+  x: integer (for move)
+  y: integer (for move)
+  button: "left" | "right" | "middle" (for click)
+  clicks: integer (for click)
+  text: string (for type/find_and_type)
+  clear_first: boolean (for find_and_type)
+  source: "screen" | "camera" (optional for observe/find)
+  keys: list[string] (for hotkey)
+
 
 skill_library
   action: "status" | "sources" | "search" | "recommend" | "read" (optional)
@@ -273,6 +289,13 @@ lossless_claw_control
   action: "status" | "configure" | "launch_instructions" (required)
   repo_path: string (optional)
   database_path: string (optional)
+
+crucix_control
+  action: "status" | "configure" | "brief" | "ideas" | "start" | "launch_instructions" (required)
+  repo_path: string (optional)
+  api_url: string (optional)
+  auto_start: boolean (optional)
+  timeout: integer (optional)
 
 predict_market
   asset: string (required)

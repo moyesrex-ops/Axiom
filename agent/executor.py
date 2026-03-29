@@ -13,7 +13,7 @@ from agent.completion_verifier import (
     extract_and_save_lessons,
     assess_result_quality,
 )
-from actions.self_modifier import get_dynamic_tool
+from core.tool_runtime import execute_tool
 from core.secret_config import get_gemini_api_key
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import log_event, search_knowledge_items, upsert_knowledge_item
@@ -187,181 +187,21 @@ def _translate_to_goal_language(content: str, goal: str) -> str:
         print(f"[Executor] Translation failed: {e}")
         return content
 
-def _call_tool(tool: str, parameters: dict, speak: Callable | None) -> str:
-
-    if tool == "open_app":
-        from actions.open_app import open_app
-        return open_app(parameters=parameters, player=None) or "Done."
-
-    elif tool == "web_search":
-        from actions.web_search import web_search
-        return web_search(parameters=parameters, player=None) or "Done."
-
-    elif tool == "browser_control":
-        from actions.browser_control import browser_control
-        return browser_control(parameters=parameters, player=None) or "Done."
-
-    elif tool == "file_controller":
-        from actions.file_controller import file_controller
-        return file_controller(parameters=parameters, player=None) or "Done."
-
-    elif tool == "cmd_control":
-        from actions.cmd_control import cmd_control
-        return cmd_control(parameters=parameters, player=None) or "Done."
-
-    elif tool == "code_helper":
-        from actions.code_helper import code_helper
-        return code_helper(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "dev_agent":
-        from actions.dev_agent import dev_agent
-        return dev_agent(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "codex_builder":
-        from actions.codex_builder import codex_builder
-        return codex_builder(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool in ("screen_process", "vision_tool"):
-        from actions.vision_engine import vision_tool
-        return vision_tool(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "send_message":
-        from actions.send_message import send_message
-        return send_message(parameters=parameters, player=None) or "Done."
-
-    elif tool == "reminder":
-        from actions.reminder import reminder
-        return reminder(parameters=parameters, player=None) or "Done."
-
-    elif tool == "youtube_video":
-        from actions.youtube_video import youtube_video
-        return youtube_video(parameters=parameters, player=None) or "Done."
-
-    elif tool == "weather_report":
-        from actions.weather_report import weather_action
-        return weather_action(parameters=parameters, player=None) or "Done."
-
-    elif tool == "computer_settings":
-        from actions.computer_settings import computer_settings
-        return computer_settings(parameters=parameters, player=None) or "Done."
-
-    elif tool == "desktop_control":
-        from actions.desktop import desktop_control
-        return desktop_control(parameters=parameters, player=None) or "Done."
-
-    elif tool == "computer_control":
-        from actions.computer_control import computer_control
-        return computer_control(parameters=parameters, player=None) or "Done."
-
-    elif tool == "flight_finder":
-        from actions.flight_finder import flight_finder
-        return flight_finder(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool in ("memory_archive", "nexus_memory"):
-        from actions.nexus_memory import memory_archive
-        return memory_archive(parameters=parameters, player=None) or "Done."
-
-    elif tool == "deep_analyzer":
-        from actions.deep_analyzer import deep_analyzer
-        return deep_analyzer(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "autonomous_researcher":
-        from actions.autonomous_researcher import autonomous_research
-        return autonomous_research(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "mt5_trading":
-        from actions.mt5_trading_agent import mt5_trading
-        return mt5_trading(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "predict_market":
-        from actions.market_predictor import predict_market
-        return predict_market(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "mirofish_control":
-        from actions.mirofish_control import mirofish_control
-        return mirofish_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "tradingagents_control":
-        from actions.tradingagents_control import tradingagents_control
-        return tradingagents_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "self_modifier":
-        from actions.self_modifier import self_modifier
-        return self_modifier(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "system_capabilities":
-        from actions.system_capabilities import system_capabilities
-        return system_capabilities(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "automaton_control":
-        from actions.automaton_control import automaton_control
-        return automaton_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "skill_library":
-        from actions.skill_library import skill_library
-        return skill_library(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "agent_library":
-        from actions.agent_library import agent_library
-        return agent_library(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "lightpanda_control":
-        from actions.lightpanda_control import lightpanda_control
-        return lightpanda_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "autoresearch_control":
-        from actions.autoresearch_control import autoresearch_control
-        return autoresearch_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "deerflow_control":
-        from actions.deerflow_control import deerflow_control
-        return deerflow_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "paperclip_control":
-        from actions.paperclip_control import paperclip_control
-        return paperclip_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "openfang_control":
-        from actions.openfang_control import openfang_control
-        return openfang_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "symphony_control":
-        from actions.symphony_control import symphony_control
-        return symphony_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "lossless_claw_control":
-        from actions.lossless_claw_control import lossless_claw_control
-        return lossless_claw_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "dexter_control":
-        from actions.dexter_control import dexter_control
-        return dexter_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "pentagi_control":
-        from actions.pentagi_control import pentagi_control
-        return pentagi_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "persona_control":
-        from actions.persona_control import persona_control
-        return persona_control(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "prompt_studio":
-        from actions.prompt_studio import prompt_studio
-        return prompt_studio(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "lead_researcher":
-        from actions.lead_researcher import lead_researcher
-        return lead_researcher(parameters=parameters, player=None, speak=speak) or "Done."
-
-    elif tool == "swarm_orchestrator":
-        from actions.swarm_orchestrator import swarm_orchestrator
-        return swarm_orchestrator(parameters=parameters, player=None, speak=speak) or "Done."
-
-    else:
-        dynamic_tool = get_dynamic_tool(tool)
-        if dynamic_tool is not None:
-            return dynamic_tool(parameters=parameters, player=None, speak=speak) or "Done."
-        raise ValueError(f"Unknown tool: {tool}")
+def _call_tool(
+    tool: str,
+    parameters: dict,
+    speak: Callable | None,
+    metadata: dict | None = None,
+) -> str:
+    return execute_tool(
+        tool,
+        parameters,
+        player=None,
+        speak=speak,
+        channel="task",
+        source="agent_executor",
+        metadata=metadata,
+    )
 
 
 def _extract_color_hint(text: str) -> str:
@@ -649,7 +489,12 @@ class AgentExecutor:
             tool, params = direct
             print(f"[Executor] Direct route: [{tool}] {params}")
             try:
-                result = _call_tool(tool, params, speak)
+                result = _call_tool(
+                    tool,
+                    params,
+                    speak,
+                    metadata={"goal": goal, "path": "direct_route", "description": goal},
+                )
                 self._remember_task_strategy(
                     goal,
                     [{"step": 1, "tool": tool, "parameters": params, "description": goal}],
@@ -735,7 +580,17 @@ class AgentExecutor:
                         from agent.self_monitor import start_task_tracking, end_task_tracking
                         start_task_tracking(f"[{tool}] {desc[:30]}")
                         
-                        result = _call_tool(tool, params, speak)
+                        result = _call_tool(
+                            tool,
+                            params,
+                            speak,
+                            metadata={
+                                "goal": goal,
+                                "step": step_num,
+                                "description": desc,
+                                "path": "plan_step",
+                            },
+                        )
                         
                         end_task_tracking(success=True)
                         step_results[step_num] = result
@@ -781,7 +636,13 @@ class AgentExecutor:
                                     res = _call_tool(
                                         fixed_step["tool"],
                                         fixed_step["parameters"],
-                                        speak
+                                        speak,
+                                        metadata={
+                                            "goal": goal,
+                                            "step": step_num,
+                                            "description": fixed_step.get("description", desc),
+                                            "path": "recovery_step",
+                                        },
                                     )
                                     step_results[step_num] = res
                                     completed_steps.append(step)

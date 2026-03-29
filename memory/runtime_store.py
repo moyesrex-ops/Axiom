@@ -274,6 +274,21 @@ def init_runtime_store() -> None:
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
 
+                CREATE TABLE IF NOT EXISTS tool_traces (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    tool TEXT NOT NULL,
+                    args_json TEXT NOT NULL DEFAULT '{}',
+                    result_text TEXT NOT NULL DEFAULT '',
+                    success INTEGER NOT NULL DEFAULT 1,
+                    duration_ms REAL NOT NULL DEFAULT 0,
+                    channel TEXT NOT NULL DEFAULT '',
+                    scope TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT '',
+                    error_text TEXT NOT NULL DEFAULT '',
+                    metadata_json TEXT NOT NULL DEFAULT '{}'
+                );
+
                 CREATE TABLE IF NOT EXISTS conversation_turns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -341,6 +356,12 @@ def init_runtime_store() -> None:
                 """
                 CREATE INDEX IF NOT EXISTS idx_conversation_turns_channel
                 ON conversation_turns(channel, channel_scope, id DESC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_tool_traces_tool_created
+                ON tool_traces(tool, created_at DESC, id DESC)
                 """
             )
             conn.commit()
@@ -1010,6 +1031,108 @@ def recent_task_runs(limit: int = 10) -> list[dict]:
             (int(limit),),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+def record_tool_trace(
+    tool: str,
+    args: dict | None = None,
+    result_text: str = "",
+    success: bool = True,
+    duration_ms: float = 0.0,
+    channel: str = "",
+    scope: str = "",
+    source: str = "",
+    error_text: str = "",
+    metadata: dict | None = None,
+) -> int:
+    init_runtime_store()
+    with _LOCK, _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO tool_traces (
+                tool,
+                args_json,
+                result_text,
+                success,
+                duration_ms,
+                channel,
+                scope,
+                source,
+                error_text,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(tool or "unknown").strip() or "unknown",
+                json.dumps(args or {}, ensure_ascii=False),
+                str(result_text or "")[:12000],
+                int(bool(success)),
+                float(duration_ms or 0.0),
+                str(channel or "").strip().lower(),
+                str(scope or "").strip(),
+                str(source or "").strip(),
+                str(error_text or "")[:4000],
+                json.dumps(metadata or {}, ensure_ascii=False),
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+
+
+def recent_tool_traces(
+    limit: int = 20,
+    tool: str = "",
+    success: bool | None = None,
+) -> list[dict]:
+    init_runtime_store()
+    clauses = []
+    params: list = []
+
+    tool_name = str(tool or "").strip()
+    if tool_name:
+        clauses.append("tool = ?")
+        params.append(tool_name)
+    if success is not None:
+        clauses.append("success = ?")
+        params.append(int(bool(success)))
+
+    where_sql = ""
+    if clauses:
+        where_sql = "WHERE " + " AND ".join(clauses)
+
+    with _connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT
+                id,
+                created_at,
+                tool,
+                args_json,
+                result_text,
+                success,
+                duration_ms,
+                channel,
+                scope,
+                source,
+                error_text,
+                metadata_json
+            FROM tool_traces
+            {where_sql}
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (*params, int(limit)),
+        ).fetchall()
+
+    results = []
+    for row in rows:
+        data = dict(row)
+        data["args"] = _safe_json_loads(data.get("args_json", "{}"), {})
+        data["metadata"] = _safe_json_loads(data.get("metadata_json", "{}"), {})
+        data["success"] = bool(data.get("success", 0))
+        results.append(data)
+    return results
 
 
 def recent_conversation_turns(limit: int = 8, channel: str = "", channel_scope: str = "") -> list[dict]:

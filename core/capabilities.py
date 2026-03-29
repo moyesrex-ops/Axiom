@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from core.agent_library import collect_agent_library_status
 from core.autoresearch_bridge import collect_autoresearch_status
 from core.automaton_bridge import collect_automaton_status
+from core.crucix_bridge import collect_crucix_status
 from core.deerflow_bridge import collect_deerflow_status
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status
@@ -152,8 +153,11 @@ def collect_capabilities() -> dict:
     personaplex_url = str(personaplex_cfg.get("server_url", "") or "").strip()
     telegram_cfg = runtime.get("channels", {}).get("telegram", {})
     research_cfg = runtime.get("research", {}) or {}
+    routing_cfg = runtime.get("routing", {}) or {}
+    learning_cfg = runtime.get("learning", {}) or {}
     vane_url = str(research_cfg.get("vane_url", "") or "").strip()
     autonomy_cfg = runtime.get("autonomy", {}) or {}
+    crucix = collect_crucix_status()
 
     return {
         "startup_mode": "gemini_first",
@@ -267,6 +271,17 @@ def collect_capabilities() -> dict:
         "research_backend": str(research_cfg.get("backend", "axiom") or "axiom"),
         "vane_url": vane_url,
         "vane_reachable": bool(vane_url) and _is_tcp_reachable(vane_url),
+        "routing_local_provider": str(routing_cfg.get("local_provider", "ollama") or "ollama"),
+        "routing_local_endpoint": str(routing_cfg.get("local_endpoint", "http://127.0.0.1:11434") or "http://127.0.0.1:11434"),
+        "routing_local_model": str(routing_cfg.get("local_model", "qwen2.5:7b-instruct") or "qwen2.5:7b-instruct"),
+        "routing_local_enabled": bool(routing_cfg.get("prefer_local_classifier", True)),
+        "learning_enabled": bool(learning_cfg.get("enabled", True)),
+        "learning_auto_run": bool(learning_cfg.get("auto_run", True)),
+        "learning_interval_seconds": int(learning_cfg.get("interval_seconds", 1800) or 1800),
+        "crucix_repo_path": str(crucix.get("repo_path", "") or ""),
+        "crucix_api_url": str(crucix.get("server_url", "") or ""),
+        "crucix_reachable": bool(crucix.get("reachable", False)),
+        "crucix_idea_count": int(crucix.get("idea_count", 0) or 0),
     }
 
 
@@ -321,6 +336,14 @@ def format_operator_surface(limit: int = 4) -> str:
         lines.append(
             f"Lightpanda backend is configured for browser acceleration and is {'reachable' if caps['lightpanda_reachable'] else 'not yet live'}."
         )
+    if caps["crucix_repo_path"]:
+        lines.append(
+            f"Crucix intelligence engine is {'reachable' if caps['crucix_reachable'] else 'configured but offline'} at {caps['crucix_api_url']}."
+        )
+
+    lines.append(
+        f"Learning daemon is {'enabled' if caps['learning_enabled'] and caps['learning_auto_run'] else 'available but not auto-running'}."
+    )
 
     lines.append("Never simulate status, artifacts, or execution. Name the exact path, URL, task id, or failure.")
     return "\n".join(f"- {line}" if index else line for index, line in enumerate(lines))
@@ -458,6 +481,21 @@ def format_capability_status() -> str:
             if caps["vane_reachable"]
             else f"Deep research backend: {caps['research_backend']}"
         ),
+        (
+            f"Crucix: API {'up' if caps['crucix_reachable'] else 'down'} at {caps['crucix_api_url']} | ideas={caps['crucix_idea_count']}"
+            if caps["crucix_repo_path"]
+            else "Crucix: repo not found"
+        ),
+        (
+            f"Local routing: {caps['routing_local_provider']} {caps['routing_local_model']} at {caps['routing_local_endpoint']}"
+            if caps["routing_local_enabled"]
+            else "Local routing: disabled"
+        ),
+        (
+            f"Learning daemon: auto-run every {caps['learning_interval_seconds']}s"
+            if caps["learning_enabled"] and caps["learning_auto_run"]
+            else "Learning daemon: disabled or manual"
+        ),
     ]
     return "[CAPABILITY STATUS]\n" + "\n".join(f"- {line}" for line in lines)
 
@@ -589,5 +627,16 @@ def format_capability_report() -> str:
             if caps["vane_reachable"]
             else f"Vane endpoint: {caps['vane_url'] or 'not configured'}"
         ),
+        f"Crucix repo path: {caps['crucix_repo_path'] or 'not found'}",
+        f"Crucix API URL: {caps['crucix_api_url'] or 'not configured'}",
+        f"Crucix API reachable: {'yes' if caps['crucix_reachable'] else 'no'}",
+        f"Crucix surfaced ideas: {caps['crucix_idea_count']}",
+        f"Local routing enabled: {'yes' if caps['routing_local_enabled'] else 'no'}",
+        f"Local routing provider: {caps['routing_local_provider']}",
+        f"Local routing endpoint: {caps['routing_local_endpoint']}",
+        f"Local routing model: {caps['routing_local_model']}",
+        f"Learning enabled: {'yes' if caps['learning_enabled'] else 'no'}",
+        f"Learning auto-run: {'yes' if caps['learning_auto_run'] else 'no'}",
+        f"Learning interval seconds: {caps['learning_interval_seconds']}",
     ]
     return "\n".join(lines)

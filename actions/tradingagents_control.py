@@ -192,31 +192,47 @@ def tradingagents_control(parameters: dict = None, player=None, speak=None) -> s
             return "Use action='analyze' with ticker=<symbol>."
         if speak:
             speak(f"Running TradingAgents analysis for {ticker}.")
-        result = run_tradingagents_analysis(params)
-        report = format_tradingagents_analysis(result)
-        log_event(
-            "research",
-            "tradingagents_analyze",
-            report[:2000],
-            metadata={
-                "ok": bool(result.get("ok")),
-                "ticker": ticker,
-                "trade_date": result.get("trade_date", ""),
-            },
-        )
-        if result.get("ok"):
-            save_to_nexus(
-                f"TradingAgents Analysis: {ticker}",
-                report[:6000],
-                kind="research",
-                source="tradingagents.analyze",
-                metadata={
-                    "ticker": ticker,
-                    "trade_date": result.get("trade_date", ""),
-                    "provider": result.get("provider", ""),
-                },
-            )
-        return report
+        def _bg_analyze():
+            try:
+                result = run_tradingagents_analysis(params)
+                report = format_tradingagents_analysis(result)
+                log_event(
+                    "research",
+                    "tradingagents_analyze",
+                    report[:2000],
+                    metadata={
+                        "ok": bool(result.get("ok")),
+                        "ticker": ticker,
+                        "trade_date": result.get("trade_date", ""),
+                    },
+                )
+                if result.get("ok"):
+                    save_to_nexus(
+                        f"TradingAgents Analysis: {ticker}",
+                        report[:6000],
+                        kind="research",
+                        source="tradingagents.analyze",
+                        metadata={
+                            "ticker": ticker,
+                            "trade_date": result.get("trade_date", ""),
+                            "provider": result.get("provider", ""),
+                        },
+                    )
+                if speak:
+                    speak(f"TradingAgents analysis complete for {ticker}. The decision is {result.get('final_trade_decision', 'HOLD')}.")
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(f"TradingAgents analysis for {ticker}:\n{report}")
+            except Exception as e:
+                msg = f"TradingAgents background analysis failed: {e}"
+                if speak:
+                    speak(msg)
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(msg)
+
+        import threading
+        t = threading.Thread(target=_bg_analyze, daemon=True, name=f"TradingAgents_{ticker}")
+        t.start()
+        return f"TradingAgents analysis for {ticker} started in the background. I will optionally notify you when complete."
 
     if action == "execute_mt5":
         ticker = str(params.get("ticker", "") or params.get("asset", "") or "").strip().upper()
@@ -225,57 +241,83 @@ def tradingagents_control(parameters: dict = None, player=None, speak=None) -> s
         if speak:
             speak(f"Running TradingAgents analysis and preparing an MT5 handoff for {ticker}.")
 
-        result = run_tradingagents_analysis(params)
-        if not result.get("ok"):
-            report = format_tradingagents_analysis(result)
-            log_event("trading", "tradingagents_mt5_handoff_failed", report[:2000], metadata={"ticker": ticker})
-            return report
+        def _bg_execute():
+            try:
+                result = run_tradingagents_analysis(params)
+                if not result.get("ok"):
+                    report = format_tradingagents_analysis(result)
+                    log_event("trading", "tradingagents_mt5_handoff_failed", report[:2000], metadata={"ticker": ticker})
+                    if speak:
+                        speak(f"MT5 handoff failed for {ticker}. Analysis error.")
+                    return
 
-        handoff = _build_mt5_handoff(result, params)
-        execution_result = ""
+                handoff = _build_mt5_handoff(result, params)
+                execution_result = ""
 
-        if not handoff["blocked_reasons"] and handoff["confirm"] and not handoff["dry_run"]:
-            execution_result = mt5_trading(
-                {
-                    "action": handoff["action"],
-                    "symbol": handoff["symbol"],
-                    "volume": handoff["volume"],
-                    "stop_loss": handoff["stop_loss"],
-                    "take_profit": handoff["take_profit"],
-                },
-                player=player,
-                speak=speak,
-            )
+                if not handoff["blocked_reasons"] and handoff["confirm"] and not handoff["dry_run"]:
+                    execution_result = mt5_trading(
+                        {
+                            "action": handoff["action"],
+                            "symbol": handoff["symbol"],
+                            "volume": handoff["volume"],
+                            "stop_loss": handoff["stop_loss"],
+                            "take_profit": handoff["take_profit"],
+                        },
+                        player=player,
+                        speak=speak,
+                    )
 
-        report = _format_mt5_handoff(result, handoff, execution_result=execution_result)
-        log_event(
-            "trading",
-            "tradingagents_mt5_handoff",
-            report[:2000],
-            metadata={
-                "ticker": ticker,
-                "trade_date": result.get("trade_date", ""),
-                "action": handoff.get("action", ""),
-                "symbol": handoff.get("symbol", ""),
-                "confirm": handoff.get("confirm", False),
-                "dry_run": handoff.get("dry_run", False),
-                "blocked": bool(handoff.get("blocked_reasons")),
-            },
-        )
-        save_to_nexus(
-            f"TradingAgents MT5 Handoff: {ticker}",
-            report[:4000],
-            kind="trading",
-            source="tradingagents.execute_mt5",
-            metadata={
-                "ticker": ticker,
-                "trade_date": result.get("trade_date", ""),
-                "action": handoff.get("action", ""),
-                "symbol": handoff.get("symbol", ""),
-                "confirm": handoff.get("confirm", False),
-            },
-        )
-        return report
+                report = _format_mt5_handoff(result, handoff, execution_result=execution_result)
+                log_event(
+                    "trading",
+                    "tradingagents_mt5_handoff",
+                    report[:2000],
+                    metadata={
+                        "ticker": ticker,
+                        "trade_date": result.get("trade_date", ""),
+                        "action": handoff.get("action", ""),
+                        "symbol": handoff.get("symbol", ""),
+                        "confirm": handoff.get("confirm", False),
+                        "dry_run": handoff.get("dry_run", False),
+                        "blocked": bool(handoff.get("blocked_reasons")),
+                    },
+                )
+                save_to_nexus(
+                    f"TradingAgents MT5 Handoff: {ticker}",
+                    report[:4000],
+                    kind="trading",
+                    source="tradingagents.execute_mt5",
+                    metadata={
+                        "ticker": ticker,
+                        "trade_date": result.get("trade_date", ""),
+                        "action": handoff.get("action", ""),
+                        "symbol": handoff.get("symbol", ""),
+                        "confirm": handoff.get("confirm", False),
+                    },
+                )
+
+                if speak:
+                    if handoff["blocked_reasons"]:
+                        speak(f"TradingAgents completed for {ticker}, but execution was blocked: {handoff['blocked_reasons'][0]}.")
+                    elif execution_result:
+                        speak(f"TradingAgents MT5 execution complete for {ticker}. {execution_result[:50]}")
+                    else:
+                        speak(f"TradingAgents MT5 evaluation complete for {ticker}, but no trade was forced.")
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(f"MT5 execution evaluated for {ticker}:\n{report}")
+
+            except Exception as e:
+                msg = f"TradingAgents MT5 execution failed: {e}"
+                if speak:
+                    speak(msg)
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(msg)
+
+        import threading
+        t = threading.Thread(target=_bg_execute, daemon=True, name=f"MT5Handoff_{ticker}")
+        t.start()
+        return f"TradingAgents MT5 handoff specifically for {ticker} has started in the background. I will notify you when it completes."
+
 
     if action == "launch_instructions":
         report = tradingagents_launch_instructions()

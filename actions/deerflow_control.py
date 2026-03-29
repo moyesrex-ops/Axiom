@@ -53,12 +53,29 @@ def deerflow_control(parameters: dict = None, player=None, speak=None) -> str:
         return report
 
     if action == "start":
-        result = start_deerflow_backend(timeout=float(params.get("timeout", 40) or 40))
-        report = str(result.get("message", "DeerFlow start finished.")).strip()
-        log_event("integration", "deerflow_start", report[:2000], metadata=result)
-        if result.get("started"):
-            save_to_nexus("DeerFlow Start", report[:2000], kind="integration", source="deerflow.start")
-        return report
+        def _bg_start():
+            try:
+                result = start_deerflow_backend(timeout=float(params.get("timeout", 40) or 40))
+                report = str(result.get("message", "DeerFlow start finished.")).strip()
+                log_event("integration", "deerflow_start", report[:2000], metadata=result)
+                if result.get("started"):
+                    save_to_nexus("DeerFlow Start", report[:2000], kind="integration", source="deerflow.start")
+                if speak:
+                    speak("DeerFlow startup sequence has completed.")
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(f"DeerFlow Start: {report}")
+            except Exception as e:
+                msg = f"DeerFlow start failed: {e}"
+                if speak:
+                    speak(msg)
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(msg)
+
+        import threading
+        t = threading.Thread(target=_bg_start, daemon=True, name="DeerFlowStart")
+        t.start()
+        return "DeerFlow backend startup initiated in the background. I will notify you when it completes."
+
 
     if action in {"query", "chat", "run"}:
         prompt = str(
@@ -71,31 +88,50 @@ def deerflow_control(parameters: dict = None, player=None, speak=None) -> str:
             return "Use action='query' with prompt=<message>."
         if speak:
             speak("Sending this task to DeerFlow.")
-        result = run_deerflow_query(
-            prompt=prompt,
-            mode=str(params.get("mode", "pro") or "pro").strip().lower(),
-            thread_id=str(params.get("thread_id", "") or "").strip(),
-            timeout=int(params.get("timeout", 240) or 240),
-        )
-        if not result.get("ok"):
-            report = str(result.get("message", "DeerFlow query failed.")).strip()
-            log_event("research", "deerflow_query_failed", report[:2000], metadata=result)
-            return report
-        report = (
-            f"DeerFlow response [{result.get('mode', 'pro')}]\n"
-            f"Thread ID: {result.get('thread_id', '')}\n"
-            f"Run ID: {result.get('run_id', '') or 'n/a'}\n\n"
-            f"{str(result.get('response_text', '')).strip()}"
-        ).strip()
-        log_event("research", "deerflow_query", prompt[:300], metadata=result)
-        save_to_nexus(
-            f"DeerFlow: {prompt[:60]}",
-            report[:6000],
-            kind="research",
-            source="deerflow.query",
-            metadata={"thread_id": result.get("thread_id", ""), "mode": result.get("mode", "pro")},
-        )
-        return report
+        def _bg_query():
+            try:
+                result = run_deerflow_query(
+                    prompt=prompt,
+                    mode=str(params.get("mode", "pro") or "pro").strip().lower(),
+                    thread_id=str(params.get("thread_id", "") or "").strip(),
+                    timeout=int(params.get("timeout", 240) or 240),
+                )
+                if not result.get("ok"):
+                    report = str(result.get("message", "DeerFlow query failed.")).strip()
+                    log_event("research", "deerflow_query_failed", report[:2000], metadata=result)
+                    if speak:
+                        speak("DeerFlow query failed. Please check the logs.")
+                    return
+                report = (
+                    f"DeerFlow response [{result.get('mode', 'pro')}]\n"
+                    f"Thread ID: {result.get('thread_id', '')}\n"
+                    f"Run ID: {result.get('run_id', '') or 'n/a'}\n\n"
+                    f"{str(result.get('response_text', '')).strip()}"
+                ).strip()
+                log_event("research", "deerflow_query", prompt[:300], metadata=result)
+                save_to_nexus(
+                    f"DeerFlow: {prompt[:60]}",
+                    report[:6000],
+                    kind="research",
+                    source="deerflow.query",
+                    metadata={"thread_id": result.get("thread_id", ""), "mode": result.get("mode", "pro")},
+                )
+                if speak:
+                    speak("DeerFlow query completed. " + str(result.get('response_text', ''))[:150] + "...")
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(f"DeerFlow Report:\n{report}")
+            except Exception as e:
+                msg = f"DeerFlow query failed: {e}"
+                if speak:
+                    speak(msg)
+                elif player and hasattr(player, "write_log"):
+                    player.write_log(msg)
+
+        import threading
+        t = threading.Thread(target=_bg_query, daemon=True, name="DeerFlowQuery")
+        t.start()
+        return "Task dispatched to DeerFlow in the background. I will notify you verbally when the run succeeds."
+
 
     if action == "launch_instructions":
         report = deerflow_launch_instructions()

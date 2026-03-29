@@ -1,5 +1,6 @@
 from core.agent_library import collect_agent_library_status
 from core.automaton_bridge import collect_automaton_status, start_automaton_runtime
+from core.crucix_bridge import collect_crucix_status, start_crucix_backend
 from core.deerflow_bridge import collect_deerflow_status, start_deerflow_backend
 from core.dexter_bridge import collect_dexter_status
 from core.lightpanda_bridge import collect_lightpanda_status, start_lightpanda_backend
@@ -150,6 +151,28 @@ def boot_integrations(log_func=None) -> list[str]:
         messages.append(line)
         _emit(log_func, line)
         log_event("integration", "deerflow_detected", line[:2000], metadata=deerflow_status)
+
+    crucix_cfg = runtime.get("crucix", {}) or {}
+    crucix_status = collect_crucix_status()
+    if crucix_cfg.get("auto_start", False):
+        try:
+            result = start_crucix_backend(timeout=12.0)
+        except Exception as exc:
+            result = {"started": False, "message": f"Crucix boot raised an exception: {exc}"}
+        msg = str(result.get("message", "Crucix auto-start attempted.")).strip()
+        line = f"[INTEGRATION] Crucix: {msg}" if result.get("started") else f"[INTEGRATION] Crucix blocked: {msg}"
+        messages.append(line)
+        _emit(log_func, line)
+        log_event("integration", "crucix_boot", line[:2000], metadata=result)
+    elif crucix_status.get("repo_path"):
+        line = (
+            "[INTEGRATION] Crucix detected. Intelligence API is live."
+            if crucix_status.get("reachable")
+            else "[INTEGRATION] Crucix detected. Auto-start is disabled."
+        )
+        messages.append(line)
+        _emit(log_func, line)
+        log_event("integration", "crucix_detected", line[:2000], metadata=crucix_status)
 
     agent_library = collect_agent_library_status(limit=4)
     if agent_library.get("enabled") and agent_library.get("sources_count", 0):
