@@ -72,6 +72,7 @@ class TaskJournalTests(unittest.TestCase):
     def test_submit_channel_task_uses_shared_channel_metadata(self):
         queue = Mock()
         queue.submit.return_value = "abc123"
+        progress = Mock()
 
         with patch("core.task_channels.get_queue", return_value=queue):
             task_id = submit_channel_task(
@@ -80,6 +81,7 @@ class TaskJournalTests(unittest.TestCase):
                 scope="42",
                 origin="telegram_bridge",
                 priority=TaskPriority.HIGH,
+                on_progress=progress,
             )
 
         self.assertEqual(task_id, "abc123")
@@ -89,6 +91,7 @@ class TaskJournalTests(unittest.TestCase):
         self.assertEqual(kwargs["metadata"]["channel"], "telegram")
         self.assertEqual(kwargs["metadata"]["scope"], "42")
         self.assertEqual(kwargs["metadata"]["origin"], "telegram_bridge")
+        self.assertIs(kwargs["on_progress"], progress)
 
 
 if __name__ == "__main__":

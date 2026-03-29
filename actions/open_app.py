@@ -51,6 +51,19 @@ _APP_ALIASES = {
     "figma":              {"Windows": "Figma",                  "Darwin": "Figma",               "Linux": "figma"},
 }
 
+_PROCESS_HINTS = {
+    "calculator": ("calculatorapp", "calc"),
+    "calc": ("calculatorapp", "calc"),
+    "notepad": ("notepad",),
+    "chrome": ("chrome",),
+    "google chrome": ("chrome",),
+    "firefox": ("firefox",),
+    "spotify": ("spotify",),
+    "vscode": ("code", "code - insiders"),
+    "visual studio code": ("code", "code - insiders"),
+    "telegram": ("telegram",),
+}
+
 
 def _normalize(raw: str) -> str:
     system = platform.system()
@@ -77,6 +90,49 @@ def _is_running(app_name: str) -> bool:
                 continue
     except Exception:
         pass
+    return False
+
+
+def _process_tokens(raw_name: str, normalized_name: str) -> tuple[str, ...]:
+    tokens = {
+        str(raw_name or "").lower().replace(".exe", "").strip(),
+        str(normalized_name or "").lower().replace(".exe", "").strip(),
+    }
+    compact = {token.replace(" ", "") for token in tokens if token}
+    tokens.update(compact)
+    for key, values in _PROCESS_HINTS.items():
+        if key in tokens or key.replace(" ", "") in compact:
+            tokens.update(values)
+    return tuple(token for token in tokens if token)
+
+
+def _close_windows(app_name: str, normalized_name: str) -> bool:
+    if _PSUTIL:
+        targets = _process_tokens(app_name, normalized_name)
+        matched = []
+        for proc in psutil.process_iter(["name"]):
+            try:
+                proc_name = str(proc.info.get("name", "") or "").lower().replace(".exe", "").replace(" ", "")
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            if not proc_name:
+                continue
+            if any(token.replace(" ", "") in proc_name or proc_name in token.replace(" ", "") for token in targets):
+                matched.append(proc)
+
+        if matched:
+            for proc in matched:
+                try:
+                    proc.terminate()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            gone, alive = psutil.wait_procs(matched, timeout=4)
+            for proc in alive:
+                try:
+                    proc.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            return bool(gone or matched)
     return False
 
 
@@ -163,6 +219,10 @@ _OS_LAUNCHERS = {
     "Linux":   _launch_linux,
 }
 
+_OS_CLOSERS = {
+    "Windows": _close_windows,
+}
+
 
 def open_app(
     parameters=None,
@@ -170,24 +230,39 @@ def open_app(
     player=None,
     session_memory=None,
 ) -> str:
-    app_name = (parameters or {}).get("app_name", "").strip()
+    params = parameters or {}
+    app_name = str(params.get("app_name", "") or "").strip()
+    action = str(params.get("action", "open") or "open").strip().lower()
 
     if not app_name:
         return "Please specify which application to open, sir."
 
     system   = platform.system()
     launcher = _OS_LAUNCHERS.get(system)
+    closer   = _OS_CLOSERS.get(system)
 
-    if launcher is None:
+    if action not in {"open", "close"}:
+        return f"Unknown open_app action: {action}"
+
+    if action == "open" and launcher is None:
         return f"Unsupported OS: {system}"
+    if action == "close" and closer is None:
+        return f"Closing applications is not supported on {system} yet."
 
     normalized = _normalize(app_name)
-    print(f"[open_app] Launching: {app_name} -> {normalized} ({system})")
+    verb = "Closing" if action == "close" else "Launching"
+    print(f"[open_app] {verb}: {app_name} -> {normalized} ({system})")
 
     if player:
-        player.write_log(f"[open_app] {app_name}")
+        player.write_log(f"[open_app] {action}: {app_name}")
 
     try:
+        if action == "close":
+            success = closer(app_name, normalized)
+            if success:
+                return f"Closed {app_name} successfully, sir."
+            return f"I tried to close {app_name}, sir, but could not confirm it exited."
+
         success = launcher(normalized)
 
         if success:
@@ -205,4 +280,5 @@ def open_app(
 
     except Exception as e:
         print(f"[open_app] Error: {e}")
-        return f"Failed to open {app_name}, sir: {e}"
+        action_word = "close" if action == "close" else "open"
+        return f"Failed to {action_word} {app_name}, sir: {e}"

@@ -224,6 +224,82 @@ class TelegramBridgeTests(unittest.TestCase):
             "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green.",
         )
 
+    def test_task_ack_message_includes_task_id_and_live_updates(self):
+        message = tb._task_ack_message("open calculator", "abc12345")
+
+        self.assertIn("Task ID: abc12345", message)
+        self.assertIn("Live updates will appear here.", message)
+
+    def test_format_progress_feedback_prefers_step_tool_description(self):
+        message = tb._format_progress_feedback(
+            {
+                "topic": "step_started",
+                "step_index": 2,
+                "step_total": 4,
+                "tool": "computer_use",
+                "description": "Click the launch button on screen",
+                "message": "Step execution started.",
+            }
+        )
+
+        self.assertEqual(message, "Step 2/4: [computer_use] Click the launch button on screen")
+
+    def test_queue_task_wires_live_feedback_callbacks(self):
+        with patch.object(tb, "submit_channel_task", return_value="abc12345") as submit_mock, patch.object(
+            tb, "_send_message"
+        ) as send_mock, patch.object(tb, "_persist_channel_state"), patch.object(
+            tb,
+            "_telegram_feedback_settings",
+            return_value={
+                "speak_updates_enabled": True,
+                "progress_updates_enabled": True,
+                "speak_min_interval_seconds": 0.0,
+                "progress_min_interval_seconds": 0.0,
+                "max_feedback_messages_per_task": 10,
+            },
+        ), patch.object(tb.time, "time", side_effect=[1.0, 3.0]):
+            tb._queue_task("42", "open calculator", 7, None, explicit=False)
+
+            kwargs = submit_mock.call_args.kwargs
+            self.assertTrue(callable(kwargs["speak"]))
+            self.assertTrue(callable(kwargs["on_progress"]))
+
+            kwargs["speak"]("Opening Calculator now.")
+            kwargs["on_progress"](
+                "abc12345",
+                {
+                    "topic": "step_started",
+                    "step_index": 1,
+                    "step_total": 1,
+                    "tool": "open_app",
+                    "description": "Open calculator",
+                },
+            )
+
+        self.assertGreaterEqual(send_mock.call_count, 2)
+        first_message = send_mock.call_args_list[0].args[1]
+        feedback_messages = [call.args[1] for call in send_mock.call_args_list[1:]]
+        self.assertIn("Task ID: abc12345", first_message)
+        self.assertIn("Opening Calculator now.", feedback_messages)
+        self.assertIn("Step 1/1: [open_app] Open calculator", feedback_messages)
+
+    def test_emit_task_feedback_does_not_raise_when_telegram_send_fails(self):
+        state = tb._task_feedback_state()
+
+        with patch.object(tb, "_send_message", side_effect=RuntimeError("telegram down")), patch.object(
+            tb, "_persist_channel_state"
+        ) as persist_mock, patch.object(tb, "log_event") as log_mock:
+            tb._emit_task_feedback(
+                "42",
+                task_id="abc12345",
+                text="Execution started.",
+                kind="progress",
+                state=state,
+            )
+
+        persist_mock.assert_not_called()
+        log_mock.assert_called()
+
 
 if __name__ == "__main__":
     unittest.main()

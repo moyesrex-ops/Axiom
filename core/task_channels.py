@@ -14,6 +14,7 @@ def submit_channel_task(
     priority: TaskPriority = TaskPriority.NORMAL,
     speak: Callable | None = None,
     on_complete: Callable | None = None,
+    on_progress: Callable | None = None,
     metadata: dict | None = None,
 ) -> str:
     payload = {
@@ -29,5 +30,6 @@ def submit_channel_task(
         priority=priority,
         speak=speak,
         on_complete=on_complete,
+        on_progress=on_progress,
         metadata=payload,
     )

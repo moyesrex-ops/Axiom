@@ -102,7 +102,7 @@ def _resolve_callable(name: str) -> tuple[Callable[..., Any], str]:
 def _normalize_parameters(tool_name: str, parameters: dict | None) -> dict:
     params = dict(parameters or {})
 
-    if tool_name == "screen_process":
+    if tool_name in {"screen_process", "vision_tool"}:
         if "action" not in params:
             params["action"] = "analyze"
         angle = str(params.get("angle", "") or "").strip().lower()

@@ -137,6 +137,10 @@ _MARKET_TASK_HINTS = (
     "xauusd",
 )
 _SOFTWARE_ONLY_TOOLS = {"codex_builder", "code_helper", "dev_agent"}
+_APP_CONTROL_VERBS = {
+    "open": ("open ", "launch ", "start "),
+    "close": ("close ", "quit ", "exit "),
+}
 
 
 def _get_api_key() -> str:
@@ -238,6 +242,50 @@ def _extract_color_hint(text: str) -> str:
         if match:
             return match[0]
     return ""
+
+
+def _extract_app_control_request(goal: str) -> tuple[str, str] | None:
+    normalized = str(goal or "").strip().lower()
+    if not normalized:
+        return None
+
+    action = ""
+    remainder = ""
+    for candidate, prefixes in _APP_CONTROL_VERBS.items():
+        for prefix in prefixes:
+            if normalized.startswith(prefix):
+                action = candidate
+                remainder = normalized[len(prefix):].strip()
+                break
+        if action:
+            break
+
+    if not action or not remainder:
+        return None
+
+    remainder = remainder.removeprefix("the ").strip()
+    for suffix in (" application", " app", " program"):
+        if remainder.endswith(suffix):
+            remainder = remainder[: -len(suffix)].strip()
+
+    try:
+        from actions.open_app import _APP_ALIASES
+
+        aliases = sorted(_APP_ALIASES.keys(), key=len, reverse=True)
+    except Exception:
+        aliases = []
+
+    for alias in aliases:
+        alias_text = str(alias or "").strip().lower()
+        if not alias_text:
+            continue
+        if remainder == alias_text or remainder.startswith(alias_text + " ") or alias_text in remainder:
+            return action, alias_text
+
+    if len(remainder.split()) <= 2 and re.fullmatch(r"[a-z0-9 ._-]+", remainder):
+        return action, remainder
+
+    return None
 
 
 def _autonomy_config() -> dict:
@@ -405,6 +453,11 @@ def _direct_tool_for_goal(goal: str, specialist_context: str = "") -> tuple[str,
     normalized = str(goal or "").strip().lower()
     if not normalized:
         return None
+
+    app_request = _extract_app_control_request(goal)
+    if app_request:
+        action, app_name = app_request
+        return ("open_app", {"action": action, "app_name": app_name})
 
     rgb_words = ("keyboard", "rgb", "lighting", "lights", "backlight", "color")
     color = _extract_color_hint(normalized)

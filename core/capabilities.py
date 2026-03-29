@@ -321,7 +321,7 @@ def format_operator_surface(limit: int = 4) -> str:
 
     if caps["telegram_bridge_enabled"] and caps["telegram_bot_configured"]:
         lines.append(
-            f"Telegram is live with {caps['telegram_allowed_chat_count']} allowed chat(s) and shares task state with voice."
+            f"Telegram is live with {caps['telegram_allowed_chat_count']} allowed chat(s), shares task state with voice, and mirrors live task feedback for queued execution."
         )
     else:
         lines.append("Telegram is disabled or missing a bot token, so voice remains the primary live channel.")

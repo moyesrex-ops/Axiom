@@ -33,6 +33,7 @@ class Task:
     error:       str        = field(compare=False, default="")
     speak:       Any        = field(compare=False, default=None)
     on_complete: Any        = field(compare=False, default=None)
+    on_progress: Any        = field(compare=False, default=None)
     metadata:    dict       = field(compare=False, default_factory=dict)
     cancel_flag: threading.Event = field(compare=False, default_factory=threading.Event)
 
@@ -118,6 +119,7 @@ class TaskQueue:
         priority:    TaskPriority = TaskPriority.NORMAL,
         speak:       Callable | None = None,
         on_complete: Callable | None = None,
+        on_progress: Callable | None = None,
         metadata:    dict | None = None,
     ) -> str:
 
@@ -129,6 +131,7 @@ class TaskQueue:
             goal        = goal,
             speak       = speak,
             on_complete = on_complete,
+            on_progress = on_progress,
             metadata    = dict(metadata or {}),
         )
 
@@ -270,6 +273,12 @@ class TaskQueue:
                         task.metadata["last_progress"] = str(payload.get("message") or "")[:500]
                     task.metadata["last_progress_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     self._snapshot(task)
+
+                if task.on_progress:
+                    try:
+                        task.on_progress(task.task_id, dict(payload))
+                    except Exception:
+                        pass
 
             result   = executor.execute(
                 goal        = task.goal,

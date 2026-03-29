@@ -229,6 +229,11 @@ DEFAULT_RUNTIME_CONFIG = {
             "queue_plain_messages": True,
             "plain_message_mode": "operator",
             "startup_prompt_enabled": True,
+            "speak_updates_enabled": True,
+            "progress_updates_enabled": True,
+            "speak_min_interval_seconds": 2.0,
+            "progress_min_interval_seconds": 4.0,
+            "max_feedback_messages_per_task": 10,
         }
     },
     "communications": {

@@ -142,6 +142,15 @@ _EXPLICIT_TOOL_NAMES = {
     "autoresearch_control",
 }
 _PLAIN_MESSAGE_MODES = {"operator", "smart", "legacy", "chat_only"}
+_PROGRESS_FEEDBACK_TOPICS = {
+    "executor_started",
+    "direct_route_selected",
+    "step_started",
+    "step_retrying",
+    "step_failed",
+    "task_failed",
+    "task_cancelled",
+}
 _CAPABILITY_TOKENS = (
     "lightpanda",
     "tradingagents",
@@ -223,6 +232,17 @@ def _plain_message_mode() -> str:
     return mode if mode in _PLAIN_MESSAGE_MODES else "operator"
 
 
+def _telegram_feedback_settings() -> dict:
+    cfg = _telegram_config()
+    return {
+        "speak_updates_enabled": bool(cfg.get("speak_updates_enabled", True)),
+        "progress_updates_enabled": bool(cfg.get("progress_updates_enabled", True)),
+        "speak_min_interval_seconds": max(0.0, float(cfg.get("speak_min_interval_seconds", 2.0) or 2.0)),
+        "progress_min_interval_seconds": max(0.0, float(cfg.get("progress_min_interval_seconds", 4.0) or 4.0)),
+        "max_feedback_messages_per_task": max(1, int(cfg.get("max_feedback_messages_per_task", 10) or 10)),
+    }
+
+
 def _api_url(method: str) -> str:
     return f"https://api.telegram.org/bot{_telegram_token()}/{method}"
 
@@ -260,6 +280,17 @@ def _trim_message(text: str, limit: int = 3900) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 18].rstrip() + "\n\n[truncated]"
+
+
+def _task_feedback_state() -> dict:
+    return {
+        "messages_sent": 0,
+        "limit_notice_sent": False,
+        "last_text": "",
+        "last_sent_at": 0.0,
+        "last_progress_at": 0.0,
+        "last_speak_at": 0.0,
+    }
 
 
 def _normalize_text(text: str) -> str:
@@ -520,16 +551,161 @@ def _task_ack_message(goal: str, task_id: str, explicit: bool = False) -> str:
     if explicit:
         return f"Queued it.\n\nTask ID: {task_id}\nGoal: {goal[:300]}".strip()
     if any(term in normalized for term in ("keyboard", "lighting", "backlight", "rgb", "lights")):
-        return "Changing that now."
-    if normalized.startswith(("open ", "launch ", "start ")):
-        return "Opening that now."
-    if normalized.startswith(("close ", "kill ", "restart ", "shutdown ")):
-        return "Handling that now."
-    if normalized.startswith(("search ", "look up ", "research ", "analyze ", "summarize ")):
-        return "Running that now."
-    if normalized.startswith(("create ", "build ", "make ", "write ", "deploy ", "fix ")):
-        return "Working on that now."
-    return "On it."
+        base = "Changing that now."
+    elif normalized.startswith(("open ", "launch ", "start ")):
+        base = "Opening that now."
+    elif normalized.startswith(("close ", "kill ", "restart ", "shutdown ")):
+        base = "Handling that now."
+    elif normalized.startswith(("search ", "look up ", "research ", "analyze ", "summarize ")):
+        base = "Running that now."
+    elif normalized.startswith(("create ", "build ", "make ", "write ", "deploy ", "fix ")):
+        base = "Working on that now."
+    else:
+        base = "On it."
+    return f"{base}\n\nTask ID: {task_id}\nLive updates will appear here.".strip()
+
+
+def _format_progress_feedback(event: dict | None) -> str:
+    payload = dict(event or {})
+    topic = str(payload.get("topic", "") or "").strip().lower()
+    if topic and topic not in _PROGRESS_FEEDBACK_TOPICS:
+        return ""
+
+    message = str(payload.get("message", "") or "").strip()
+    tool = str(payload.get("tool", "") or "").strip()
+    description = str(payload.get("description", "") or "").strip()
+    step_index = payload.get("step_index")
+    step_total = payload.get("step_total")
+
+    step_prefix = ""
+    if step_index not in (None, ""):
+        try:
+            step_prefix = f"Step {int(step_index)}"
+        except Exception:
+            step_prefix = "Step"
+        if step_total not in (None, ""):
+            try:
+                step_prefix += f"/{int(step_total)}"
+            except Exception:
+                pass
+
+    if topic == "executor_started":
+        return "Execution started."
+    if topic == "direct_route_selected":
+        if tool:
+            return f"Direct route selected: [{tool}]."
+        if message:
+            return message[:320]
+    if step_prefix and tool and description:
+        return f"{step_prefix}: [{tool}] {description[:220]}".strip()
+    if step_prefix and message:
+        return f"{step_prefix}: {message[:300]}".strip()
+    if topic in {"task_failed", "task_cancelled"} and message:
+        return message[:320]
+    return message[:320] if message else ""
+
+
+def _emit_task_feedback(
+    chat_id: str,
+    *,
+    task_id: str,
+    text: str,
+    kind: str,
+    state: dict,
+    reply_to_message_id: int | None = None,
+) -> None:
+    message = _trim_message(text)
+    if not message:
+        return
+
+    settings = _telegram_feedback_settings()
+    enabled = bool(settings.get(f"{kind}_updates_enabled", False))
+    if not enabled:
+        return
+
+    if message == str(state.get("last_text", "") or ""):
+        return
+
+    now = time.time()
+    min_interval = float(settings.get(f"{kind}_min_interval_seconds", 0.0) or 0.0)
+    last_kind_at = float(state.get(f"last_{kind}_at", 0.0) or 0.0)
+    last_any_at = float(state.get("last_sent_at", 0.0) or 0.0)
+    if (now - last_kind_at) < min_interval or (now - last_any_at) < 0.75:
+        return
+
+    max_messages = int(settings.get("max_feedback_messages_per_task", 10) or 10)
+    if int(state.get("messages_sent", 0) or 0) >= max_messages:
+        if not state.get("limit_notice_sent"):
+            try:
+                _send_message(
+                    chat_id,
+                    "Still running. Ask for status any time and I will report the latest checkpoint.",
+                    reply_to_message_id=reply_to_message_id,
+                )
+                state["limit_notice_sent"] = True
+            except Exception as error:
+                log_event(
+                    "telegram",
+                    "task_feedback_send_failed",
+                    str(error)[:500],
+                    metadata={"chat_id": chat_id, "task_id": task_id, "kind": kind, "phase": "limit_notice"},
+                )
+        return
+
+    try:
+        _send_message(chat_id, message, reply_to_message_id=reply_to_message_id)
+    except Exception as error:
+        log_event(
+            "telegram",
+            "task_feedback_send_failed",
+            str(error)[:500],
+            metadata={"chat_id": chat_id, "task_id": task_id, "kind": kind},
+        )
+        return
+
+    state["messages_sent"] = int(state.get("messages_sent", 0) or 0) + 1
+    state["last_text"] = message
+    state["last_sent_at"] = now
+    state[f"last_{kind}_at"] = now
+    _persist_channel_state(
+        chat_id,
+        active_task_id=task_id,
+        last_assistant_text=message,
+        metadata={"last_interaction": f"task_{kind}", "task_id": task_id},
+    )
+
+
+def _build_task_feedback_callbacks(
+    chat_id: str,
+    *,
+    reply_to_message_id: int | None,
+) -> tuple[Callable[[str], None], Callable[[str, dict | None], None]]:
+    state = _task_feedback_state()
+
+    def _speak_callback(text: str) -> None:
+        _emit_task_feedback(
+            chat_id,
+            task_id=str(_ACTIVE_CHAT_TASKS.get(chat_id, "") or ""),
+            text=str(text or ""),
+            kind="speak",
+            state=state,
+            reply_to_message_id=reply_to_message_id,
+        )
+
+    def _progress_callback(task_id: str, event: dict | None) -> None:
+        message = _format_progress_feedback(event)
+        if not message:
+            return
+        _emit_task_feedback(
+            chat_id,
+            task_id=str(task_id or ""),
+            text=message,
+            kind="progress",
+            state=state,
+            reply_to_message_id=reply_to_message_id,
+        )
+
+    return _speak_callback, _progress_callback
 
 
 def _extract_color_hint(text: str) -> str:
@@ -958,14 +1134,20 @@ def _queue_task(
         except Exception as send_error:
             log_event("telegram", "task_finish_send_failed", f"{task_id}: {send_error}")
 
+    speak_callback, progress_callback = _build_task_feedback_callbacks(
+        chat_id,
+        reply_to_message_id=reply_to_message_id,
+    )
     task_id = submit_channel_task(
         goal,
         channel="telegram",
         scope=chat_id,
         origin="telegram_bridge",
         priority=TaskPriority.NORMAL,
-        speak=None,
+        speak=speak_callback,
         on_complete=_on_complete,
+        on_progress=progress_callback,
+        metadata={"interface": "telegram_bridge"},
     )
     _ACTIVE_CHAT_TASKS[chat_id] = task_id
     _persist_channel_state(

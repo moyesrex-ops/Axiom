@@ -54,6 +54,30 @@ class ExecutorDirectRouteTests(unittest.TestCase):
         self.assertEqual(call_tool_mock.call_args.args[0], "codex_builder")
         self.assertIn("Open target:", result)
 
+    def test_direct_route_opens_known_apps_without_planner(self):
+        executor = AgentExecutor()
+
+        with patch("agent.executor._specialist_context", return_value=""), patch(
+            "agent.executor.create_plan"
+        ) as create_plan_mock, patch(
+            "agent.executor._call_tool",
+            return_value="Opened calculator successfully, sir.",
+        ) as call_tool_mock:
+            result = executor.execute("open calculator")
+
+        create_plan_mock.assert_not_called()
+        self.assertEqual(call_tool_mock.call_args.args[0], "open_app")
+        self.assertEqual(call_tool_mock.call_args.args[1]["action"], "open")
+        self.assertEqual(call_tool_mock.call_args.args[1]["app_name"], "calculator")
+        self.assertIn("Opened calculator", result)
+
+    def test_direct_route_closes_known_apps_without_cmd_control(self):
+        direct = _direct_tool_for_goal("close calculator")
+
+        self.assertEqual(direct[0], "open_app")
+        self.assertEqual(direct[1]["action"], "close")
+        self.assertEqual(direct[1]["app_name"], "calculator")
+
     def test_planner_receives_specialist_context_for_complex_tasks(self):
         executor = AgentExecutor()
         fake_plan = {
