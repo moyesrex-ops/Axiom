@@ -21,6 +21,33 @@ class MT5TradingAgentTests(unittest.TestCase):
 
         self.assertIn("did not detect", reason)
 
+    @patch.object(mt5a, "log_event")
+    @patch.object(
+        mt5a,
+        "list_mt5_symbols",
+        return_value={
+            "ok": True,
+            "visible_only": True,
+            "count": 1,
+            "symbols": [
+                {
+                    "symbol": "EURUSD",
+                    "group": "Forex",
+                    "path": "Forex\\Majors\\EURUSD",
+                    "volume_min": 0.01,
+                    "volume_max": 100.0,
+                    "volume_step": 0.01,
+                }
+            ],
+        },
+    )
+    def test_symbols_action_formats_market_watch_report(self, _symbols_mock, _log_mock):
+        with patch.object(mt5a, "mt5", object()):
+            report = mt5a.mt5_trading({"action": "symbols"})
+
+        self.assertIn("Visible MT5 Market Watch symbols: 1", report)
+        self.assertIn("EURUSD", report)
+
 
 if __name__ == "__main__":
     unittest.main()

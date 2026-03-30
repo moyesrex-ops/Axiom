@@ -53,6 +53,7 @@ ABSOLUTE RULES:
 - Use dexter_control for the imported Dexter financial research runtime and status.
 - Use pentagi_control for the imported PentAGI security runtime status and limitations.
 - Use tradingagents_control when the task depends on the imported TradingAgents runtime, trading runs, or multi-agent market analysis.
+- Use trade_daemon_control for persistent autonomous trading, daemon status, or immediate background trading-cycle control tied to MT5 Market Watch.
 - Use paperclip_control, openfang_control, symphony_control, or lossless_claw_control when the task is specifically about those imported repos or their runtime readiness.
 - Use crucix_control for the Crucix intelligence engine, live OSINT/market sweeps, or briefing-style world intelligence.
 - Use file_controller to save content to disk.
@@ -221,6 +222,31 @@ mt5_trading
   stop_loss: number (optional)
   take_profit: number (optional)
   note: string (optional)
+
+trade_daemon_control
+  action: "status" | "start" | "stop" | "run_once" | "wake" | "configure" | "snapshot" (required)
+  enabled: boolean (optional)
+  auto_start: boolean (optional)
+  cycle_interval_seconds: integer (optional)
+  max_symbols_per_cycle: integer (optional)
+  max_new_trades_per_cycle: integer (optional)
+  max_open_positions: integer (optional)
+  default_volume: number (optional)
+  min_confidence: integer (optional)
+  allowed_groups: list[string] (optional)
+  preferred_symbols: list[string] (optional)
+  analysis_cooldown_seconds: integer (optional)
+  trade_cooldown_seconds: integer (optional)
+  telegram_push_updates: boolean (optional)
+  telegram_push_non_trade_cycles: boolean (optional)
+  use_market_watch_only: boolean (optional)
+  provider: string (optional)
+  deep_model: string (optional)
+  quick_model: string (optional)
+  analysts: list[string] (optional)
+  analysis_timeout_seconds: integer (optional)
+  max_debate_rounds: integer (optional)
+  max_risk_discuss_rounds: integer (optional)
 
 computer_use
   action: "observe" | "analyze" | "read_text" | "find" | "find_and_click" | "find_and_type" | "verify" | "screenshot" | "move" | "click" | "type" | "hotkey" | "info" (required)

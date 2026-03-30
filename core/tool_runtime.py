@@ -41,6 +41,7 @@ _TOOL_BINDINGS: dict[str, ToolBinding] = {
     "deep_analyzer": ToolBinding("actions.deep_analyzer", "deep_analyzer"),
     "autonomous_researcher": ToolBinding("actions.autonomous_researcher", "autonomous_research"),
     "mt5_trading": ToolBinding("actions.mt5_trading_agent", "mt5_trading"),
+    "trade_daemon_control": ToolBinding("actions.trade_daemon_control", "trade_daemon_control"),
     "predict_market": ToolBinding("actions.market_predictor", "predict_market"),
     "mirofish_control": ToolBinding("actions.mirofish_control", "mirofish_control"),
     "tradingagents_control": ToolBinding("actions.tradingagents_control", "tradingagents_control"),

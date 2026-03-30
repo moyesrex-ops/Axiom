@@ -163,6 +163,12 @@ def collect_capabilities() -> dict:
     crucix = collect_crucix_status()
     comms = collect_comms_status()
     tool_rows = tool_catalog_rows()
+    try:
+        from core.trade_daemon import collect_trade_daemon_status
+
+        trade_daemon = collect_trade_daemon_status()
+    except Exception:
+        trade_daemon = {}
 
     return {
         "startup_mode": "gemini_first",
@@ -294,6 +300,16 @@ def collect_capabilities() -> dict:
         "crucix_api_url": str(crucix.get("server_url", "") or ""),
         "crucix_reachable": bool(crucix.get("reachable", False)),
         "crucix_idea_count": int(crucix.get("idea_count", 0) or 0),
+        "trade_daemon_enabled": bool(trade_daemon.get("enabled", False)),
+        "trade_daemon_running": bool(trade_daemon.get("running", False)),
+        "trade_daemon_auto_start": bool(trade_daemon.get("auto_start", False)),
+        "trade_daemon_cycle_interval_seconds": int(trade_daemon.get("cycle_interval_seconds", 0) or 0),
+        "trade_daemon_max_open_positions": int(trade_daemon.get("max_open_positions", 0) or 0),
+        "trade_daemon_market_watch_count": int(trade_daemon.get("market_watch_count", 0) or 0),
+        "trade_daemon_open_positions_count": int(trade_daemon.get("open_positions_count", 0) or 0),
+        "trade_daemon_cycle_count": int(trade_daemon.get("cycle_count", 0) or 0),
+        "trade_daemon_last_trade_at": str(trade_daemon.get("last_trade_at", "") or ""),
+        "trade_daemon_last_summary": str(trade_daemon.get("last_cycle_summary", "") or ""),
         "desktop_messaging_ready": bool(comms.get("desktop_messaging_ready", False)),
         "email_channel_ready": bool((comms.get("email", {}) or {}).get("ready", False)),
         "email_channel_enabled": bool((comms.get("email", {}) or {}).get("enabled", False)),
@@ -325,6 +341,17 @@ def format_operator_surface(limit: int = 4) -> str:
         )
     else:
         lines.append("Telegram is disabled or missing a bot token, so voice remains the primary live channel.")
+
+    if caps.get("trade_daemon_enabled"):
+        lines.append(
+            "The persistent trade daemon is part of the shared voice/Telegram runtime and rotates across visible MT5 Market Watch symbols instead of relying on one-off chat tasks."
+        )
+        lines.append(
+            f"Trade daemon status: {'running' if caps.get('trade_daemon_running') else 'idle'} | "
+            f"cycle={caps.get('trade_daemon_cycle_interval_seconds', 0)}s | "
+            f"market_watch={caps.get('trade_daemon_market_watch_count', 0)} | "
+            f"open_positions={caps.get('trade_daemon_open_positions_count', 0)}."
+        )
 
     if skill_status["enabled"] and skill_status["sources_count"]:
         source_names = ", ".join(source["name"] for source in skill_status["sources"][: max(int(limit), 1)])
@@ -538,6 +565,15 @@ def format_capability_status() -> str:
             else "Crucix: repo not found"
         ),
         (
+            f"Trade daemon: {'running' if caps['trade_daemon_running'] else 'idle'} | "
+            f"auto_start={'yes' if caps['trade_daemon_auto_start'] else 'no'} | "
+            f"market_watch={caps['trade_daemon_market_watch_count']} | "
+            f"open_positions={caps['trade_daemon_open_positions_count']} | "
+            f"cycles={caps['trade_daemon_cycle_count']}"
+            if caps["trade_daemon_enabled"]
+            else "Trade daemon: disabled"
+        ),
+        (
             f"Local routing: {caps['routing_local_provider']} {caps['routing_local_model']} at {caps['routing_local_endpoint']}"
             if caps["routing_local_enabled"]
             else "Local routing: disabled"
@@ -700,6 +736,16 @@ def format_capability_report() -> str:
         f"Crucix API URL: {caps['crucix_api_url'] or 'not configured'}",
         f"Crucix API reachable: {'yes' if caps['crucix_reachable'] else 'no'}",
         f"Crucix surfaced ideas: {caps['crucix_idea_count']}",
+        f"Trade daemon enabled: {'yes' if caps['trade_daemon_enabled'] else 'no'}",
+        f"Trade daemon running: {'yes' if caps['trade_daemon_running'] else 'no'}",
+        f"Trade daemon auto-start: {'yes' if caps['trade_daemon_auto_start'] else 'no'}",
+        f"Trade daemon cycle interval seconds: {caps['trade_daemon_cycle_interval_seconds']}",
+        f"Trade daemon max open positions: {caps['trade_daemon_max_open_positions']}",
+        f"Trade daemon market watch count: {caps['trade_daemon_market_watch_count']}",
+        f"Trade daemon open positions last seen: {caps['trade_daemon_open_positions_count']}",
+        f"Trade daemon cycles completed: {caps['trade_daemon_cycle_count']}",
+        f"Trade daemon last trade at: {caps['trade_daemon_last_trade_at'] or 'not yet'}",
+        f"Trade daemon last summary: {caps['trade_daemon_last_summary'] or 'none'}",
         f"Local routing enabled: {'yes' if caps['routing_local_enabled'] else 'no'}",
         f"Local routing provider: {caps['routing_local_provider']}",
         f"Local routing endpoint: {caps['routing_local_endpoint']}",

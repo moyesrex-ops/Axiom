@@ -8,6 +8,7 @@ class ToolCatalogTests(unittest.TestCase):
         self.assertEqual(canonical_tool_name("communications"), "comms_control")
         self.assertEqual(canonical_tool_name("screen_processor"), "vision_tool")
         self.assertEqual(canonical_tool_name("mt5"), "mt5_trading")
+        self.assertEqual(canonical_tool_name("trade_daemon"), "trade_daemon_control")
 
     def test_catalog_exposes_aliases(self):
         rows = tool_catalog_rows(category="communications")

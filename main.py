@@ -45,6 +45,7 @@ from actions.nexus_memory     import memory_archive
 from actions.deep_analyzer    import deep_analyzer
 from actions.autonomous_researcher import autonomous_research
 from actions.mt5_trading_agent     import mt5_trading
+from actions.trade_daemon_control  import trade_daemon_control
 from actions.market_predictor      import predict_market
 from actions.mirofish_control      import mirofish_control
 from actions.tradingagents_control import tradingagents_control
@@ -78,6 +79,7 @@ from core.secret_config            import get_gemini_api_key, get_secret
 from core.system_context           import format_prompt_system_context
 from core.task_channels            import submit_channel_task
 from core.telegram_bridge          import start_telegram_bridge, stop_telegram_bridge
+from core.trade_daemon            import start_trade_daemon, stop_trade_daemon
 from core.tool_runtime             import execute_tool
 from memory.runtime_store          import init_runtime_store, log_event
 
@@ -758,13 +760,52 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action":      {"type": "STRING", "description": "The action to perform: 'info', 'buy', 'sell', or 'screen_state'."},
+            "action":      {"type": "STRING", "description": "The action to perform: 'info', 'symbols', 'recent_deals', 'buy', 'sell', or 'screen_state'."},
             "symbol":      {"type": "STRING", "description": "The market symbol to trade (e.g., 'EURUSD'). Default is EURUSD."},
             "volume":      {"type": "NUMBER", "description": "The lot size for the trade (e.g., 0.01). Default is 0.01."},
             "stop_loss":   {"type": "NUMBER", "description": "Optional stop-loss price. Defaults to a 50-pip protective stop if omitted."},
             "take_profit": {"type": "NUMBER", "description": "Optional take-profit price. Defaults to a 50-pip target if omitted."},
             "prompt":      {"type": "STRING", "description": "Natural language trade intent for AI extraction."},
-            "observe_screen": {"type": "BOOLEAN", "description": "Whether to capture the visible MetaTrader screen state before live execution."}
+            "observe_screen": {"type": "BOOLEAN", "description": "Whether to capture the visible MetaTrader screen state before live execution."},
+            "visible_only": {"type": "BOOLEAN", "description": "For symbols action, restrict results to visible Market Watch symbols."},
+            "limit": {"type": "INTEGER", "description": "Optional row limit for symbols or recent_deals."},
+            "lookback_hours": {"type": "INTEGER", "description": "Optional lookback window for recent_deals."}
+        },
+        "required": ["action"]
+    }
+},
+{
+    "name": "trade_daemon_control",
+    "description": (
+        "Controls AXIOM's persistent autonomous trade daemon that rotates through MT5 Market Watch symbols, "
+        "runs TradingAgents-backed analysis, places real demo-account trades, and keeps Telegram/voice synced on the same daemon state."
+    ),
+    "parameters": {
+        "type": "OBJECT",
+        "properties": {
+            "action": {"type": "STRING", "description": "status | start | stop | run_once | wake | configure | snapshot"},
+            "enabled": {"type": "BOOLEAN", "description": "Enable or disable the daemon in runtime config"},
+            "auto_start": {"type": "BOOLEAN", "description": "Whether the daemon should auto-start during AXIOM boot"},
+            "cycle_interval_seconds": {"type": "INTEGER", "description": "Seconds between daemon cycles"},
+            "max_symbols_per_cycle": {"type": "INTEGER", "description": "How many MT5 symbols to evaluate per cycle"},
+            "max_new_trades_per_cycle": {"type": "INTEGER", "description": "How many fresh trades can be placed in one cycle"},
+            "max_open_positions": {"type": "INTEGER", "description": "Hard cap for simultaneous open positions"},
+            "default_volume": {"type": "NUMBER", "description": "Default MT5 lot size for daemon-driven orders"},
+            "min_confidence": {"type": "INTEGER", "description": "Minimum TradingAgents confidence to allow a live order"},
+            "allowed_groups": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "MT5 group roots to consider, such as Forex, Commodities, Indices, Crypto"},
+            "preferred_symbols": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional preferred symbol order"},
+            "analysis_cooldown_seconds": {"type": "INTEGER", "description": "Cooldown after a no-trade analysis"},
+            "trade_cooldown_seconds": {"type": "INTEGER", "description": "Cooldown after a live trade on the same symbol"},
+            "telegram_push_updates": {"type": "BOOLEAN", "description": "Whether the daemon should push trade updates into Telegram"},
+            "telegram_push_non_trade_cycles": {"type": "BOOLEAN", "description": "Whether to push no-trade cycle summaries into Telegram"},
+            "use_market_watch_only": {"type": "BOOLEAN", "description": "Restrict discovery to currently visible Market Watch symbols"},
+            "provider": {"type": "STRING", "description": "Optional TradingAgents provider override"},
+            "deep_model": {"type": "STRING", "description": "Optional TradingAgents deep model override"},
+            "quick_model": {"type": "STRING", "description": "Optional TradingAgents quick model override"},
+            "analysts": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Optional TradingAgents analyst subset"},
+            "analysis_timeout_seconds": {"type": "INTEGER", "description": "Optional per-symbol TradingAgents timeout"},
+            "max_debate_rounds": {"type": "INTEGER", "description": "Optional TradingAgents debate rounds"},
+            "max_risk_discuss_rounds": {"type": "INTEGER", "description": "Optional TradingAgents risk debate rounds"}
         },
         "required": ["action"]
     }
@@ -940,7 +981,7 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "summary | status | doctor | context | operator | routing | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | lightpanda | autoresearch | deerflow | crucix | learning | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
+            "action": {"type": "STRING", "description": "summary | status | doctor | context | operator | routing | hardware | integrations | mirofish | automaton | dexter | pentagi | tradingagents | trade_daemon | lightpanda | autoresearch | deerflow | crucix | learning | paperclip | openfang | symphony | lossless_claw | skills | agents | failures | events | tasks"},
             "limit":  {"type": "INTEGER", "description": "Optional row limit for failures/events/tasks"}
         },
         "required": []
@@ -2012,6 +2053,11 @@ def main():
             pass
 
         try:
+            stop_trade_daemon(timeout=2.5)
+        except Exception:
+            pass
+
+        try:
             shutdown_browser_control(timeout=10)
         except Exception:
             pass
@@ -2036,6 +2082,10 @@ def main():
         for line in boot_doctor_lines(limit=6):
             ui.write_log(f"SYS: {line}")
             log_event("doctor", "boot", line[:2000])
+
+        trade_cfg = load_runtime_config().get("trade_daemon", {}) or {}
+        if bool(trade_cfg.get("enabled", True)) and bool(trade_cfg.get("auto_start", True)):
+            start_trade_daemon(log_func=ui.write_log)
 
         axiom = AxiomLive(ui)
         runner_state["axiom"] = axiom

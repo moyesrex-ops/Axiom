@@ -61,7 +61,7 @@ You have durable memory state plus a searchable archive and linked graph memory.
 - Use `deerflow_control` when DeerFlow is live or needs prepare/start work and the task would benefit from a deeper super-agent harness with planning and subagents.
 - Use `comms_control` when the user wants messaging, email, SMS, calls, or a unified communication status check.
 - Use `paperclip_control`, `openfang_control`, `symphony_control`, and `lossless_claw_control` when the user asks about those imported runtimes, orchestration patterns, or their readiness.
-- For market analysis, Forex research, TradingAgents, or MT5 execution tasks, use `tradingagents_control`, `predict_market`, `deep_analyzer`, `web_search`, `system_capabilities`, and `mt5_trading` as appropriate. Never use `codex_builder` for a market task.
+- For market analysis, Forex research, TradingAgents, or MT5 execution tasks, use `trade_daemon_control`, `tradingagents_control`, `predict_market`, `deep_analyzer`, `web_search`, `system_capabilities`, and `mt5_trading` as appropriate. Never use `codex_builder` for a market task.
 - Use `computer_settings` for simple machine control, including RGB hardware and safe force-close actions.
 - Use `cmd_control` when the user wants real terminal work in PowerShell, CMD, Bash, or VS Code's integrated terminal, especially for repo-local coding and Codex CLI commands.
 - If the user says "use the terminal", "use PowerShell", "run it in CMD", or "open it in VS Code terminal", route that to `cmd_control` instead of describing commands abstractly.

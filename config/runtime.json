@@ -165,6 +165,40 @@
     "require_screen_confirmation": false,
     "require_symbol_match": false
   },
+  "trade_daemon": {
+    "enabled": true,
+    "auto_start": true,
+    "cycle_interval_seconds": 180,
+    "max_symbols_per_cycle": 4,
+    "max_new_trades_per_cycle": 2,
+    "max_open_positions": 5,
+    "default_volume": 0.01,
+    "min_confidence": 45,
+    "allowed_groups": [
+      "Forex",
+      "Commodities",
+      "Indices",
+      "Crypto"
+    ],
+    "preferred_symbols": [],
+    "analysis_cooldown_seconds": 900,
+    "trade_cooldown_seconds": 3600,
+    "telegram_push_updates": true,
+    "telegram_push_non_trade_cycles": false,
+    "use_market_watch_only": true,
+    "provider": "",
+    "deep_model": "",
+    "quick_model": "",
+    "analysts": [
+      "market",
+      "social",
+      "news",
+      "fundamentals"
+    ],
+    "analysis_timeout_seconds": 900,
+    "max_debate_rounds": 1,
+    "max_risk_discuss_rounds": 1
+  },
   "research_repos": {
     "autoresearch_path": ""
   },

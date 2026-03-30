@@ -96,6 +96,7 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
             from core.openfang_bridge import format_openfang_status
             from core.pentagi_bridge import format_pentagi_status
             from core.paperclip_bridge import format_paperclip_status
+            from core.trade_daemon import format_trade_daemon_status
             from core.tradingagents_bridge import format_tradingagents_status
             from core.symphony_bridge import format_symphony_status
             from core.learning_orchestrator import format_learning_status
@@ -106,6 +107,7 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
                 f"{format_dexter_status()}\n\n"
                 f"{format_pentagi_status()}\n\n"
                 f"{format_tradingagents_status(limit=limit)}\n\n"
+                f"{format_trade_daemon_status()}\n\n"
                 f"{format_lightpanda_status()}\n\n"
                 f"{format_autoresearch_status(limit=limit)}\n\n"
                 f"{format_deerflow_status(limit=limit)}\n\n"
@@ -282,6 +284,16 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
         except Exception as error:
             return f"TradingAgents status failed: {error}"
 
+    if action in ("trade_daemon", "trading_daemon"):
+        try:
+            from core.trade_daemon import format_trade_daemon_status
+
+            report = format_trade_daemon_status()
+            log_event("capabilities", "trade_daemon_status", report[:2000])
+            return report
+        except Exception as error:
+            return f"Trade daemon status failed: {error}"
+
     if action == "failures":
         rows = recent_failures(limit=limit)
         if not rows:
@@ -339,6 +351,6 @@ def system_capabilities(parameters: dict = None, player=None, speak=None) -> str
 
     return (
         "Unknown action. Use summary, status, doctor, context, hardware, integrations, "
-        "mirofish, automaton, dexter, pentagi, tradingagents, lightpanda, autoresearch, deerflow, "
+        "mirofish, automaton, dexter, pentagi, tradingagents, trade_daemon, lightpanda, autoresearch, deerflow, "
         "paperclip, openfang, symphony, lossless_claw, skills, agents, failures, events, or tasks."
     )

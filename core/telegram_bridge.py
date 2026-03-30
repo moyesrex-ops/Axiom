@@ -9,6 +9,7 @@ import requests
 
 from core import gemini_native as gn
 from actions.system_capabilities import system_capabilities
+from actions.trade_daemon_control import trade_daemon_control
 from agent.task_queue import TaskPriority, get_queue
 from core.capabilities import format_capability_status
 from core.intelligence_router import route_message_kind
@@ -1080,6 +1081,32 @@ def _send_message(chat_id: str | int, text: str, reply_to_message_id: int | None
     response.raise_for_status()
 
 
+def broadcast_bridge_message(text: str, chat_ids: list[str] | None = None) -> int:
+    if not _is_enabled():
+        return 0
+
+    if chat_ids:
+        targets = [str(chat_id).strip() for chat_id in chat_ids if str(chat_id).strip()]
+    else:
+        targets = sorted(_allowed_chat_ids())
+
+    delivered = 0
+    for chat_id in targets:
+        try:
+            _send_message(chat_id, text)
+            delivered += 1
+        except Exception as error:
+            log_event(
+                "telegram",
+                "broadcast_failed",
+                str(error)[:500],
+                metadata={"chat_id": chat_id, "text_preview": str(text or "")[:200]},
+            )
+    if delivered:
+        log_event("telegram", "broadcast_sent", str(text or "")[:500], metadata={"delivered": delivered})
+    return delivered
+
+
 def _format_recent_tasks(limit: int = 8) -> str:
     rows = recent_task_runs(limit=limit)
     if not rows:
@@ -1214,6 +1241,10 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
             (
                 "AXIOM Telegram bridge\n\n"
                 "/status - capability summary\n"
+                "/trading - trade daemon status\n"
+                "/trading_start - start the persistent trade daemon\n"
+                "/trading_stop - stop the persistent trade daemon\n"
+                "/trading_run - force the next trade cycle immediately\n"
                 "/tasks - recent task checkpoints\n"
                 "/task <goal> - optional explicit force-execute\n"
                 "Plain messages default to execution when they look actionable.\n"
@@ -1236,6 +1267,50 @@ def _handle_message(message: dict, log_func: Callable | None = None) -> None:
         _send_message(
             chat_id,
             _format_recent_tasks(limit=8),
+            reply_to_message_id=reply_to_message_id,
+        )
+        return
+
+    if text in ("/trading", "/trade", "/trading_status", "/trade_status"):
+        _send_message(
+            chat_id,
+            trade_daemon_control({"action": "status"}),
+            reply_to_message_id=reply_to_message_id,
+        )
+        return
+
+    if text in ("/trading_start", "/trade_start"):
+        if not execution_enabled:
+            _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
+            log_event("telegram", "execution_blocked", text, metadata={"chat_id": chat_id})
+            return
+        _send_message(
+            chat_id,
+            trade_daemon_control({"action": "start"}),
+            reply_to_message_id=reply_to_message_id,
+        )
+        return
+
+    if text in ("/trading_stop", "/trade_stop"):
+        if not execution_enabled:
+            _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
+            log_event("telegram", "execution_blocked", text, metadata={"chat_id": chat_id})
+            return
+        _send_message(
+            chat_id,
+            trade_daemon_control({"action": "stop"}),
+            reply_to_message_id=reply_to_message_id,
+        )
+        return
+
+    if text in ("/trading_run", "/trade_run", "/trading_wake", "/trade_wake"):
+        if not execution_enabled:
+            _send_message(chat_id, execution_lock_notice, reply_to_message_id=reply_to_message_id)
+            log_event("telegram", "execution_blocked", text, metadata={"chat_id": chat_id})
+            return
+        _send_message(
+            chat_id,
+            trade_daemon_control({"action": "run_once"}),
             reply_to_message_id=reply_to_message_id,
         )
         return

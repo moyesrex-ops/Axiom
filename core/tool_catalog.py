@@ -185,6 +185,12 @@ _TOOL_SPECS: dict[str, ToolSpec] = {
         "Native MetaTrader5 account inspection and order execution.",
         aliases=("mt5",),
     ),
+    "trade_daemon_control": ToolSpec(
+        "trade_daemon_control",
+        "trading",
+        "Persistent autonomous trading daemon control, status, and immediate-cycle triggers tied to MT5 Market Watch.",
+        aliases=("trade_daemon", "trading_daemon"),
+    ),
     "lightpanda_control": ToolSpec(
         "lightpanda_control",
         "integrations",

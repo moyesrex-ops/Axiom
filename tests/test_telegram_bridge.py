@@ -75,6 +75,40 @@ class TelegramBridgeTests(unittest.TestCase):
         reply_mock.assert_called_once()
         queue_task_mock.assert_not_called()
 
+    def test_trading_status_command_uses_trade_daemon_control(self):
+        message = {
+            "text": "/trading",
+            "chat": {"id": "42"},
+            "message_id": 8,
+        }
+
+        with patch.object(tb, "_chat_is_authorized", return_value=True), patch.object(
+            tb, "trade_daemon_control", return_value="daemon status"
+        ) as daemon_mock, patch.object(tb, "_send_message") as send_mock:
+            tb._handle_message(message)
+
+        daemon_mock.assert_called_once_with({"action": "status"})
+        send_mock.assert_called_once()
+        self.assertEqual(send_mock.call_args.args[1], "daemon status")
+
+    def test_trading_start_command_respects_execution_lock(self):
+        message = {
+            "text": "/trading_start",
+            "chat": {"id": "42"},
+            "message_id": 8,
+        }
+
+        with patch.object(tb, "_chat_is_authorized", return_value=True), patch.object(
+            tb, "_chat_can_execute", return_value=False
+        ), patch.object(tb, "_send_message") as send_mock, patch.object(
+            tb, "trade_daemon_control"
+        ) as daemon_mock:
+            tb._handle_message(message)
+
+        daemon_mock.assert_not_called()
+        send_mock.assert_called_once()
+        self.assertIn("execution is locked", send_mock.call_args.args[1].lower())
+
     def test_contextualize_rgb_followup_rewrites_pronoun_goal(self):
         with patch.dict(
             tb._LAST_CHAT_TASK_RESULTS,

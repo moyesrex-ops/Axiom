@@ -1,6 +1,7 @@
 import json
 import threading
 import time
+from datetime import datetime, timedelta
 from typing import Optional
 
 from actions.mt5_screen_observer import (
@@ -53,6 +54,194 @@ DEFAULT_SL_TP_PIPS = 50
 
 def _trading_config() -> dict:
     return load_runtime_config().get("trading", {}) or {}
+
+
+def _serialize_position(position) -> dict:
+    if position is None:
+        return {}
+    side = "BUY" if getattr(position, "type", None) == getattr(mt5, "ORDER_TYPE_BUY", 0) else "SELL"
+    return {
+        "ticket": int(getattr(position, "ticket", 0) or 0),
+        "symbol": str(getattr(position, "symbol", "") or "").strip().upper(),
+        "side": side,
+        "volume": float(getattr(position, "volume", 0.0) or 0.0),
+        "price_open": float(getattr(position, "price_open", 0.0) or 0.0),
+        "price_current": float(getattr(position, "price_current", 0.0) or 0.0),
+        "profit": float(getattr(position, "profit", 0.0) or 0.0),
+        "swap": float(getattr(position, "swap", 0.0) or 0.0),
+        "comment": str(getattr(position, "comment", "") or "").strip(),
+        "magic": int(getattr(position, "magic", 0) or 0),
+    }
+
+
+def _serialize_symbol(symbol_info) -> dict:
+    if symbol_info is None:
+        return {}
+    path = str(getattr(symbol_info, "path", "") or "").strip()
+    group = path.split("\\", 1)[0].strip() if path else ""
+    return {
+        "symbol": str(getattr(symbol_info, "name", "") or "").strip().upper(),
+        "visible": bool(getattr(symbol_info, "visible", False)),
+        "selected": bool(getattr(symbol_info, "select", False)),
+        "path": path,
+        "group": group,
+        "description": str(getattr(symbol_info, "description", "") or "").strip(),
+        "currency_base": str(getattr(symbol_info, "currency_base", "") or "").strip(),
+        "currency_profit": str(getattr(symbol_info, "currency_profit", "") or "").strip(),
+        "digits": int(getattr(symbol_info, "digits", 0) or 0),
+        "point": float(getattr(symbol_info, "point", 0.0) or 0.0),
+        "trade_mode": int(getattr(symbol_info, "trade_mode", 0) or 0),
+        "volume_min": float(getattr(symbol_info, "volume_min", 0.0) or 0.0),
+        "volume_max": float(getattr(symbol_info, "volume_max", 0.0) or 0.0),
+        "volume_step": float(getattr(symbol_info, "volume_step", 0.0) or 0.0),
+    }
+
+
+def get_mt5_account_snapshot(symbol_filter: str = "") -> dict:
+    if mt5 is None:
+        return {"ok": False, "message": "MetaTrader5 is not installed in the current Python environment."}
+    if not mt5.initialize():
+        return {"ok": False, "message": f"Failed to initialize MT5, error: {mt5.last_error()}"}
+    try:
+        account_info = mt5.account_info()
+        if account_info is None:
+            return {"ok": False, "message": f"Failed to get account info: {mt5.last_error()}"}
+
+        positions = mt5.positions_get(symbol=symbol_filter) if symbol_filter else mt5.positions_get()
+        rows = [_serialize_position(position) for position in list(positions or [])]
+        floating_pl = sum(float(row.get("profit", 0.0) or 0.0) for row in rows)
+        server = str(getattr(account_info, "server", "") or "")
+        return {
+            "ok": True,
+            "balance": float(getattr(account_info, "balance", 0.0) or 0.0),
+            "equity": float(getattr(account_info, "equity", 0.0) or 0.0),
+            "margin": float(getattr(account_info, "margin", 0.0) or 0.0),
+            "server": server,
+            "demo_account": _account_is_demo(account_info),
+            "positions": rows,
+            "positions_count": len(rows),
+            "floating_pl": floating_pl,
+        }
+    finally:
+        mt5.shutdown()
+
+
+def list_mt5_symbols(*, only_visible: bool = True, limit: int = 0) -> dict:
+    if mt5 is None:
+        return {"ok": False, "message": "MetaTrader5 is not installed in the current Python environment.", "symbols": []}
+    if not mt5.initialize():
+        return {"ok": False, "message": f"Failed to initialize MT5, error: {mt5.last_error()}", "symbols": []}
+    try:
+        symbols = list(mt5.symbols_get() or [])
+        rows = [_serialize_symbol(symbol_info) for symbol_info in symbols]
+        if only_visible:
+            rows = [row for row in rows if row.get("visible", False)]
+        rows.sort(key=lambda row: (row.get("group", ""), row.get("symbol", "")))
+        if limit and limit > 0:
+            rows = rows[:limit]
+        return {
+            "ok": True,
+            "symbols": rows,
+            "visible_only": bool(only_visible),
+            "count": len(rows),
+        }
+    finally:
+        mt5.shutdown()
+
+
+def recent_mt5_deals(*, limit: int = 8, lookback_hours: int = 48) -> dict:
+    if mt5 is None:
+        return {"ok": False, "message": "MetaTrader5 is not installed in the current Python environment.", "deals": []}
+    if not mt5.initialize():
+        return {"ok": False, "message": f"Failed to initialize MT5, error: {mt5.last_error()}", "deals": []}
+    try:
+        to_time = datetime.now()
+        from_time = to_time - timedelta(hours=max(int(lookback_hours or 1), 1))
+        deals = list(mt5.history_deals_get(from_time, to_time) or [])
+        deals.sort(key=lambda deal: int(getattr(deal, "time", 0) or 0), reverse=True)
+        rows = []
+        for deal in deals[: max(int(limit or 1), 1)]:
+            rows.append(
+                {
+                    "ticket": int(getattr(deal, "ticket", 0) or 0),
+                    "position_id": int(getattr(deal, "position_id", 0) or 0),
+                    "symbol": str(getattr(deal, "symbol", "") or "").strip().upper(),
+                    "type": int(getattr(deal, "type", 0) or 0),
+                    "volume": float(getattr(deal, "volume", 0.0) or 0.0),
+                    "price": float(getattr(deal, "price", 0.0) or 0.0),
+                    "profit": float(getattr(deal, "profit", 0.0) or 0.0),
+                    "comment": str(getattr(deal, "comment", "") or "").strip(),
+                    "time": int(getattr(deal, "time", 0) or 0),
+                }
+            )
+        return {"ok": True, "deals": rows, "count": len(rows), "lookback_hours": int(lookback_hours or 48)}
+    finally:
+        mt5.shutdown()
+
+
+def _format_account_snapshot(snapshot: dict, symbol_filter: str = "") -> str:
+    if not snapshot.get("ok"):
+        return str(snapshot.get("message", "Failed to get MT5 account info."))
+    positions = list(snapshot.get("positions", []) or [])
+    lines = [
+        (
+            f"MT5 Connected. Balance: {snapshot.get('balance', 0.0):.2f}, "
+            f"Equity: {snapshot.get('equity', 0.0):.2f}, Margin: {snapshot.get('margin', 0.0):.2f}, "
+            f"Open positions: {snapshot.get('positions_count', 0)}, Floating P/L: {snapshot.get('floating_pl', 0.0):.2f}"
+        ),
+        f"Server: {snapshot.get('server', 'unknown')} | Demo account: {'yes' if snapshot.get('demo_account') else 'no'}",
+    ]
+    if positions:
+        lines.append("Open positions:")
+        for position in positions[:6]:
+            lines.append(
+                (
+                    f"- #{position['ticket']} {position['symbol']} {position['side']} "
+                    f"{position['volume']:.2f} lots | entry {position['price_open']:.5f} "
+                    f"| current {position['price_current']:.5f} | P/L {position['profit']:.2f}"
+                )
+            )
+        if len(positions) > 6:
+            lines.append(f"- ... {len(positions) - 6} more open positions")
+    else:
+        lines.append("No open positions right now." if not symbol_filter else f"No open positions for {symbol_filter} right now.")
+    return "\n".join(lines)
+
+
+def _format_symbol_report(payload: dict) -> str:
+    if not payload.get("ok"):
+        return str(payload.get("message", "Failed to load MT5 symbols."))
+    symbols = list(payload.get("symbols", []) or [])
+    label = "Visible MT5 Market Watch symbols" if payload.get("visible_only", True) else "MT5 symbols"
+    lines = [f"{label}: {payload.get('count', len(symbols))}"]
+    if not symbols:
+        lines.append("No symbols matched the current filter.")
+        return "\n".join(lines)
+    for row in symbols[:40]:
+        group = row.get("group", "") or "Other"
+        path = row.get("path", "") or row.get("symbol", "")
+        lines.append(
+            f"- {row.get('symbol', '')} | group={group} | path={path} | "
+            f"volume {row.get('volume_min', 0.0):g}-{row.get('volume_max', 0.0):g} step {row.get('volume_step', 0.0):g}"
+        )
+    if len(symbols) > 40:
+        lines.append(f"- ... {len(symbols) - 40} more symbols")
+    return "\n".join(lines)
+
+
+def _format_deals_report(payload: dict) -> str:
+    if not payload.get("ok"):
+        return str(payload.get("message", "Failed to load MT5 deals."))
+    deals = list(payload.get("deals", []) or [])
+    lines = [f"Recent MT5 deals: {payload.get('count', len(deals))} over the last {payload.get('lookback_hours', 48)}h"]
+    if not deals:
+        lines.append("No recent MT5 deals were found.")
+        return "\n".join(lines)
+    for row in deals:
+        lines.append(
+            f"- #{row['ticket']} {row['symbol']} volume={row['volume']:.2f} price={row['price']:.5f} profit={row['profit']:.2f} comment={row['comment'] or 'n/a'}"
+        )
+    return "\n".join(lines)
 
 
 def _observe_mt5_screen_if_needed(symbol: str, params: dict, *, force: bool = False) -> dict:
@@ -172,61 +361,53 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         log_event("trading", "mt5_unavailable", message)
         return message
 
-    if not mt5.initialize():
-        message = f"Failed to initialize MT5, error: {mt5.last_error()}"
-        log_event("trading", "mt5_initialize_failed", message)
-        return message
-
-    if action == "info":
-        account_info = mt5.account_info()
-        if account_info is None:
-            mt5.shutdown()
-            return f"Failed to get account info: {mt5.last_error()}"
-
-        positions = (
-            mt5.positions_get(symbol=symbol_filter)
-            if symbol_filter
-            else mt5.positions_get()
-        )
-        positions = list(positions or [])
-        floating_pl = sum(float(getattr(position, "profit", 0.0) or 0.0) for position in positions)
-
-        lines = [
-            (
-                f"MT5 Connected. Balance: {account_info.balance:.2f}, "
-                f"Equity: {account_info.equity:.2f}, Margin: {account_info.margin:.2f}, "
-                f"Open positions: {len(positions)}, Floating P/L: {floating_pl:.2f}"
-            ),
-            f"Server: {account_info.server} | Demo account: {'yes' if _account_is_demo(account_info) else 'no'}",
-        ]
-
-        if positions:
-            lines.append("Open positions:")
-            for position in positions[:6]:
-                side = "BUY" if getattr(position, "type", None) == mt5.ORDER_TYPE_BUY else "SELL"
-                lines.append(
-                    (
-                        f"- #{position.ticket} {position.symbol} {side} "
-                        f"{float(position.volume):.2f} lots | entry {float(position.price_open):.5f} "
-                        f"| current {float(position.price_current):.5f} | P/L {float(position.profit):.2f}"
-                    )
-                )
-            if len(positions) > 6:
-                lines.append(f"- ... {len(positions) - 6} more open positions")
-        else:
-            lines.append("No open positions right now.")
-
-        res = "\n".join(lines)
+    if action in ("info", "status"):
+        snapshot = get_mt5_account_snapshot(symbol_filter=symbol_filter)
+        res = _format_account_snapshot(snapshot, symbol_filter=symbol_filter)
         if speak:
             speak(res)
         log_event(
             "trading",
             "mt5_info",
             res[:1500],
-            metadata={"symbol_filter": symbol_filter, "positions": len(positions)},
+            metadata={"symbol_filter": symbol_filter, "positions": int(snapshot.get("positions_count", 0) or 0)},
         )
-        mt5.shutdown()
         return res
+
+    if action in ("symbols", "market_watch", "marketwatch"):
+        only_visible = bool(params.get("visible_only", True))
+        limit = int(params.get("limit", 0) or 0)
+        payload = list_mt5_symbols(only_visible=only_visible, limit=limit)
+        report = _format_symbol_report(payload)
+        log_event(
+            "trading",
+            "mt5_symbols",
+            report[:2000],
+            metadata={"visible_only": only_visible, "count": int(payload.get("count", 0) or 0)},
+        )
+        return report
+
+    if action in ("recent_deals", "deals", "history"):
+        payload = recent_mt5_deals(
+            limit=int(params.get("limit", 8) or 8),
+            lookback_hours=int(params.get("lookback_hours", 48) or 48),
+        )
+        report = _format_deals_report(payload)
+        log_event(
+            "trading",
+            "mt5_recent_deals",
+            report[:2000],
+            metadata={
+                "count": int(payload.get("count", 0) or 0),
+                "lookback_hours": int(payload.get("lookback_hours", 48) or 48),
+            },
+        )
+        return report
+
+    if not mt5.initialize():
+        message = f"Failed to initialize MT5, error: {mt5.last_error()}"
+        log_event("trading", "mt5_initialize_failed", message)
+        return message
 
     if prompt_raw and action not in ("buy", "sell"):
         try:
@@ -424,6 +605,6 @@ def mt5_trading(parameters: dict = None, player=None, speak=None) -> str:
         return msg
 
     mt5.shutdown()
-    message = f"Unknown action: {action}. Supported: info, buy, sell."
+    message = f"Unknown action: {action}. Supported: info, symbols, recent_deals, buy, sell, screen_state."
     log_event("trading", "mt5_unknown_action", message)
     return message
