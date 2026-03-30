@@ -26,6 +26,10 @@ DEFAULT_RUNTIME_CONFIG = {
         "rapid_reconnect_seconds": 0.75,
         "error_reconnect_seconds": 3.0,
         "thinking_level": "low",
+        "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
+        "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH",
+        "prefix_padding_ms": 80,
+        "silence_duration_ms": 450,
     },
     "audio": {
         "target_input_rms": 4200.0,

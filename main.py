@@ -170,7 +170,17 @@ def _live_disconnect_notice(error: BaseException, reconnect_delay_seconds: float
             "SYS: Live session reset by the Gemini API because AXIOM sent a deprecated "
             f"realtime audio payload. Reconnecting in {delay_text}s."
         )
+    if "1007" in text and "invalid argument" in text:
+        return (
+            "SYS: Live session rejected an invalid realtime update. "
+            f"Reconnecting in {delay_text}s."
+        )
     return f"SYS: Live link dropped. Reconnecting in {delay_text}s with context recovery."
+
+
+def _is_invalid_live_argument_error(error: BaseException) -> bool:
+    text = _summarize_exception(error).lower()
+    return "1007" in text and "invalid argument" in text
 
 
 def _safe_queue_size(queue: asyncio.Queue | None) -> int:
@@ -1252,6 +1262,9 @@ class AxiomLive:
         self._idle_rotate_window_seconds = 0.9
         self._rapid_reconnect_seconds = 0.75
         self._error_reconnect_seconds = 3.0
+        self._last_status_text = ""
+        self._last_status_at = 0.0
+        self._session_send_lock = None
         self._shutdown_requested = threading.Event()
         self._apply_audio_runtime_config(load_runtime_config())
 
@@ -1288,16 +1301,24 @@ class AxiomLive:
         )
 
     def speak(self, text: str):
-        """Thread-safe speak - any thread can call this."""
-        if not self._loop or not self.session:
+        """Thread-safe status emission for background tools and agents."""
+        message = str(text or "").strip()
+        if not message:
             return
-        asyncio.run_coroutine_threadsafe(
-            self.session.send_client_content(
-                turns={"parts": [{"text": text}]},
-                turn_complete=True
-            ),
-            self._loop
-         )
+        now = time.time()
+        if message == self._last_status_text and (now - self._last_status_at) < 1.5:
+            return
+        self._last_status_text = message
+        self._last_status_at = now
+        self.ui.write_log(f"Axiom: {message}")
+
+    async def _send_session_message(self, sender) -> None:
+        lock = self._session_send_lock
+        if lock is None:
+            await sender()
+            return
+        async with lock:
+            await sender()
 
     def _interrupt_threshold(self) -> float:
         return self._interrupt_detector.interrupt_threshold()
@@ -1545,6 +1566,24 @@ class AxiomLive:
                 )
             ),
         )
+        silence_duration_ms = max(150, int(live_cfg.get("silence_duration_ms", 450) or 450))
+        prefix_padding_ms = max(0, int(live_cfg.get("prefix_padding_ms", 80) or 80))
+        config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                start_of_speech_sensitivity=(
+                    live_cfg.get("start_of_speech_sensitivity")
+                    or types.StartSensitivity.START_SENSITIVITY_HIGH
+                ),
+                end_of_speech_sensitivity=(
+                    live_cfg.get("end_of_speech_sensitivity")
+                    or types.EndSensitivity.END_SENSITIVITY_HIGH
+                ),
+                prefix_padding_ms=prefix_padding_ms,
+                silence_duration_ms=silence_duration_ms,
+            ),
+            activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+            turn_coverage=types.TurnCoverage.TURN_INCLUDES_ONLY_ACTIVITY,
+        )
         thinking_level = str(live_cfg.get("thinking_level", "") or "").strip().lower()
         thinking_budget = live_cfg.get("thinking_budget")
         include_thoughts = bool(live_cfg.get("include_thoughts", False))
@@ -1636,12 +1675,23 @@ class AxiomLive:
         while True:
             msg = await self.out_queue.get()
             mime_type = str((msg or {}).get("mime_type", "")).strip().lower()
+            if self._tool_calls_in_flight > 0 and mime_type.startswith("audio/"):
+                continue
             if mime_type.startswith("audio/"):
-                await self.session.send_realtime_input(audio=msg)
+                await self._send_session_message(
+                    lambda: self.session.send_realtime_input(audio=msg)
+                )
             elif mime_type.startswith("video/") or mime_type.startswith("image/"):
-                await self.session.send_realtime_input(video=msg)
+                await self._send_session_message(
+                    lambda: self.session.send_realtime_input(video=msg)
+                )
             else:
-                await self.session.send_realtime_input(media=msg)
+                log_event(
+                    "session",
+                    "unsupported_realtime_payload",
+                    mime_type or "unknown",
+                    metadata={"keys": sorted(list((msg or {}).keys()))[:6]},
+                )
 
     async def _listen_audio(self):
         print("[AXIOM] Mic started")
@@ -1765,8 +1815,10 @@ class AxiomLive:
                             finally:
                                 self._tool_calls_in_flight = max(0, self._tool_calls_in_flight - 1)
                             fn_responses.append(fr)
-                        await self.session.send_tool_response(
-                            function_responses=fn_responses
+                        await self._send_session_message(
+                            lambda: self.session.send_tool_response(
+                                function_responses=fn_responses
+                            )
                         )
                         await self._maybe_rotate_session("tool_response_sent")
 
@@ -1823,6 +1875,7 @@ class AxiomLive:
                         asyncio.TaskGroup() as tg,
                     ):
                         self.session        = session
+                        self._session_send_lock = asyncio.Lock()
                         self._loop          = asyncio.get_event_loop()
                         self.audio_in_queue = asyncio.Queue()
                         self.out_queue      = asyncio.Queue(maxsize=10)
@@ -1861,6 +1914,7 @@ class AxiomLive:
                     planned_rotation = self._go_away_requested and _is_clean_rotation_error(e)
                     self._last_disconnect_was_planned = planned_rotation
                     invalid_resumption = _is_invalid_resumption_error(e)
+                    invalid_argument = _is_invalid_live_argument_error(e)
                     if invalid_resumption:
                         stale_handle = self._session_resumption_handle
                         self._session_resumption_handle = ""
@@ -1871,9 +1925,23 @@ class AxiomLive:
                             stale_handle[:48],
                             metadata={"reason": self._last_disconnect_reason[:220], "supported": True},
                         )
+                    elif invalid_argument and self._session_resumption_handle:
+                        stale_handle = self._session_resumption_handle
+                        self._session_resumption_handle = ""
+                        self._session_resumable = False
+                        log_event(
+                            "session",
+                            "resumption_handle_cleared",
+                            stale_handle[:48],
+                            metadata={
+                                "reason": self._last_disconnect_reason[:220],
+                                "supported": self._session_resumption_supported,
+                                "invalid_argument": True,
+                            },
+                        )
                     next_delay_seconds = (
                         self._rapid_reconnect_seconds
-                        if (self._go_away_requested or invalid_resumption)
+                        if (self._go_away_requested or invalid_resumption or invalid_argument)
                         else self._error_reconnect_seconds
                     )
                     log_event(
@@ -1885,6 +1953,7 @@ class AxiomLive:
                             "has_resumption_handle": bool(self._session_resumption_handle),
                             "go_away_requested": self._go_away_requested,
                             "invalid_resumption": invalid_resumption,
+                            "invalid_argument": invalid_argument,
                             "resumption_supported": self._session_resumption_supported,
                             "reconnect_delay_seconds": next_delay_seconds,
                         },
@@ -1897,6 +1966,7 @@ class AxiomLive:
                         traceback.print_exc()
                 finally:
                     self.session = None
+                    self._session_send_lock = None
                     self._loop = None
                     self.audio_in_queue = None
                     self.out_queue = None
