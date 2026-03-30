@@ -155,6 +155,24 @@ def _is_invalid_resumption_error(error: BaseException) -> bool:
     return "1008" in text and ("not implemented" in text or "session resumption" in text or "operation is not implemented" in text)
 
 
+def _format_reconnect_delay(seconds: float) -> str:
+    rounded = round(float(seconds or 0.0), 1)
+    if abs(rounded - round(rounded)) < 0.05:
+        return str(int(round(rounded)))
+    return f"{rounded:.1f}".rstrip("0").rstrip(".")
+
+
+def _live_disconnect_notice(error: BaseException, reconnect_delay_seconds: float) -> str:
+    text = _summarize_exception(error).lower()
+    delay_text = _format_reconnect_delay(reconnect_delay_seconds)
+    if "realtime_input.media_chunks is deprecated" in text:
+        return (
+            "SYS: Live session reset by the Gemini API because AXIOM sent a deprecated "
+            f"realtime audio payload. Reconnecting in {delay_text}s."
+        )
+    return f"SYS: Live link dropped. Reconnecting in {delay_text}s with context recovery."
+
+
 def _safe_queue_size(queue: asyncio.Queue | None) -> int:
     if queue is None:
         return 0
@@ -1617,7 +1635,13 @@ class AxiomLive:
     async def _send_realtime(self):
         while True:
             msg = await self.out_queue.get()
-            await self.session.send_realtime_input(media=msg)
+            mime_type = str((msg or {}).get("mime_type", "")).strip().lower()
+            if mime_type.startswith("audio/"):
+                await self.session.send_realtime_input(audio=msg)
+            elif mime_type.startswith("video/") or mime_type.startswith("image/"):
+                await self.session.send_realtime_input(video=msg)
+            else:
+                await self.session.send_realtime_input(media=msg)
 
     async def _listen_audio(self):
         print("[AXIOM] Mic started")
@@ -1868,7 +1892,7 @@ class AxiomLive:
                     if planned_rotation:
                         print(f"[AXIOM] Planned live-session rotation: {e}")
                     else:
-                        self.ui.write_log("SYS: Live link dropped. Reconnecting in 3s with context recovery.")
+                        self.ui.write_log(_live_disconnect_notice(e, next_delay_seconds))
                         print(f"[AXIOM] Error: {e}")
                         traceback.print_exc()
                 finally:
