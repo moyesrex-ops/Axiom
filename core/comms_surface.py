@@ -3,6 +3,10 @@ import os
 import smtplib
 from email.message import EmailMessage
 
+from core.google_workspace import (
+    collect_google_workspace_status,
+    google_workspace_launch_instructions,
+)
 from core.runtime_config import load_runtime_config
 from core.secret_config import get_secret
 
@@ -99,6 +103,7 @@ def collect_comms_status() -> dict:
     desktop_apps_cfg = _communications_config().get("desktop_apps", {}) or {}
     email = _email_runtime_settings()
     telephony = _telephony_runtime_settings()
+    google_workspace = collect_google_workspace_status()
     return {
         "telegram_bridge_enabled": bool(telegram_cfg.get("enabled", False)),
         "telegram_token_present": bool(telegram_token),
@@ -107,6 +112,7 @@ def collect_comms_status() -> dict:
         "desktop_messaging_ready": bool(desktop_apps_cfg.get("enabled", True) and _has_module("pyautogui")),
         "email": email,
         "telephony": telephony,
+        "google_workspace": google_workspace,
     }
 
 
@@ -114,10 +120,18 @@ def format_comms_status() -> str:
     status = collect_comms_status()
     email = status["email"]
     telephony = status["telephony"]
+    google_workspace = status["google_workspace"]
     lines = [
         "[COMMUNICATION SURFACE]",
         f"- Telegram bridge: {'enabled' if status['telegram_bridge_enabled'] else 'disabled'} | token={'yes' if status['telegram_token_present'] else 'no'} | allowed_chats={status['telegram_allowed_chat_count']}",
         f"- Desktop messaging automation: {'ready' if status['desktop_messaging_ready'] else 'not ready'}",
+        (
+            f"- Google Workspace: {'ready' if google_workspace['ready'] else 'not ready'} | "
+            f"enabled={'yes' if google_workspace['enabled'] else 'no'} | "
+            f"gmail={'yes' if google_workspace['gmail_enabled'] else 'no'} | "
+            f"calendar={'yes' if google_workspace['calendar_enabled'] else 'no'} | "
+            f"timezone={google_workspace['timezone']}"
+        ),
         (
             f"- Email channel: {'ready' if email['ready'] else 'not ready'} | "
             f"enabled={'yes' if email['enabled'] else 'no'} | host={email['host'] or 'not configured'} | "
@@ -141,7 +155,8 @@ def email_launch_instructions() -> str:
         "- AXIOM_SMTP_HOST or communications.email.smtp_host\n"
         "- AXIOM_SMTP_USERNAME / SMTP_USERNAME\n"
         "- AXIOM_SMTP_PASSWORD / SMTP_PASSWORD\n"
-        "- AXIOM_SMTP_FROM / SMTP_FROM_ADDRESS or communications.email.from_address"
+        "- AXIOM_SMTP_FROM / SMTP_FROM_ADDRESS or communications.email.from_address\n\n"
+        + google_workspace_launch_instructions()
     )
 
 

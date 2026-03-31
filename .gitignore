@@ -15,3 +15,5 @@ memory/axiom_state.db
 .idea/
 tests/_tmp/
 .axiom_cache/
+.pytest_cache/
+pytest-cache-files-*/

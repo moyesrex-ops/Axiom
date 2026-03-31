@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>One local runtime, one command, real tool execution.</b><br>
-  Gemini Live · Unified Tool Runtime · Planner / Executor · Browser / Desktop / Terminal Control · Desktop Vision / Computer Use · Shared Voice / Telegram State · Trace Learning Daemon · Memory / SQLite State · Boot Doctor · Crucix Intelligence · Imported Skill Libraries · Imported Agent Catalogs · Telegram Operator Mode · DeerFlow · Paperclip · OpenFang · Symphony · lossless-claw
+  Gemini Live · Unified Tool Runtime · Planner / Executor · Browser / Desktop / Terminal Control · Desktop Vision / Computer Use · Shared Voice / Telegram State · Shared Operator State · Gmail / Calendar Control · Trace Learning Daemon · Memory / SQLite State · Boot Doctor · Crucix Intelligence · Imported Skill Libraries · Imported Agent Catalogs · Telegram Operator Mode · DeerFlow · Paperclip · OpenFang · Symphony · lossless-claw
 </p>
 
 <p align="center">
@@ -40,11 +40,13 @@ Core ideas:
 ## Latest Runtime Upgrades
 
 - Voice and Telegram now share one tool execution backbone instead of separate hardcoded dispatch trees.
+- Voice and Telegram now also mirror recent operator task state, so work started in one channel is easier to continue from the other.
 - Deferred work now runs through one shared mission journal with persisted phases, plan revisions, step checkpoints, and event history.
 - Every tool call is written into SQLite tool traces so AXIOM can mine recurring success and failure patterns.
 - A background learning daemon converts recent traces into routing insights stored in durable memory.
 - Gemini-native capability calls now go through one shared backend layer in `core/gemini_native.py` instead of being scattered across unrelated modules.
 - Voice Live now exposes Gemini's built-in Google Search directly alongside AXIOM's custom function tools.
+- `comms_control` can now surface Google Workspace status, check recent Gmail, draft or send human-style email replies, and book Google Calendar events when OAuth is configured.
 - Planner and Telegram task-vs-chat routing now use structured JSON generation instead of prompt-for-JSON plus loose parsing.
 - AXIOM now has a first-class `gemini_native` tool for grounded Search, URL Context, Code Execution, Maps grounding, and gated File Search.
 - `computer_use` is now a higher-level desktop operator that can observe the screen, find targets by description, click or type into them, and verify outcomes.
@@ -756,6 +758,7 @@ These stay optional, but AXIOM knows how to inspect and use them when they are p
 Useful checks:
 
 ```powershell
+python -m pytest -q
 python -m unittest discover -s tests -p "test_*.py" -v
 python -m compileall .
 python -c "from actions.system_capabilities import system_capabilities; print(system_capabilities({'action':'summary'}))"
@@ -768,6 +771,8 @@ python -c "from actions.tradingagents_control import tradingagents_control; prin
 .\scripts\axiom-ops.ps1 -Doctor -Integrations
 node .\scripts\axiom-sidecars.mjs
 ```
+
+GitHub CI now mirrors the main local checks on a Windows runner and includes a `main.py` import smoke test.
 
 Practical startup check:
 

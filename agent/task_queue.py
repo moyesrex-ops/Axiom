@@ -112,6 +112,22 @@ class TaskQueue:
                     "origin": str(snapshot_metadata.get("origin", "") or ""),
                 },
             )
+            if channel in {"voice", "telegram"}:
+                upsert_channel_state(
+                    channel="operator",
+                    scope="shared",
+                    active_task_id=active_task_id,
+                    last_task_id=task.task_id if task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING) else None,
+                    last_goal=task.goal,
+                    last_result=last_result,
+                    metadata={
+                        "task_id": task.task_id,
+                        "task_status": task.status.value,
+                        "origin": str(snapshot_metadata.get("origin", "") or ""),
+                        "last_channel": channel,
+                        "last_scope": scope,
+                    },
+                )
 
     def submit(
         self,

@@ -146,7 +146,7 @@ weather_report
   city: string (required)
 
 comms_control
-  action: "status" | "send" | "message" | "email" | "sms" | "call" | "launch_instructions" (required)
+  action: "status" | "launch_instructions" | "workspace_status" | "gmail_status" | "gmail_recent" | "gmail_check" | "gmail_read" | "gmail_reply_draft" | "gmail_reply_send" | "calendar_status" | "calendar_list" | "calendar_book" | "send" | "message" | "email" | "sms" | "call" (required)
   channel: string (optional)
   platform: string (optional)
   to: string (optional)
@@ -154,6 +154,22 @@ comms_control
   subject: string (optional)
   message: string (optional)
   message_text: string (optional)
+  query: string (optional Gmail search query)
+  message_id: string (optional Gmail message id)
+  count: integer (optional email/event count)
+  unread_only: boolean (optional Gmail unread filter)
+  instruction: string (optional human-style Gmail reply instruction)
+  send: boolean (optional send Gmail reply instead of drafting)
+  title: string (optional calendar title)
+  summary: string (optional calendar summary)
+  start: string (optional ISO-8601 start)
+  end: string (optional ISO-8601 end)
+  when: string (optional natural-language calendar booking request)
+  duration_minutes: integer (optional fallback event duration)
+  location: string (optional calendar location)
+  description: string (optional calendar description)
+  attendees: list[string] (optional attendee emails)
+  calendar_id: string (optional Google Calendar id)
 
 flight_finder
   origin: string (required)

@@ -253,7 +253,15 @@ def _api_url(method: str) -> str:
 
 
 def _channel_state(chat_id: str) -> dict:
-    return get_channel_state("telegram", str(chat_id or "").strip())
+    shared = get_channel_state("operator", "shared")
+    specific = get_channel_state("telegram", str(chat_id or "").strip())
+    if not shared:
+        return specific
+    if not specific:
+        return shared
+    merged = dict(shared)
+    merged.update({key: value for key, value in specific.items() if value not in (None, "", {}, [])})
+    return merged
 
 
 def _persist_channel_state(

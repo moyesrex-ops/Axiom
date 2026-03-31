@@ -12,6 +12,14 @@ class CommsSurfaceTests(unittest.TestCase):
                 "desktop_apps": {"enabled": True},
                 "email": {"enabled": True, "smtp_host": "smtp.example.com", "smtp_port": 587, "from_address": "axiom@example.com"},
                 "telephony": {"enabled": True, "provider": "twilio", "from_number": "+15551234567"},
+                "google_workspace": {
+                    "enabled": True,
+                    "gmail_enabled": True,
+                    "calendar_enabled": True,
+                    "client_secret_path": "C:\\Users\\moyes\\client_secret.json",
+                    "token_path": "C:\\Users\\moyes\\token.json",
+                    "timezone": "America/Regina",
+                },
             },
         }
 
@@ -29,7 +37,25 @@ class CommsSurfaceTests(unittest.TestCase):
 
         with patch.object(cs, "load_runtime_config", return_value=runtime), patch.object(
             cs, "get_secret", side_effect=fake_secret
-        ), patch.object(cs, "_has_module", side_effect=lambda name: True):
+        ), patch.object(cs, "_has_module", side_effect=lambda name: True), patch.object(
+            cs, "collect_google_workspace_status",
+            return_value={
+                "enabled": True,
+                "gmail_enabled": True,
+                "calendar_enabled": True,
+                "client_secret_path": "C:\\Users\\moyes\\client_secret.json",
+                "client_secret_exists": True,
+                "token_path": "C:\\Users\\moyes\\token.json",
+                "token_exists": True,
+                "libraries_ready": True,
+                "allow_browser_auth": True,
+                "timezone": "America/Regina",
+                "default_calendar_id": "primary",
+                "reply_model": "gemini-2.5-flash",
+                "calendar_model": "gemini-2.5-flash-lite-preview-06-17",
+                "ready": True,
+            },
+        ):
             status = cs.collect_comms_status()
 
         self.assertTrue(status["telegram_bridge_enabled"])
@@ -37,6 +63,7 @@ class CommsSurfaceTests(unittest.TestCase):
         self.assertTrue(status["email"]["ready"])
         self.assertTrue(status["telephony"]["sms_ready"])
         self.assertTrue(status["telephony"]["call_ready"])
+        self.assertTrue(status["google_workspace"]["ready"])
 
 
 if __name__ == "__main__":

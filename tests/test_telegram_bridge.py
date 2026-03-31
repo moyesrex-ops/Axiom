@@ -248,6 +248,20 @@ class TelegramBridgeTests(unittest.TestCase):
         self.assertEqual(decision["kind"], "task")
         self.assertEqual(decision["source"], "operator_explicit_tool")
 
+    def test_channel_state_falls_back_to_shared_operator_state(self):
+        with patch.object(
+            tb,
+            "get_channel_state",
+            side_effect=[
+                {"last_task_id": "voice1", "last_goal": "open gmail", "last_result": "done"},
+                {},
+            ],
+        ):
+            state = tb._channel_state("42")
+
+        self.assertEqual(state["last_task_id"], "voice1")
+        self.assertEqual(state["last_goal"], "open gmail")
+
     def test_render_task_completion_message_drops_robotic_prefix(self):
         message = tb._render_task_completion_message(
             "Hardware RGB updated: ASUS TUF Laptop Keyboard: color=green."

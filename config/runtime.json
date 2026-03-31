@@ -3,16 +3,19 @@
   "voice_backend": "gemini_live",
   "live_model": "gemini-3.1-flash-live-preview",
   "live": {
+    "api_version": "v1beta",
     "enable_context_window_compression": true,
     "rotation_lead_seconds": 4.0,
     "idle_rotate_window_ms": 900,
     "rapid_reconnect_seconds": 0.75,
     "error_reconnect_seconds": 3.0,
     "thinking_level": "low",
+    "enable_affective_dialog": false,
+    "enable_proactive_audio": false,
     "start_of_speech_sensitivity": "START_SENSITIVITY_HIGH",
     "end_of_speech_sensitivity": "END_SENSITIVITY_HIGH",
-    "prefix_padding_ms": 80,
-    "silence_duration_ms": 450
+    "prefix_padding_ms": 60,
+    "silence_duration_ms": 300
   },
   "audio": {
     "target_input_rms": 4200.0,
@@ -25,20 +28,20 @@
       "min_zero_crossing_ratio": 0.015,
       "max_zero_crossing_ratio": 0.24,
       "onset_multiplier": 1.12,
-      "required_speech_frames": 3,
-      "history_frames": 4,
+      "required_speech_frames": 2,
+      "history_frames": 3,
       "ambient_alpha": 0.08,
       "playback_alpha": 0.28,
-      "speaker_guard_ms": 120,
+      "speaker_guard_ms": 90,
       "speaker_guard_min_rms": 360.0,
       "speaker_guard_ambient_multiplier": 2.2,
       "speaker_guard_playback_multiplier": 0.16
     }
   },
   "text_models": {
-    "default": "gemini-3-flash-preview",
-    "fast": "gemini-3.1-flash-lite-preview",
-    "reasoning": "gemini-3.1-pro-preview"
+    "default": "gemini-2.5-flash",
+    "fast": "gemini-2.5-flash-lite-preview-06-17",
+    "reasoning": "gemini-2.5-pro"
   },
   "personaplex": {
     "enabled": false,
@@ -221,6 +224,36 @@
       "plain_message_mode": "operator",
       "startup_prompt_enabled": true,
       "show_task_ids_in_messages": false
+    }
+  },
+  "communications": {
+    "desktop_apps": {
+      "enabled": true
+    },
+    "email": {
+      "enabled": false,
+      "smtp_host": "",
+      "smtp_port": 587,
+      "from_address": "",
+      "use_tls": true
+    },
+    "telephony": {
+      "enabled": false,
+      "provider": "twilio",
+      "from_number": "",
+      "default_to_number": ""
+    },
+    "google_workspace": {
+      "enabled": false,
+      "gmail_enabled": true,
+      "calendar_enabled": true,
+      "client_secret_path": "",
+      "token_path": "",
+      "timezone": "America/Regina",
+      "default_calendar_id": "primary",
+      "reply_model": "",
+      "calendar_model": "",
+      "allow_browser_auth": true
     }
   }
 }

@@ -356,6 +356,45 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "comms_control",
+        "description": (
+            "Unified communications and personal-ops surface. Use this for Gmail or SMTP email, "
+            "Google Calendar booking, SMS/calls, and communication status checks. "
+            "Can check recent unread mail, read a message, draft or send a human-style reply, "
+            "list upcoming events, and book a calendar event from ISO timestamps or a natural-language request."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "status | launch_instructions | workspace_status | gmail_status | gmail_recent | gmail_check | gmail_read | gmail_reply_draft | gmail_reply_send | calendar_status | calendar_list | calendar_book | send | message | email | sms | call"},
+                "channel": {"type": "STRING", "description": "email | mail | sms | text | call | telegram | whatsapp | discord | slack | instagram"},
+                "platform": {"type": "STRING", "description": "Optional communication platform"},
+                "to": {"type": "STRING", "description": "Recipient address, username, or phone number"},
+                "receiver": {"type": "STRING", "description": "Recipient alias"},
+                "subject": {"type": "STRING", "description": "Email subject"},
+                "message": {"type": "STRING", "description": "Message body or extra communication text"},
+                "message_text": {"type": "STRING", "description": "Alternate message body field"},
+                "query": {"type": "STRING", "description": "Optional Gmail search query"},
+                "message_id": {"type": "STRING", "description": "Gmail message id to read or reply to"},
+                "count": {"type": "INTEGER", "description": "How many emails or events to return"},
+                "unread_only": {"type": "BOOLEAN", "description": "Prefer unread Gmail messages"},
+                "instruction": {"type": "STRING", "description": "Extra instruction for drafting a human-style Gmail reply"},
+                "send": {"type": "BOOLEAN", "description": "Send the Gmail reply instead of saving a draft"},
+                "title": {"type": "STRING", "description": "Calendar event title"},
+                "summary": {"type": "STRING", "description": "Calendar event summary"},
+                "start": {"type": "STRING", "description": "Calendar event start in ISO-8601 form"},
+                "end": {"type": "STRING", "description": "Calendar event end in ISO-8601 form"},
+                "when": {"type": "STRING", "description": "Natural-language scheduling request for calendar booking"},
+                "duration_minutes": {"type": "INTEGER", "description": "Default event duration when only a start time is implied"},
+                "location": {"type": "STRING", "description": "Calendar event location"},
+                "description": {"type": "STRING", "description": "Calendar event description"},
+                "attendees": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Calendar attendee emails"},
+                "calendar_id": {"type": "STRING", "description": "Optional Google Calendar id"}
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "reminder",
         "description": "Sets a timed reminder using Windows Task Scheduler.",
         "parameters": {
@@ -1607,8 +1646,8 @@ class AxiomLive:
                 )
             ),
         )
-        silence_duration_ms = max(150, int(live_cfg.get("silence_duration_ms", 450) or 450))
-        prefix_padding_ms = max(0, int(live_cfg.get("prefix_padding_ms", 80) or 80))
+        silence_duration_ms = max(120, int(live_cfg.get("silence_duration_ms", 300) or 300))
+        prefix_padding_ms = max(0, int(live_cfg.get("prefix_padding_ms", 60) or 60))
         config_kwargs["realtime_input_config"] = types.RealtimeInputConfig(
             automatic_activity_detection=types.AutomaticActivityDetection(
                 start_of_speech_sensitivity=(
@@ -1642,6 +1681,10 @@ class AxiomLive:
             thinking_kwargs["include_thoughts"] = True
         if thinking_kwargs:
             config_kwargs["thinking_config"] = types.ThinkingConfig(**thinking_kwargs)
+        if bool(live_cfg.get("enable_affective_dialog", False)):
+            config_kwargs["enable_affective_dialog"] = True
+        if bool(live_cfg.get("enable_proactive_audio", False)):
+            config_kwargs["proactivity"] = types.ProactivityConfig(proactive_audio=True)
         if self._live_context_window_compression:
             config_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(
                 sliding_window=types.SlidingWindow()
@@ -1898,7 +1941,11 @@ class AxiomLive:
     async def run(self):
         client = genai.Client(
             api_key=_get_api_key(),
-            http_options={"api_version": "v1beta"}
+            http_options={
+                "api_version": str(
+                    load_runtime_config().get("live", {}).get("api_version", "v1beta") or "v1beta"
+                )
+            }
         )
         heartbeat = HeartbeatDaemon(speak_func=self.speak, log_func=self.ui.write_log)
         heartbeat_task = asyncio.create_task(heartbeat.start())

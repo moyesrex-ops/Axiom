@@ -530,6 +530,19 @@ def log_conversation_turn(
             last_assistant_text=assistant_text[:4000],
             metadata={"last_turn_source": "conversation", **(metadata or {})},
         )
+        if channel in {"voice", "telegram"}:
+            upsert_channel_state(
+                channel="operator",
+                scope="shared",
+                last_user_text=user_text[:4000],
+                last_assistant_text=assistant_text[:4000],
+                metadata={
+                    "last_turn_source": "conversation",
+                    "last_channel": channel,
+                    "last_scope": channel_scope,
+                    **(metadata or {}),
+                },
+            )
     _index_graph_from_text(user_text, assistant_text, source_kind="conversation")
 
 
