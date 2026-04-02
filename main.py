@@ -120,6 +120,11 @@ def _normalize_live_model_name(model_name: str) -> str:
         return value.split("/", 1)[1].strip()
     return value
 
+
+def _supports_native_audio_dialog_features(model_name: str) -> bool:
+    normalized = _normalize_live_model_name(model_name).lower()
+    return "native-audio" in normalized or "audio-dialog" in normalized
+
 _memory_turn_counter  = 0
 _memory_turn_lock     = threading.Lock()
 _MEMORY_EVERY_N_TURNS = 5
@@ -269,13 +274,17 @@ TOOL_DECLARATIONS = [
     {
         "name": "open_app",
         "description": (
-            "Opens any application on the Windows computer. "
-            "Use this whenever the user asks to open, launch, or start any app, "
-            "website, or program. Always call this tool - never just say you opened it."
+            "Controls desktop applications on the computer. "
+            "Use this whenever the user asks to open, launch, start, close, quit, exit, or focus any app, "
+            "website wrapper, or program. Always call this tool instead of claiming it happened."
         ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": "open | close | focus (default: open)"
+                },
                 "app_name": {
                     "type": "STRING",
                     "description": "Exact name of the application (e.g. 'WhatsApp', 'Chrome', 'Spotify')"
@@ -315,11 +324,11 @@ TOOL_DECLARATIONS = [
     "parameters": {
         "type": "OBJECT",
         "properties": {
-            "action": {"type": "STRING", "description": "status | search | url_context | code_execution | maps | file_search"},
+            "action": {"type": "STRING", "description": "status | search | url_context | code_execution | maps | file_search | deep_research"},
             "query": {"type": "STRING", "description": "Query for search/maps/file_search"},
-            "prompt": {"type": "STRING", "description": "Prompt for url_context/code_execution/maps/file_search"},
+            "prompt": {"type": "STRING", "description": "Prompt for url_context/code_execution/maps/file_search/deep_research"},
             "urls": {"type": "ARRAY", "items": {"type": "STRING"}, "description": "Specific URLs for URL Context"},
-            "model": {"type": "STRING", "description": "Optional Gemini model override"},
+            "model": {"type": "STRING", "description": "Optional Gemini model or Deep Research agent override"},
             "latitude": {"type": "NUMBER", "description": "Optional latitude for Google Maps grounding"},
             "longitude": {"type": "NUMBER", "description": "Optional longitude for Google Maps grounding"},
             "enable_widget": {"type": "BOOLEAN", "description": "Optional Google Maps widget token request"},
@@ -327,6 +336,7 @@ TOOL_DECLARATIONS = [
             "confirm_upload": {"type": "BOOLEAN", "description": "Required to allow local file uploads for Gemini File Search unless runtime config already permits it"},
             "persist_store": {"type": "BOOLEAN", "description": "Whether to keep the Gemini File Search store after the query"},
             "timeout": {"type": "INTEGER", "description": "Optional file-search indexing timeout in seconds"},
+            "poll_seconds": {"type": "NUMBER", "description": "Optional Deep Research polling interval in seconds"},
         },
         "required": ["action"]
     }
@@ -366,7 +376,7 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "action": {"type": "STRING", "description": "status | launch_instructions | workspace_status | gmail_status | gmail_recent | gmail_check | gmail_read | gmail_reply_draft | gmail_reply_send | calendar_status | calendar_list | calendar_book | send | message | email | sms | call"},
+                "action": {"type": "STRING", "description": "status | launch_instructions | workspace_status | gmail_status | gmail_recent | gmail_check | gmail_read | gmail_reply_draft | gmail_reply_send | mail_overview | mail_read_visible | mail_reply_draft | calendar_status | calendar_list | calendar_book | send | message | email | sms | call"},
                 "channel": {"type": "STRING", "description": "email | mail | sms | text | call | telegram | whatsapp | discord | slack | instagram"},
                 "platform": {"type": "STRING", "description": "Optional communication platform"},
                 "to": {"type": "STRING", "description": "Recipient address, username, or phone number"},
@@ -1681,9 +1691,10 @@ class AxiomLive:
             thinking_kwargs["include_thoughts"] = True
         if thinking_kwargs:
             config_kwargs["thinking_config"] = types.ThinkingConfig(**thinking_kwargs)
-        if bool(live_cfg.get("enable_affective_dialog", False)):
+        native_audio_dialog_supported = _supports_native_audio_dialog_features(self.live_model)
+        if bool(live_cfg.get("enable_affective_dialog", False)) and native_audio_dialog_supported:
             config_kwargs["enable_affective_dialog"] = True
-        if bool(live_cfg.get("enable_proactive_audio", False)):
+        if bool(live_cfg.get("enable_proactive_audio", False)) and native_audio_dialog_supported:
             config_kwargs["proactivity"] = types.ProactivityConfig(proactive_audio=True)
         if self._live_context_window_compression:
             config_kwargs["context_window_compression"] = types.ContextWindowCompressionConfig(

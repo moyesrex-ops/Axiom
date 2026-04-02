@@ -95,6 +95,36 @@ class AgentLibraryTests(unittest.TestCase):
         )
         return repo
 
+    def _make_external_blueprints(self) -> dict:
+        root = self._workspace_dir("external_blueprints")
+
+        cashclaw = root / "cashclaw"
+        (cashclaw / "src" / "loop").mkdir(parents=True, exist_ok=True)
+        (cashclaw / "src" / "memory").mkdir(parents=True, exist_ok=True)
+        (cashclaw / "README.md").write_text("CashClaw README", encoding="utf-8")
+        (cashclaw / "src" / "heartbeat.ts").write_text("export const heartbeat = true;\n", encoding="utf-8")
+        (cashclaw / "src" / "loop" / "study.ts").write_text("export const study = true;\n", encoding="utf-8")
+        (cashclaw / "src" / "memory" / "search.ts").write_text("export const search = true;\n", encoding="utf-8")
+
+        hyperagents = root / "HyperAgents"
+        hyperagents.mkdir(parents=True, exist_ok=True)
+        (hyperagents / "README.md").write_text("HyperAgents README", encoding="utf-8")
+        (hyperagents / "meta_agent.py").write_text("class MetaAgent:\n    pass\n", encoding="utf-8")
+        (hyperagents / "task_agent.py").write_text("class TaskAgent:\n    pass\n", encoding="utf-8")
+        (hyperagents / "generate_loop.py").write_text("def generate_loop():\n    return []\n", encoding="utf-8")
+
+        jarvis = root / "vierisid-jarvis"
+        (jarvis / "docs").mkdir(parents=True, exist_ok=True)
+        (jarvis / "README.md").write_text("JARVIS daemon README", encoding="utf-8")
+        (jarvis / "VISION.md").write_text("Authority and goal pursuit vision", encoding="utf-8")
+        (jarvis / "docs" / "WORKFLOW_AUTOMATION.md").write_text("Workflow automation docs", encoding="utf-8")
+
+        return {
+            "cashclaw": cashclaw,
+            "hyperagents": hyperagents,
+            "jarvis": jarvis,
+        }
+
     def test_indexes_catalog_and_special_sources(self):
         repos = self._make_catalogs()
         runtime = {
@@ -267,6 +297,49 @@ class AgentLibraryTests(unittest.TestCase):
         self.assertTrue(any(row["id"] == "openmanus:mcp-agent-runner" for row in entries))
         self.assertEqual(search[0]["source_id"], "openmanus")
         self.assertEqual(recommend[0]["source_id"], "openmanus")
+
+    def test_indexes_cashclaw_hyperagents_and_jarvis_blueprints(self):
+        repos = self._make_external_blueprints()
+        runtime = {
+            "agent_library": {
+                "enabled": True,
+                "cashclaw_path": str(repos["cashclaw"]),
+                "hyperagents_path": str(repos["hyperagents"]),
+                "vierisid_jarvis_path": str(repos["jarvis"]),
+            }
+        }
+        source_specs = {
+            "cashclaw": {
+                "name": "CashClaw",
+                "config_key": "cashclaw_path",
+                "default_candidates": [],
+                "special": "cashclaw",
+            },
+            "hyperagents": {
+                "name": "HyperAgents",
+                "config_key": "hyperagents_path",
+                "default_candidates": [],
+                "special": "hyperagents",
+            },
+            "vierisid_jarvis": {
+                "name": "Vierisid JARVIS",
+                "config_key": "vierisid_jarvis_path",
+                "default_candidates": [],
+                "special": "vierisid_jarvis",
+            },
+        }
+
+        with patch.object(al, "load_runtime_config", return_value=runtime), patch.object(
+            al, "_SOURCE_SPECS", source_specs
+        ):
+            entries = al.index_agent_library()
+            search = al.search_agent_library("workflow automation authority", limit=3)
+
+        self.assertEqual(len(entries), 9)
+        self.assertTrue(any(row["id"] == "cashclaw:heartbeat-operator" for row in entries))
+        self.assertTrue(any(row["id"] == "hyperagents:meta-agent" for row in entries))
+        self.assertTrue(any(row["id"] == "vierisid_jarvis:workflow-engine" for row in entries))
+        self.assertEqual(search[0]["source_id"], "vierisid_jarvis")
 
 
 if __name__ == "__main__":

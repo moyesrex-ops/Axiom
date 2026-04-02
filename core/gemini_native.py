@@ -139,6 +139,14 @@ def file_search_model_name() -> str:
     )
 
 
+def deep_research_agent_name() -> str:
+    native = native_runtime_config()
+    configured = _non_empty_string(native.get("deep_research_agent", ""))
+    if configured:
+        return configured
+    return "deep-research-pro-preview-12-2025"
+
+
 def live_search_enabled() -> bool:
     return bool(native_runtime_config().get("enable_live_google_search", True))
 
@@ -544,6 +552,86 @@ def format_google_maps_result(result: dict) -> str:
     return body + "\n\n" + citations_block
 
 
+def deep_research(
+    prompt: str,
+    *,
+    agent: str = "",
+    timeout_seconds: int = 900,
+    poll_seconds: float = 10.0,
+) -> dict:
+    resolved_agent = _non_empty_string(agent) or deep_research_agent_name()
+    clean_prompt = _non_empty_string(prompt)
+    if not clean_prompt:
+        raise GeminiNativeError("Deep Research needs a non-empty prompt.")
+
+    client = get_client()
+    try:
+        interaction = client.interactions.create(
+            api_version="v1beta",
+            input=clean_prompt,
+            agent=resolved_agent,
+            background=True,
+        )
+    except Exception as error:
+        raise GeminiNativeError(f"Deep Research could not start: {error}") from error
+
+    interaction_id = _non_empty_string(getattr(interaction, "id", ""))
+    if not interaction_id:
+        raise GeminiNativeError("Deep Research started without returning an interaction id.")
+
+    deadline = time.time() + max(int(timeout_seconds or 900), 60)
+    current = interaction
+    status = _non_empty_string(getattr(current, "status", "")).lower()
+    while time.time() < deadline:
+        if status == "completed":
+            break
+        if status in {"failed", "cancelled", "canceled", "expired"}:
+            break
+        time.sleep(max(float(poll_seconds or 10.0), 1.0))
+        current = client.interactions.get(interaction_id, api_version="v1beta")
+        status = _non_empty_string(getattr(current, "status", "")).lower()
+
+    outputs = list(getattr(current, "outputs", []) or [])
+    text = ""
+    for item in outputs:
+        candidate = _non_empty_string(getattr(item, "text", ""))
+        if candidate:
+            text = candidate
+    error_text = _non_empty_string(getattr(current, "error", ""))
+
+    if status != "completed":
+        if time.time() >= deadline and status not in {"failed", "cancelled", "canceled", "expired"}:
+            raise GeminiNativeError(
+                f"Deep Research timed out after {int(timeout_seconds or 900)} seconds."
+            )
+        detail = error_text or status or "unknown status"
+        raise GeminiNativeError(f"Deep Research failed: {detail}")
+
+    if not text:
+        raise GeminiNativeError("Deep Research completed but returned no report text.")
+
+    return {
+        "agent": resolved_agent,
+        "interaction_id": interaction_id,
+        "status": status,
+        "text": text,
+    }
+
+
+def format_deep_research_result(result: dict) -> str:
+    body = _non_empty_string(result.get("text", "")) or "No Deep Research report was returned."
+    interaction_id = _non_empty_string(result.get("interaction_id", ""))
+    agent = _non_empty_string(result.get("agent", ""))
+    footer = []
+    if agent:
+        footer.append(f"Deep Research agent: {agent}")
+    if interaction_id:
+        footer.append(f"Interaction ID: {interaction_id}")
+    if not footer:
+        return body
+    return body + "\n\n" + "\n".join(footer)
+
+
 def file_search(
     prompt: str,
     files: list[str] | tuple[str, ...] | str,
@@ -634,6 +722,7 @@ def capability_snapshot() -> dict:
         "code_execution_model": code_execution_model_name(),
         "maps_model": maps_model_name(),
         "file_search_model": file_search_model_name(),
+        "deep_research_agent": deep_research_agent_name(),
         "file_search_uploads_allowed": bool(native.get("allow_file_search_uploads", False)),
         "file_search_max_files": int(native.get("file_search_max_files", 8) or 8),
         "url_context_max_urls": int(native.get("url_context_max_urls", 6) or 6),
@@ -654,6 +743,7 @@ def format_capability_snapshot() -> str:
         f"Code Execution model: {caps['code_execution_model']}",
         f"Google Maps model: {caps['maps_model']}",
         f"File Search model: {caps['file_search_model']}",
+        f"Deep Research agent: {caps['deep_research_agent']}",
         f"File Search uploads allowed by default: {'yes' if caps['file_search_uploads_allowed'] else 'no'}",
         f"File Search max files: {caps['file_search_max_files']}",
         f"URL Context max URLs: {caps['url_context_max_urls']}",

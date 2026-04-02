@@ -78,6 +78,29 @@ class ExecutorDirectRouteTests(unittest.TestCase):
         self.assertEqual(direct[1]["action"], "close")
         self.assertEqual(direct[1]["app_name"], "calculator")
 
+    def test_direct_route_checks_mail_without_planner(self):
+        executor = AgentExecutor()
+
+        with patch("agent.executor._specialist_context", return_value=""), patch(
+            "agent.executor.create_plan"
+        ) as create_plan_mock, patch(
+            "agent.executor._call_tool",
+            return_value="Visible inbox summary.",
+        ) as call_tool_mock:
+            result = executor.execute("check my mail")
+
+        create_plan_mock.assert_not_called()
+        self.assertEqual(call_tool_mock.call_args.args[0], "comms_control")
+        self.assertEqual(call_tool_mock.call_args.args[1]["action"], "gmail_check")
+        self.assertIn("Visible inbox summary", result)
+
+    def test_direct_route_drafts_visible_mail_reply_without_planner(self):
+        direct = _direct_tool_for_goal('reply to this email saying "I can do tomorrow at 2 PM"')
+
+        self.assertEqual(direct[0], "comms_control")
+        self.assertEqual(direct[1]["action"], "gmail_reply_draft")
+        self.assertIn("tomorrow at 2 PM", direct[1]["instruction"])
+
     def test_planner_receives_specialist_context_for_complex_tasks(self):
         executor = AgentExecutor()
         fake_plan = {

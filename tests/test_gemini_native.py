@@ -47,6 +47,21 @@ class GeminiNativeActionTests(unittest.TestCase):
         self.assertIn("Generated code (PYTHON):", report)
         self.assertIn("Execution output (OUTCOME_OK):", report)
 
+    def test_deep_research_formats_report(self):
+        with patch(
+            "actions.gemini_native.gn.deep_research",
+            return_value={
+                "agent": "deep-research-pro-preview-12-2025",
+                "interaction_id": "ir_123",
+                "status": "completed",
+                "text": "Deep research report body.",
+            },
+        ), patch("actions.gemini_native.log_event"):
+            report = gemini_native({"action": "deep_research", "prompt": "Research AI agent memory systems."})
+
+        self.assertIn("Deep research report body.", report)
+        self.assertIn("Interaction ID: ir_123", report)
+
 
 if __name__ == "__main__":
     unittest.main()

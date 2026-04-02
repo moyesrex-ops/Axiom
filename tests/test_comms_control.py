@@ -5,8 +5,23 @@ from actions import comms_control as cc
 
 
 class CommsControlTests(unittest.TestCase):
+    def test_desktop_mail_text_focuses_mail_before_retrying_screen_read(self):
+        with patch.object(cc, "read_text_on_screen", side_effect=["anime screenshot", "Inbox\nSecurity alert"]), patch.object(
+            cc,
+            "open_app",
+            return_value="Focused mail successfully, sir.",
+        ) as open_mock:
+            text = cc._desktop_mail_text(app_name="mail", open_if_needed=False)
+
+        self.assertIn("Inbox", text)
+        open_mock.assert_called_once_with({"action": "focus", "app_name": "mail"}, player=None)
+
     def test_gmail_recent_formats_messages(self):
         with patch.object(
+            cc,
+            "_workspace_ready",
+            return_value=True,
+        ), patch.object(
             cc,
             "gmail_list_recent_messages",
             return_value={
@@ -28,8 +43,21 @@ class CommsControlTests(unittest.TestCase):
         self.assertIn("abc123", report)
         self.assertIn("UNREAD", report)
 
+    def test_gmail_recent_falls_back_to_desktop_mail_when_workspace_not_ready(self):
+        with patch.object(cc, "_workspace_ready", return_value=False), patch.object(
+            cc,
+            "_desktop_mail_overview",
+            return_value="Visible desktop inbox summary.",
+        ) as overview_mock, patch.object(cc, "log_event"):
+            report = cc.comms_control({"action": "gmail_recent"})
+
+        overview_mock.assert_called_once()
+        self.assertEqual(report, "Visible desktop inbox summary.")
+
     def test_gmail_reply_draft_uses_generated_reply_when_body_missing(self):
-        with patch.object(cc, "_resolve_message_id", return_value="abc123"), patch.object(
+        with patch.object(cc, "_workspace_ready", return_value=True), patch.object(
+            cc, "_resolve_message_id", return_value="abc123"
+        ), patch.object(
             cc, "gmail_read_message", return_value={"id": "abc123", "subject": "Hello"}
         ), patch.object(
             cc, "gmail_generate_reply", return_value="Thanks, that works for me."
@@ -83,6 +111,17 @@ class CommsControlTests(unittest.TestCase):
         plan_mock.assert_called_once()
         create_mock.assert_called_once()
         self.assertIn("Calendar event booked", report)
+
+    def test_gmail_reply_draft_falls_back_to_desktop_draft(self):
+        with patch.object(cc, "_workspace_ready", return_value=False), patch.object(
+            cc,
+            "_desktop_mail_reply_draft",
+            return_value="[DESKTOP MAIL DRAFT]\nThanks, I can do tomorrow.",
+        ) as draft_mock, patch.object(cc, "log_event"):
+            report = cc.comms_control({"action": "gmail_reply_draft"})
+
+        draft_mock.assert_called_once()
+        self.assertIn("[DESKTOP MAIL DRAFT]", report)
 
 
 if __name__ == "__main__":

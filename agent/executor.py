@@ -141,6 +141,38 @@ _APP_CONTROL_VERBS = {
     "open": ("open ", "launch ", "start "),
     "close": ("close ", "quit ", "exit "),
 }
+_MAIL_CHECK_PHRASES = (
+    "check my mail",
+    "check my email",
+    "check my emails",
+    "check my inbox",
+    "go through my mail",
+    "go through my mails",
+    "go through my emails",
+    "see if i have any mail",
+    "see if i have any email",
+    "see if i have any emails",
+    "what emails do i have",
+    "what email do i have",
+    "what mail do i have",
+)
+_MAIL_READ_PHRASES = (
+    "read this email",
+    "read this mail",
+    "read the email",
+    "read the mail",
+    "read my email",
+    "read my mail",
+    "check what this email says",
+)
+_MAIL_REPLY_PHRASES = (
+    "reply to this email",
+    "reply to this mail",
+    "respond to this email",
+    "respond to this mail",
+    "draft a reply to this email",
+    "draft a reply to this mail",
+)
 
 
 def _get_api_key() -> str:
@@ -284,6 +316,40 @@ def _extract_app_control_request(goal: str) -> tuple[str, str] | None:
 
     if len(remainder.split()) <= 2 and re.fullmatch(r"[a-z0-9 ._-]+", remainder):
         return action, remainder
+
+    return None
+
+
+def _extract_mail_reply_instruction(goal: str) -> str:
+    raw = str(goal or "").strip()
+    normalized = raw.lower()
+    for marker in (" saying ", " say ", " telling them ", " tell them ", " with ", " that says "):
+        if marker in normalized:
+            return raw[normalized.index(marker) + len(marker) :].strip().strip("\"'")
+    return ""
+
+
+def _extract_mail_request(goal: str) -> tuple[str, dict] | None:
+    normalized = str(goal or "").strip().lower()
+    if not normalized:
+        return None
+
+    if any(_contains_phrase(normalized, phrase) for phrase in _MAIL_REPLY_PHRASES):
+        instruction = _extract_mail_reply_instruction(goal)
+        params = {
+            "action": "gmail_reply_draft",
+            "app_name": "mail",
+            "open_if_needed": False,
+        }
+        if instruction:
+            params["instruction"] = instruction
+        return "comms_control", params
+
+    if any(_contains_phrase(normalized, phrase) for phrase in _MAIL_READ_PHRASES):
+        return "comms_control", {"action": "gmail_read", "app_name": "mail", "open_if_needed": False}
+
+    if any(_contains_phrase(normalized, phrase) for phrase in _MAIL_CHECK_PHRASES):
+        return "comms_control", {"action": "gmail_check", "app_name": "mail", "open_if_needed": True}
 
     return None
 
@@ -458,6 +524,10 @@ def _direct_tool_for_goal(goal: str, specialist_context: str = "") -> tuple[str,
     if app_request:
         action, app_name = app_request
         return ("open_app", {"action": action, "app_name": app_name})
+
+    mail_request = _extract_mail_request(goal)
+    if mail_request:
+        return mail_request
 
     rgb_words = ("keyboard", "rgb", "lighting", "lights", "backlight", "color")
     color = _extract_color_hint(normalized)

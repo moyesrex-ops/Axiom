@@ -63,6 +63,7 @@ ABSOLUTE RULES:
 AVAILABLE TOOLS AND THEIR PARAMETERS:
 
 open_app
+  action: "open" | "close" | "focus" (optional, default: open)
   app_name: string (required)
 
 web_search
@@ -74,11 +75,11 @@ web_search
   sources: list of strings (optional, for deep search: web | discussions | academic)
 
 gemini_native
-  action: "status" | "search" | "url_context" | "code_execution" | "maps" | "file_search" (required)
-  query: string (for search/maps/file_search)
-  prompt: string (for url_context/code_execution/maps/file_search)
+  action: "status" | "search" | "url_context" | "code_execution" | "maps" | "file_search" | "deep_research" (required)
+  query: string (for search/maps/file_search/deep_research)
+  prompt: string (for url_context/code_execution/maps/file_search/deep_research)
   urls: list[string] (for url_context)
-  model: string (optional model override)
+  model: string (optional model or Deep Research agent override)
   latitude: number (optional for maps)
   longitude: number (optional for maps)
   enable_widget: boolean (optional for maps)
@@ -86,6 +87,7 @@ gemini_native
   confirm_upload: boolean (required for file_search unless runtime config already allows uploads)
   persist_store: boolean (optional for file_search)
   timeout: integer (optional for file_search)
+  poll_seconds: number (optional for deep_research)
 
 browser_control
   action: "go_to" | "search" | "click" | "type" | "scroll" | "fill_form" | "smart_click" | "smart_type" | "get_text" | "press" | "current_state" | "close_tab" | "youtube_play" | "close" (required)
@@ -146,7 +148,7 @@ weather_report
   city: string (required)
 
 comms_control
-  action: "status" | "launch_instructions" | "workspace_status" | "gmail_status" | "gmail_recent" | "gmail_check" | "gmail_read" | "gmail_reply_draft" | "gmail_reply_send" | "calendar_status" | "calendar_list" | "calendar_book" | "send" | "message" | "email" | "sms" | "call" (required)
+  action: "status" | "launch_instructions" | "workspace_status" | "gmail_status" | "gmail_recent" | "gmail_check" | "gmail_read" | "gmail_reply_draft" | "gmail_reply_send" | "mail_overview" | "mail_read_visible" | "mail_reply_draft" | "calendar_status" | "calendar_list" | "calendar_book" | "send" | "message" | "email" | "sms" | "call" (required)
   channel: string (optional)
   platform: string (optional)
   to: string (optional)

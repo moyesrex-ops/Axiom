@@ -92,6 +92,30 @@ _SOURCE_SPECS = {
         ],
         "special": "lossless_claw",
     },
+    "cashclaw": {
+        "name": "CashClaw",
+        "config_key": "cashclaw_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "cashclaw",
+        ],
+        "special": "cashclaw",
+    },
+    "hyperagents": {
+        "name": "HyperAgents",
+        "config_key": "hyperagents_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "HyperAgents",
+        ],
+        "special": "hyperagents",
+    },
+    "vierisid_jarvis": {
+        "name": "Vierisid JARVIS",
+        "config_key": "vierisid_jarvis_path",
+        "default_candidates": [
+            Path.home() / "Axiom_research" / "external" / "vierisid-jarvis",
+        ],
+        "special": "vierisid_jarvis",
+    },
 }
 
 _INDEX_CACHE: dict = {"signature": None, "entries": []}
@@ -261,6 +285,12 @@ def _agent_source_row(source_id: str, spec: dict, repo_path: Path) -> dict:
         row["agent_files"] = len(_tradingagents_role_cards(repo_path))
     elif spec.get("special") == "openfang":
         row["agent_files"] = len(_openfang_hand_cards(repo_path))
+    elif spec.get("special") == "cashclaw":
+        row["agent_files"] = 3
+    elif spec.get("special") == "hyperagents":
+        row["agent_files"] = 3
+    elif spec.get("special") == "vierisid_jarvis":
+        row["agent_files"] = 3
     elif spec.get("special") == "openmanus":
         row["agent_files"] = 4
     elif spec.get("special"):
@@ -312,6 +342,15 @@ def resolve_agent_library_sources() -> list[dict]:
                 continue
         elif spec.get("special") == "lossless_claw":
             if not (repo_path / "README.md").exists():
+                continue
+        elif spec.get("special") == "cashclaw":
+            if not (repo_path / "README.md").exists() or not (repo_path / "src" / "heartbeat.ts").exists():
+                continue
+        elif spec.get("special") == "hyperagents":
+            if not (repo_path / "README.md").exists() or not (repo_path / "meta_agent.py").exists():
+                continue
+        elif spec.get("special") == "vierisid_jarvis":
+            if not (repo_path / "README.md").exists() or not (repo_path / "docs" / "WORKFLOW_AUTOMATION.md").exists():
                 continue
         elif not any(repo_path.glob(spec["glob"])):
             continue
@@ -377,6 +416,38 @@ def _signature_files_for_source(source: dict) -> list[Path]:
         return [
             path
             for path in [repo_path / "README.md", repo_path / "AGENTS.md", repo_path / "openclaw.plugin.json"]
+            if path.exists()
+        ]
+    if special == "cashclaw":
+        return [
+            path
+            for path in [
+                repo_path / "README.md",
+                repo_path / "src" / "heartbeat.ts",
+                repo_path / "src" / "loop" / "study.ts",
+                repo_path / "src" / "memory" / "search.ts",
+            ]
+            if path.exists()
+        ]
+    if special == "hyperagents":
+        return [
+            path
+            for path in [
+                repo_path / "README.md",
+                repo_path / "meta_agent.py",
+                repo_path / "task_agent.py",
+                repo_path / "generate_loop.py",
+            ]
+            if path.exists()
+        ]
+    if special == "vierisid_jarvis":
+        return [
+            path
+            for path in [
+                repo_path / "README.md",
+                repo_path / "VISION.md",
+                repo_path / "docs" / "WORKFLOW_AUTOMATION.md",
+            ]
             if path.exists()
         ]
     glob_pattern = str(source.get("glob", "") or "").strip()
@@ -664,6 +735,171 @@ def _special_lossless_claw_entry(source: dict) -> dict:
     }
 
 
+def _special_cashclaw_entries(source: dict) -> list[dict]:
+    repo_path = Path(source["repo_path"])
+    readme_text = _safe_read_text(repo_path / "README.md", limit=2600)
+    heartbeat_text = _safe_read_text(repo_path / "src" / "heartbeat.ts", limit=2600)
+    study_text = _safe_read_text(repo_path / "src" / "loop" / "study.ts", limit=2600)
+    memory_text = _safe_read_text(repo_path / "src" / "memory" / "search.ts", limit=2200)
+    return [
+        {
+            "id": "cashclaw:heartbeat-operator",
+            "source_id": "cashclaw",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "heartbeat-operator",
+            "name": "CashClaw Heartbeat Operator",
+            "description": (
+                "Persistent operator loop that watches for pending work, manages an operator dashboard, "
+                "and keeps an always-on heartbeat alive."
+            ),
+            "category": "continuous operations",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "src" / "heartbeat.ts"),
+            "content_preview": (heartbeat_text or readme_text).strip(),
+        },
+        {
+            "id": "cashclaw:self-study-loop",
+            "source_id": "cashclaw",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "self-study-loop",
+            "name": "CashClaw Self-Study Loop",
+            "description": (
+                "Self-improvement loop that studies prior tasks, operator feedback, and results to refine future behavior."
+            ),
+            "category": "self-improvement",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "src" / "loop" / "study.ts"),
+            "content_preview": (study_text or readme_text).strip(),
+        },
+        {
+            "id": "cashclaw:memory-search",
+            "source_id": "cashclaw",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "memory-search",
+            "name": "CashClaw Memory Search",
+            "description": (
+                "Local memory retrieval layer with ranked search over prior knowledge, notes, and feedback."
+            ),
+            "category": "memory and retrieval",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "src" / "memory" / "search.ts"),
+            "content_preview": (memory_text or readme_text).strip(),
+        },
+    ]
+
+
+def _special_hyperagents_entries(source: dict) -> list[dict]:
+    repo_path = Path(source["repo_path"])
+    readme_text = _safe_read_text(repo_path / "README.md", limit=2600)
+    meta_text = _safe_read_text(repo_path / "meta_agent.py", limit=2600)
+    task_text = _safe_read_text(repo_path / "task_agent.py", limit=2600)
+    loop_text = _safe_read_text(repo_path / "generate_loop.py", limit=2600)
+    return [
+        {
+            "id": "hyperagents:meta-agent",
+            "source_id": "hyperagents",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "meta-agent",
+            "name": "HyperAgents Meta Agent",
+            "description": (
+                "Recursive self-improvement supervisor that critiques prior agent generations and proposes the next iteration."
+            ),
+            "category": "self-improvement",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "meta_agent.py"),
+            "content_preview": (meta_text or readme_text).strip(),
+        },
+        {
+            "id": "hyperagents:task-agent",
+            "source_id": "hyperagents",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "task-agent",
+            "name": "HyperAgents Task Agent",
+            "description": (
+                "Execution worker that tackles domain tasks, produces artifacts, and feeds results back into the evolution loop."
+            ),
+            "category": "task execution",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "task_agent.py"),
+            "content_preview": (task_text or readme_text).strip(),
+        },
+        {
+            "id": "hyperagents:generate-loop",
+            "source_id": "hyperagents",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "generate-loop",
+            "name": "HyperAgents Generate Loop",
+            "description": (
+                "Outer orchestration loop that repeatedly spawns, evaluates, and selects improved agents over multiple generations."
+            ),
+            "category": "agent orchestration",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "generate_loop.py"),
+            "content_preview": (loop_text or readme_text).strip(),
+        },
+    ]
+
+
+def _special_vierisid_jarvis_entries(source: dict) -> list[dict]:
+    repo_path = Path(source["repo_path"])
+    readme_text = _safe_read_text(repo_path / "README.md", limit=2600)
+    vision_text = _safe_read_text(repo_path / "VISION.md", limit=2600)
+    workflow_text = _safe_read_text(repo_path / "docs" / "WORKFLOW_AUTOMATION.md", limit=2600)
+    return [
+        {
+            "id": "vierisid_jarvis:primary-daemon",
+            "source_id": "vierisid_jarvis",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "primary-daemon",
+            "name": "JARVIS Primary Daemon",
+            "description": (
+                "Always-on personal operator daemon with sidecars, memory vault, desktop awareness, and multi-channel control."
+            ),
+            "category": "personal operator",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "README.md"),
+            "content_preview": readme_text.strip(),
+        },
+        {
+            "id": "vierisid_jarvis:workflow-engine",
+            "source_id": "vierisid_jarvis",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "workflow-engine",
+            "name": "JARVIS Workflow Engine",
+            "description": (
+                "Natural-language and visual workflow engine with triggers, node graphs, self-healing execution, and background automation."
+            ),
+            "category": "workflow automation",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "docs" / "WORKFLOW_AUTOMATION.md"),
+            "content_preview": (workflow_text or readme_text).strip(),
+        },
+        {
+            "id": "vierisid_jarvis:authority-goals",
+            "source_id": "vierisid_jarvis",
+            "source_name": source["name"],
+            "repo_path": source["repo_path"],
+            "slug": "authority-goals",
+            "name": "JARVIS Authority and Goals Engine",
+            "description": (
+                "Authority-gated autonomy layer for approvals, audit trail, long-running goals, and self-improvement loops."
+            ),
+            "category": "autonomy governance",
+            "model_hint": "provider-configurable",
+            "path": str(repo_path / "VISION.md"),
+            "content_preview": (vision_text or readme_text).strip(),
+        },
+    ]
+
+
 def _tradingagents_role_cards(repo_path: Path) -> list[tuple[Path, str, str, str]]:
     agents_root = repo_path / "tradingagents" / "agents"
     if not agents_root.exists():
@@ -756,6 +992,15 @@ def index_agent_library() -> list[dict]:
             continue
         if special == "lossless_claw":
             entries.append(_special_lossless_claw_entry(source))
+            continue
+        if special == "cashclaw":
+            entries.extend(_special_cashclaw_entries(source))
+            continue
+        if special == "hyperagents":
+            entries.extend(_special_hyperagents_entries(source))
+            continue
+        if special == "vierisid_jarvis":
+            entries.extend(_special_vierisid_jarvis_entries(source))
             continue
 
         for path in repo_path.glob(source["glob"]):

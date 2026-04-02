@@ -1,4 +1,11 @@
+import re
+import time
+
+from actions.computer_control import computer_control
+from actions.open_app import open_app
 from actions.send_message import send_message
+from actions.vision_engine import analyze_screen, read_text_on_screen
+from core import gemini_native as gn
 from core.comms_surface import (
     email_launch_instructions,
     format_comms_status,
@@ -19,6 +26,20 @@ from core.google_workspace import (
 )
 from memory.memory_manager import save_to_nexus
 from memory.runtime_store import log_event
+
+
+_MAIL_SCREEN_HINTS = (
+    "inbox",
+    "compose",
+    "drafts",
+    "sent",
+    "primary",
+    "gmail",
+    "outlook",
+    "mail",
+    "reply",
+    "archive",
+)
 
 
 def _int_value(value, default: int) -> int:
@@ -94,6 +115,144 @@ def _resolve_message_id(params: dict) -> str:
     return str(rows[0].get("id", "") or "").strip()
 
 
+def _workspace_ready(*, gmail: bool = False, calendar: bool = False) -> bool:
+    status = collect_google_workspace_status()
+    if not status.get("ready"):
+        return False
+    if gmail and not status.get("gmail_enabled"):
+        return False
+    if calendar and not status.get("calendar_enabled"):
+        return False
+    return True
+
+
+def _looks_like_mail_screen(text: str) -> bool:
+    normalized = re.sub(r"\s+", " ", str(text or "").lower())
+    return any(token in normalized for token in _MAIL_SCREEN_HINTS)
+
+
+def _desktop_mail_text(*, app_name: str = "mail", open_if_needed: bool = True, wait_seconds: float = 2.5) -> str:
+    visible_text = ""
+    try:
+        visible_text = read_text_on_screen()
+    except Exception:
+        visible_text = ""
+
+    if open_if_needed and not _looks_like_mail_screen(visible_text):
+        open_app({"action": "open", "app_name": app_name}, player=None)
+        time.sleep(max(0.6, float(wait_seconds or 2.5)))
+        open_app({"action": "focus", "app_name": app_name}, player=None)
+        time.sleep(0.8)
+        try:
+            visible_text = read_text_on_screen()
+        except Exception:
+            pass
+    elif not _looks_like_mail_screen(visible_text):
+        focus_result = open_app({"action": "focus", "app_name": app_name}, player=None)
+        if "Focused" in focus_result:
+            time.sleep(0.8)
+            try:
+                visible_text = read_text_on_screen()
+            except Exception:
+                pass
+
+    return str(visible_text or "").strip()
+
+
+def _desktop_mail_overview(params: dict) -> str:
+    app_name = str(params.get("app_name", "mail") or "mail").strip()
+    open_if_needed = bool(params.get("open_if_needed", True))
+    visible_text = _desktop_mail_text(
+        app_name=app_name,
+        open_if_needed=open_if_needed,
+        wait_seconds=float(params.get("wait_seconds", 2.5) or 2.5),
+    )
+    question = (
+        "Analyze the visible email interface. Identify the mail app or website, list the most important visible "
+        "messages with sender and subject when readable, note unread counts or categories if visible, and flag any "
+        "security alerts, financial alerts, or time-sensitive items."
+    )
+    analysis = analyze_screen(question=question, source="screen")
+    report = str(analysis.description or "").strip()
+    if report:
+        return report
+    if visible_text:
+        return f"[VISIBLE MAIL TEXT]\n{visible_text[:6000]}"
+    return "I could not see a readable mail inbox on screen."
+
+
+def _desktop_mail_read_visible(params: dict) -> str:
+    app_name = str(params.get("app_name", "mail") or "mail").strip()
+    open_if_needed = bool(params.get("open_if_needed", False))
+    visible_text = _desktop_mail_text(
+        app_name=app_name,
+        open_if_needed=open_if_needed,
+        wait_seconds=float(params.get("wait_seconds", 2.0) or 2.0),
+    )
+    question = (
+        "If a specific email message is visible, extract the sender, subject, important body details, and any clear "
+        "action items. If only the inbox is visible, say that the inbox is visible instead of a single email."
+    )
+    analysis = analyze_screen(question=question, source="screen")
+    report = str(analysis.description or "").strip()
+    if report:
+        return report
+    if visible_text:
+        return f"[VISIBLE MAIL TEXT]\n{visible_text[:6000]}"
+    return "I could not read a visible email from the current screen."
+
+
+def _desktop_mail_reply_draft(params: dict) -> str:
+    app_name = str(params.get("app_name", "mail") or "mail").strip()
+    instruction = str(params.get("instruction", "") or params.get("message", "") or "").strip()
+    visible_text = _desktop_mail_text(
+        app_name=app_name,
+        open_if_needed=bool(params.get("open_if_needed", False)),
+        wait_seconds=float(params.get("wait_seconds", 1.8) or 1.8),
+    )
+    if len(re.sub(r"\s+", "", visible_text)) < 40:
+        return (
+            "I need the target email visible on screen before I can draft a desktop reply. "
+            "Open the email first, then ask me to draft or type the reply."
+        )
+
+    prompt = (
+        "Write a natural human email reply for the mailbox owner.\n"
+        "Rules:\n"
+        "- Sound competent, direct, and human.\n"
+        "- Keep it concise unless the visible email clearly needs more detail.\n"
+        "- Do not mention AI or automation.\n"
+        "- Output only the email body.\n\n"
+        f"Visible email content:\n{visible_text[:6000]}\n\n"
+        + (f"Extra instruction: {instruction}\n\n" if instruction else "")
+        + "Reply:"
+    )
+    draft = gn.generate_text(prompt, model=gn.reflection_model_name()).strip()
+    if not draft:
+        return "I could see the email, but I could not generate a reply draft."
+
+    typed_report = ""
+    if bool(params.get("type_into_app", False)):
+        typed_report = computer_control(
+            {
+                "action": "smart_type",
+                "text": draft,
+                "clear_first": bool(params.get("clear_first", False)),
+            },
+            player=None,
+        )
+
+    report = f"[DESKTOP MAIL DRAFT]\n{draft}"
+    if typed_report:
+        report += f"\n\n{typed_report}"
+    if bool(params.get("send", False)):
+        report += (
+            "\n\nDesktop mail auto-send is intentionally not confirmed automatically here. "
+            "The draft is ready, but you should review it before sending."
+        )
+    return report
+
+
 def comms_control(parameters: dict = None, player=None, speak=None) -> str:
     params = parameters or {}
     action = str(params.get("action", "status") or "status").strip().lower()
@@ -123,51 +282,81 @@ def comms_control(parameters: dict = None, player=None, speak=None) -> str:
         log_event("communications", "google_workspace_status", report[:2000])
         return report
 
+    if action in {"mail_overview", "desktop_mail_check", "desktop_mail_overview"}:
+        report = _desktop_mail_overview(params)
+        log_event("communications", "desktop_mail_overview", report[:2000])
+        return report
+
+    if action in {"mail_read_visible", "desktop_mail_read"}:
+        report = _desktop_mail_read_visible(params)
+        log_event("communications", "desktop_mail_read", report[:2000])
+        return report
+
+    if action in {"mail_reply_draft", "desktop_mail_reply"}:
+        report = _desktop_mail_reply_draft(params)
+        log_event("communications", "desktop_mail_reply", report[:2000])
+        return report
+
     if action in {"gmail_recent", "gmail_check", "check_mail", "check_email"}:
-        payload = gmail_list_recent_messages(
-            limit=_int_value(params.get("count", params.get("limit", 8)), 8),
-            query=str(params.get("query", "") or "").strip(),
-            unread_only=bool(params.get("unread_only", True)),
-        )
-        report = _format_recent_mail(payload)
-        log_event("communications", "gmail_recent", report[:2000], metadata={"count": payload.get("count", 0)})
+        if _workspace_ready(gmail=True):
+            payload = gmail_list_recent_messages(
+                limit=_int_value(params.get("count", params.get("limit", 8)), 8),
+                query=str(params.get("query", "") or "").strip(),
+                unread_only=bool(params.get("unread_only", True)),
+            )
+            report = _format_recent_mail(payload)
+            log_event("communications", "gmail_recent", report[:2000], metadata={"count": payload.get("count", 0)})
+            return report
+
+        report = _desktop_mail_overview(params)
+        log_event("communications", "desktop_mail_overview", report[:2000])
         return report
 
     if action in {"gmail_read", "email_read"}:
-        message = gmail_read_message(_resolve_message_id(params))
-        report = _format_mail_message(message)
-        log_event("communications", "gmail_read", report[:2000], metadata={"message_id": message.get("id", "")})
+        if _workspace_ready(gmail=True):
+            message = gmail_read_message(_resolve_message_id(params))
+            report = _format_mail_message(message)
+            log_event("communications", "gmail_read", report[:2000], metadata={"message_id": message.get("id", "")})
+            return report
+
+        report = _desktop_mail_read_visible(params)
+        log_event("communications", "desktop_mail_read", report[:2000])
         return report
 
     if action in {"gmail_reply_draft", "gmail_reply_send"}:
-        message_id = _resolve_message_id(params)
-        instruction = str(params.get("instruction", "") or "").strip()
-        body_text = str(
-            params.get("body", "")
-            or params.get("message", "")
-            or params.get("message_text", "")
-            or ""
-        ).strip()
-        if not body_text:
-            message = gmail_read_message(message_id)
-            body_text = gmail_generate_reply(message, instruction=instruction)
-        payload = gmail_reply_to_message(
-            message_id,
-            body_text,
-            send=(action == "gmail_reply_send" or bool(params.get("send", False))),
-        )
-        report = (
-            f"Gmail reply {payload.get('mode', 'prepared')} for {payload.get('to', '')}. "
-            f"Subject: {payload.get('subject', '')}"
-        )
-        log_event("communications", "gmail_reply", report[:2000], metadata=payload)
-        save_to_nexus(
-            "Gmail Reply",
-            body_text[:2000],
-            kind="communication",
-            source="comms_control",
-            metadata={"action": action, "message_id": message_id, **payload},
-        )
+        if _workspace_ready(gmail=True):
+            message_id = _resolve_message_id(params)
+            instruction = str(params.get("instruction", "") or "").strip()
+            body_text = str(
+                params.get("body", "")
+                or params.get("message", "")
+                or params.get("message_text", "")
+                or ""
+            ).strip()
+            if not body_text:
+                message = gmail_read_message(message_id)
+                body_text = gmail_generate_reply(message, instruction=instruction)
+            payload = gmail_reply_to_message(
+                message_id,
+                body_text,
+                send=(action == "gmail_reply_send" or bool(params.get("send", False))),
+            )
+            report = (
+                f"Gmail reply {payload.get('mode', 'prepared')} for {payload.get('to', '')}. "
+                f"Subject: {payload.get('subject', '')}"
+            )
+            log_event("communications", "gmail_reply", report[:2000], metadata=payload)
+            save_to_nexus(
+                "Gmail Reply",
+                body_text[:2000],
+                kind="communication",
+                source="comms_control",
+                metadata={"action": action, "message_id": message_id, **payload},
+            )
+            return report
+
+        report = _desktop_mail_reply_draft({**params, "send": action == "gmail_reply_send" or bool(params.get("send", False))})
+        log_event("communications", "desktop_mail_reply", report[:2000])
         return report
 
     if action in {"calendar_list", "calendar_upcoming"}:

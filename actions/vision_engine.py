@@ -378,8 +378,16 @@ Be specific and precise. Quote exact text. Don't guess — if you can't read som
         print(f"[Vision] Analysis complete ({len(raw)} chars)")
 
     except Exception as e:
-        result.success = False
-        result.description = f"Vision analysis failed: {e}"
+        if result.text_content:
+            result.success = True
+            result.confidence = 0.4
+            result.description = (
+                "Gemini vision was unavailable, so this is an OCR-only fallback.\n\n"
+                + result.text_content[:6000]
+            )
+        else:
+            result.success = False
+            result.description = f"Vision analysis failed: {e}"
         print(f"[Vision] ERROR {e}")
         traceback.print_exc()
 

@@ -110,8 +110,27 @@ def gemini_native(parameters: dict = None, player=None, speak=None) -> str:
             )
             return report
 
+        if action in {"deep_research", "research_agent"}:
+            prompt = str(params.get("prompt", "") or params.get("query", "") or "").strip()
+            if not prompt:
+                return "Provide prompt=<question> for Gemini Deep Research."
+            result = gn.deep_research(
+                prompt,
+                agent=model,
+                timeout_seconds=int(params.get("timeout", 900) or 900),
+                poll_seconds=float(params.get("poll_seconds", 10) or 10),
+            )
+            report = gn.format_deep_research_result(result)
+            log_event(
+                "gemini_native",
+                "deep_research",
+                prompt[:300],
+                metadata={"agent": result["agent"], "interaction_id": result["interaction_id"]},
+            )
+            return report
+
         return (
-            "Unknown action. Use status, search, url_context, code_execution, maps, or file_search."
+            "Unknown action. Use status, search, url_context, code_execution, maps, file_search, or deep_research."
         )
 
     except gn.GeminiNativeError as error:
