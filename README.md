@@ -46,12 +46,13 @@ Core ideas:
 - A background learning daemon converts recent traces into routing insights stored in durable memory.
 - Gemini-native capability calls now go through one shared backend layer in `core/gemini_native.py` instead of being scattered across unrelated modules.
 - Voice Live now exposes Gemini's built-in Google Search directly alongside AXIOM's custom function tools.
-- `comms_control` can now surface Google Workspace status, check recent Gmail, draft or send human-style email replies, and book Google Calendar events when OAuth is configured.
+- `comms_control` can now surface Google Workspace status, check recent Gmail, draft or send human-style email replies, book Google Calendar events when OAuth is configured, and fall back to desktop Mail or Outlook screen-reading when Workspace is disabled.
 - Planner and Telegram task-vs-chat routing now use structured JSON generation instead of prompt-for-JSON plus loose parsing.
-- AXIOM now has a first-class `gemini_native` tool for grounded Search, URL Context, Code Execution, Maps grounding, and gated File Search.
+- AXIOM now has a first-class `gemini_native` tool for grounded Search, URL Context, Code Execution, Maps grounding, Gemini Deep Research, and gated File Search.
 - `computer_use` is now a higher-level desktop operator that can observe the screen, find targets by description, click or type into them, and verify outcomes.
 - Crucix is wired in as a first-class intelligence sidecar for live status, briefs, ideas, and boot management.
 - Telegram plain-message routing can now use a local-first classifier path through Ollama when available before escalating to Gemini.
+- The imported agent catalog now includes blueprint entries from CashClaw, HyperAgents, and Vierisid JARVIS so AXIOM can reuse their orchestration patterns during planning.
 
 ---
 
@@ -120,7 +121,7 @@ AXIOM now has a clearer split between:
 What this means in practice:
 
 - `web_search` now routes its grounded search path through Gemini's native Google Search tool and surfaces citations more cleanly.
-- `gemini_native` is a first-class runtime tool for `search`, `url_context`, `code_execution`, `maps`, and `file_search`.
+- `gemini_native` is a first-class runtime tool for `search`, `url_context`, `code_execution`, `maps`, `deep_research`, and `file_search`.
 - File Search is intentionally gated behind `confirm_upload=true` unless you opt into default uploads in runtime config, because it can upload local files to Google's File Search service.
 - The live voice session stays on the current Gemini Live audio model for stability, but now also exposes built-in Google Search directly in the live tool list.
 - URL Context, Code Execution, Maps grounding, and File Search run through the shared backend layer rather than the Live API because that keeps the architecture stable across voice, Telegram, and deferred execution.
@@ -414,7 +415,7 @@ Important high-level keys:
 {
   "voice_name": "Charon",
   "voice_backend": "gemini_live",
-  "live_model": "models/gemini-2.5-flash-native-audio-preview-12-2025",
+  "live_model": "gemini-3.1-flash-live-preview",
   "audio": {
     "target_input_rms": 4200.0,
     "max_input_gain": 6.2,
@@ -448,6 +449,11 @@ Important high-level keys:
     "lightpanda_repo_path": "",
     "lightpanda_wsl_binary_path": ""
   },
+  "gemini_native": {
+    "enable_live_google_search": true,
+    "deep_research_agent": "deep-research-pro-preview-12-2025",
+    "allow_file_search_uploads": false
+  },
   "skill_library": {
     "enabled": true,
     "everything_claude_code_path": "",
@@ -474,6 +480,9 @@ Important high-level keys:
     "openmanus_path": "",
     "symphony_path": "",
     "lossless_claw_path": "",
+    "cashclaw_path": "",
+    "hyperagents_path": "",
+    "vierisid_jarvis_path": "",
     "delegate_limit": 3
   },
   "paperclip": {
